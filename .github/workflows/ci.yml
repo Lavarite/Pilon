@@ -60,8 +60,8 @@ jobs:
     env:
       LC_ALL: C.UTF-8
       TZ: Etc/UTC
-      PILON_GOOGLE_CLIENT_ID: ${{ vars.PILON_GOOGLE_CLIENT_ID }}
-      PILON_MICROSOFT_CLIENT_ID: ${{ vars.PILON_MICROSOFT_CLIENT_ID }}
+      PILON_GOOGLE_CLIENT_ID: ${{ github.ref_type == 'tag' && needs.commits.outputs.release == 'true' && vars.PILON_GOOGLE_CLIENT_ID || '' }}
+      PILON_MICROSOFT_CLIENT_ID: ${{ github.ref_type == 'tag' && needs.commits.outputs.release == 'true' && vars.PILON_MICROSOFT_CLIENT_ID || '' }}
     defaults:
       run:
         shell: bash
@@ -103,10 +103,10 @@ jobs:
             ctest --test-dir build --parallel 2 --no-tests=error --output-on-failure
           '
       - name: Verify and package Linux and source archives
-        if: needs.commits.outputs.release == 'true'
+        if: github.ref_type == 'tag' && needs.commits.outputs.release == 'true'
         run: runuser -u pilon-ci -- bash .github/scripts/package-linux.sh "$GITHUB_REF_NAME"
       - name: Upload tested release packages
-        if: needs.commits.outputs.release == 'true'
+        if: github.ref_type == 'tag' && needs.commits.outputs.release == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: release-assets
@@ -180,7 +180,7 @@ jobs:
 
   draft:
     name: Prepare release draft
-    if: needs.commits.outputs.release == 'true'
+    if: github.ref_type == 'tag' && needs.commits.outputs.release == 'true'
     needs: [passed, commits]
     runs-on: ubuntu-24.04
     timeout-minutes: 10

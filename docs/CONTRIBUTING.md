@@ -45,6 +45,9 @@ subject such as `fix(notes): keep note actions visible`. The format is
 CI checks commit message style on pushes and pull requests, builds and tests
 Pilon on Linux, and runs add-on and Android host checks. The add-on job covers
 Calendar sharing. Native add-on tests run with the Linux regression suites.
+Pull requests from forks run these checks on GitHub-hosted runners without
+maintainer credentials or release settings. A maintainer approves workflow
+runs for first-time contributors.
 See [releases](release.md) for the signed APK and binary distribution checks.
 
 ## Tests
