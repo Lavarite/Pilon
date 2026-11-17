@@ -1,21 +1,32 @@
 # Pilon
 
-A Qt workspace for handwritten and typed notes, calendars, local and remote files,
-SSH terminals, and an assistant with local model support. Local features work
-without an account. Built-in features can be enabled individually as add-ons.
+Pilon is a workspace you can extend with your own add-ons. Enable the features
+you want, or build pages, settings and integrations in QML and JavaScript.
+Package and share them as `.piext` files that install without rebuilding Pilon.
 
 [![CI](https://github.com/Lavarite/Pilon/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Lavarite/Pilon/actions/workflows/ci.yml)
 
-## Download
+## Install
 
-Get the current packages from [GitHub Releases](https://github.com/Lavarite/Pilon/releases).
+On a compatible Linux x86_64 system:
 
-| Platform | Release asset | Install |
-| --- | --- | --- |
-| Linux x86_64 | `pilon-*-linux-x86_64.tar.gz` | [Extract and run](docs/install.md#linux) |
-| Android 9+, ARM64 preview | `pilon-*-android-arm64-v8a.apk` | [Install the APK](docs/install.md#android) |
+```sh
+curl -fsSL https://github.com/Lavarite/Pilon/releases/download/v1.0.0/install-linux.sh | sh
+```
 
-## Screenshots
+See [Linux requirements and manual installation](docs/install.md#linux) or
+[install the Android ARM64 preview](docs/install.md#android).
+
+## Create an add-on
+
+Start with [Counter](examples/counter/readme.md) for a page and settings, or
+[Checklist](examples/checklist/readme.md) for state that persists. Follow the
+[add-on guide](docs/addons/index.md) to build your `.piext`, then import it from
+**Settings → Add-ons**.
+
+## Built-in add-ons
+
+Notes and Calendar are two of the [built-in add-ons](docs/index.md#add-ons).
 
 ![Pilon Notes with typed field notes and a hand-drawn trail map](docs/screenshots/notes.png)
 

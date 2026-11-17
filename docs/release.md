@@ -4,8 +4,9 @@
 
 Tag the verified commit on `main` with `vMAJOR.MINOR.PATCH`, matching the
 version in [CMake](../src/CMakeLists.txt). The [CI workflow](../.github/workflows/ci.yml)
-runs on the tag and stages the source and Linux downloads in a draft GitHub
-release. It checks the Linux corresponding-source report before uploading.
+runs on the tag and stages the source archive, Linux archive and
+`install-linux.sh` in a draft GitHub release. It checks the Linux
+corresponding-source report before uploading.
 
 ## Android preview
 

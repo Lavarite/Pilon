@@ -33,3 +33,5 @@ if [[ "$status" != 124 ]]; then
     printf 'The extracted executable exited before the smoke test finished (%s).\n' "$status" >&2
     exit 1
 fi
+sh -n src/scripts/install-linux.sh
+install -m 755 src/scripts/install-linux.sh "$assets/install-linux.sh"
