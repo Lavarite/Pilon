@@ -42,8 +42,9 @@ git config core.hooksPath .github/hooks
 Use a scoped [Conventional Commit](https://www.conventionalcommits.org/en/v1.0.0/)
 subject such as `fix(notes): keep note actions visible`. The format is
 `type(scope): summary`, with optional `!` after the scope for breaking changes.
-CI validates commit subjects on pushes and pull requests and runs the Linux
-build and tests, calendar server tests, and Android host checks.
+CI checks commit message style on pushes and pull requests, builds and tests
+Pilon on Linux, and runs add-on and Android host checks. The add-on job covers
+Calendar sharing. Native add-on tests run with the Linux regression suites.
 See [releases](release.md) for the signed APK and binary distribution checks.
 
 ## Tests

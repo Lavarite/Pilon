@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   commits:
-    name: Scoped commits
+    name: Commit message style
     if: ${{ !github.event.deleted }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -22,9 +22,9 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Test commit lint and local hooks
+      - name: Test commit lint and Git hooks
         run: python3 .github/scripts/commit_lint_tests.py
-      - name: Lint new commits
+      - name: Check scoped commit message style
         id: lint
         env:
           BEFORE: ${{ github.event.before }}
@@ -51,7 +51,7 @@ jobs:
           fi
 
   linux:
-    name: Linux
+    name: Linux build and regression tests
     if: ${{ !github.event.deleted }}
     needs: commits
     runs-on: ubuntu-24.04
@@ -72,7 +72,7 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
-      - name: Build and run all CTest suites
+      - name: Build Pilon and run CTest regression suites
         run: |
           useradd -m -p '*' pilon-ci
           mkdir -p /run/sshd
@@ -97,18 +97,10 @@ jobs:
           name: release-assets
           path: release-assets/
           if-no-files-found: error
-          retention-days: 7
-      - name: Upload test log
-        if: failure()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
-        with:
-          name: ctest-log
-          path: build/Testing/Temporary/LastTest.log
-          if-no-files-found: ignore
-          retention-days: 7
+          retention-days: 1
 
-  calendar:
-    name: Calendar server
+  addons:
+    name: Add-on checks
     if: ${{ !github.event.deleted }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -119,26 +111,27 @@ jobs:
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: '22'
-          cache: npm
-          cache-dependency-path: addons/calendar/server/frontend/package-lock.json
-      - name: Test and build the frontend
+          package-manager-cache: false
+      - name: Test and build the Calendar add-on sharing frontend
         working-directory: addons/calendar/server/frontend
         run: |
           npm ci
           npm test
           npm run build
-          npm audit --omit=dev --audit-level=high
+      - name: Audit Calendar add-on sharing runtime dependencies
+        working-directory: addons/calendar/server/frontend
+        run: npm audit --omit=dev --audit-level=high
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: '3.12'
-      - name: Test the backend
+      - name: Test the Calendar add-on sharing backend
         working-directory: addons/calendar/server/backend
         run: |
           python -m pip install -r requirements.txt
           python -m unittest discover -s tests
 
   android:
-    name: Android host checks
+    name: Android host tests
     if: ${{ !github.event.deleted }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -161,7 +154,7 @@ jobs:
   passed:
     name: CI passed
     if: ${{ always() && !github.event.deleted }}
-    needs: [commits, linux, calendar, android]
+    needs: [commits, linux, addons, android]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -171,7 +164,7 @@ jobs:
         run: test "$CHECK_RESULTS" = "success success success success"
 
   draft:
-    name: Draft release
+    name: Prepare release draft
     if: needs.commits.outputs.release == 'true'
     needs: [passed, commits]
     runs-on: ubuntu-24.04
