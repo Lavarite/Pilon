@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <instrumentation android:name="org.pilon.CredentialProbeInstrumentation"
+        android:targetPackage="${pilonAppTarget}" tools:replace="android:targetPackage" />
+    <instrumentation android:name="org.pilon.BrowserProbeInstrumentation"
+        android:targetPackage="${pilonAppTarget}" tools:replace="android:targetPackage" />
+    <instrumentation android:name="org.pilon.OfficeProbeInstrumentation"
+        android:targetPackage="${pilonAppTarget}" tools:replace="android:targetPackage" />
+    <instrumentation android:name="org.pilon.LiteRtProbeInstrumentation"
+        android:targetPackage="${pilonAppTarget}" tools:replace="android:targetPackage" />
+    <instrumentation android:name="org.pilon.CalendarAuthProbeInstrumentation"
+        android:targetPackage="${pilonAppTarget}" tools:replace="android:targetPackage" />
+    <instrumentation android:name="org.pilon.ReminderProbeInstrumentation"
+        android:targetPackage="${pilonAppTarget}" tools:replace="android:targetPackage" />
+    <instrumentation android:name="org.pilon.TailscaleProbeInstrumentation"
+        android:targetPackage="${pilonAppTarget}" tools:replace="android:targetPackage" />
+    <instrumentation android:name="org.pilon.ClipboardProbeInstrumentation"
+        android:targetPackage="${pilonAppTarget}" tools:replace="android:targetPackage" />
+    <instrumentation android:name="org.pilon.AccessibilityProbeInstrumentation"
+        android:targetPackage="${pilonAppTarget}" tools:replace="android:targetPackage" />
+    <instrumentation android:name="org.pilon.PinchProbeInstrumentation"
+        android:targetPackage="${pilonAppTarget}.test" tools:replace="android:targetPackage" />
+    <instrumentation android:name="org.pilon.AgentRuntimeProbeInstrumentation"
+        android:targetPackage="${pilonAppTarget}" tools:replace="android:targetPackage" />
+</manifest>

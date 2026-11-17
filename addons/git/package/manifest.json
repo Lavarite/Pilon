@@ -1,0 +1,41 @@
+{
+  "id": "git",
+  "name": "Git",
+  "description": "Review, commit and sync repository changes.",
+  "version": "1.1.0",
+  "apiVersion": 1,
+  "page": "Page.qml",
+  "runtime": "Runtime.qml",
+  "startOnEnable": true,
+  "lifecycle": "Lifecycle.qml",
+  "icon": "icon.svg",
+  "settings": [
+    {
+      "id": "git",
+      "name": "Git",
+      "entry": "Settings.qml"
+    }
+  ],
+  "integrations": [
+    {
+      "id": "files",
+      "name": "Git folder actions",
+      "target": "files",
+      "minVersion": "1.0.0",
+      "point": "folder-actions",
+      "apiVersion": 1,
+      "enabledByDefault": true,
+      "entry": "FileActions.qml"
+    },
+    {
+      "id": "calendar",
+      "name": "Calendar Git sync",
+      "target": "calendar",
+      "minVersion": "1.0.0",
+      "point": "storage-actions",
+      "apiVersion": 1,
+      "enabledByDefault": true,
+      "entry": "CalendarActions.qml"
+    }
+  ]
+}

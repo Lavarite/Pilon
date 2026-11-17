@@ -1,0 +1,129 @@
+{
+  "description": "Inspect projects: list directories and read README files, source code and documentation on Pilon's devices using SSH. Also resolve saved locations, run Linux commands and transfer files.",
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "list_locations",
+        "description": "List saved bookmarks and user-named network locations with paths, device names, and usernames. Use this to resolve a location referred to by name.",
+        "parameters": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "list_devices",
+        "description": "List known Tailscale devices and saved SSH destinations with usernames and availability.",
+        "parameters": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "ssh_exec",
+        "description": "Inspect files or run Linux shell commands on a remote host. Use ls or find to list projects, and cat or sed to read README files and source. YOLO runs commands automatically; Approve asks the user first. Passwords are handled outside chat.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "target": {
+              "type": "string",
+              "description": "Device name/target from get_app_context.devices. Also accepts a hostname, IP or username@host. Use target alone for a discovered device. If both are omitted, uses the selected remote Files device."
+            },
+            "command": {
+              "type": "string",
+              "description": "The requested remote shell command."
+            },
+            "working_directory": {
+              "type": "string",
+              "description": "Absolute directory. Defaults to the current Files folder when target and account match; otherwise the remote home directory. An empty string explicitly selects home. Each call starts fresh."
+            },
+            "host": {
+              "type": "string",
+              "description": "Explicit SSH hostname or IP when not using a known device target. Omit when target is supplied."
+            },
+            "username": {
+              "type": "string",
+              "description": "SSH account; defaults to known target account or current local user."
+            }
+          },
+          "required": [
+            "command"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "list_attachments",
+        "description": "List files the user attached, with opaque IDs usable for SCP upload.",
+        "parameters": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "scp_transfer",
+        "description": "Upload a local file or download a remote file into the agent workspace or an explicit path. YOLO runs transfers automatically; Approve asks the user first.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "target": {
+              "type": "string",
+              "description": "Known device name, hostname, IP address, or username@host."
+            },
+            "direction": {
+              "type": "string",
+              "enum": [
+                "upload",
+                "download"
+              ]
+            },
+            "remote_path": {
+              "type": "string",
+              "description": "Absolute remote file path."
+            },
+            "attachment_id": {
+              "type": "string",
+              "description": "Alternative to local_path for uploading a chat attachment."
+            },
+            "filename": {
+              "type": "string",
+              "description": "Optional downloaded filename, default remote filename, in the workspace downloads folder."
+            },
+            "host": {
+              "type": "string",
+              "description": "Explicit SSH host; can be used instead of target."
+            },
+            "username": {
+              "type": "string",
+              "description": "SSH account; defaults to known target account or current local user."
+            },
+            "local_path": {
+              "type": "string",
+              "description": "Local upload source or download destination. Relative to the agent workspace. Downloads replace this path atomically after success."
+            }
+          },
+          "required": [
+            "direction",
+            "remote_path"
+          ],
+          "additionalProperties": false
+        }
+      }
+    }
+  ]
+}

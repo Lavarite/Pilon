@@ -1,0 +1,16 @@
+<?xml version='1.0' encoding='utf-8'?>
+<full-backup-content>
+    <exclude domain="file" path="pilon-widgets/" />
+    <exclude domain="sharedpref" path="pilon_widgets.xml" />
+    <exclude domain="sharedpref" path="pilon_widgets.xml.bak" />
+    <exclude domain="file" path=".pilon/assistant/codex" />
+    <exclude domain="root" path="app_org.pilon.Pilon" />
+    <exclude domain="sharedpref" path="pilon_credentials.xml" />
+    <exclude domain="sharedpref" path="pilon_credentials.xml.bak" />
+    <exclude domain="sharedpref" path="com.microsoft.identity.client.account_credential_cache.xml" />
+    <exclude domain="sharedpref" path="com.microsoft.identity.client.account_credential_cache.xml.bak" />
+    <exclude domain="sharedpref" path="com.microsoft.identity.client.single_account_credential_cache.xml" />
+    <exclude domain="sharedpref" path="com.microsoft.identity.client.single_account_credential_cache.xml.bak" />
+    <exclude domain="sharedpref" path="com.microsoft.aad.adal.cache.xml" />
+    <exclude domain="sharedpref" path="com.microsoft.aad.adal.cache.xml.bak" />
+</full-backup-content>

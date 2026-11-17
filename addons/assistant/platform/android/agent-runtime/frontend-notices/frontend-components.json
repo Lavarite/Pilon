@@ -1,0 +1,3341 @@
+{
+  "rollup": {
+    "version": "4.68.0",
+    "commit": "b93d9a40e1eed7a78069a58ca191260f5c094727",
+    "source_url": "https://github.com/rollup/rollup/tree/b93d9a40e1eed7a78069a58ca191260f5c094727",
+    "wasm_sha256": "9f81870e4d63128da7ceb442998c4fd7afb93b97d5cd4010bd403d3c436dfe5e",
+    "crate_graph": {
+      "rollup_commit": "b93d9a40e1eed7a78069a58ca191260f5c094727",
+      "scope": "Conservative complete Cargo.lock graph reachable from bindings_wasm, including conditional/build dependencies; not a claim that each crate is linked.",
+      "crates": [
+        {
+          "name": "ahash",
+          "version": "0.8.12",
+          "source_url": "https://static.crates.io/crates/ahash/ahash-0.8.12.crate",
+          "sha256": "5a15f179cd60c4584b8a8c596927aadc462e27f2ca70c04e0071964a73ba7a75",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/ahash-0.8.12/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/ahash-0.8.12/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "Tom Kaitchuck <Tom.Kaitchuck@gmail.com>"
+          ],
+          "published_repository": "https://github.com/tkaitchuck/ahash",
+          "published_homepage": null
+        },
+        {
+          "name": "aho-corasick",
+          "version": "1.1.5",
+          "source_url": "https://static.crates.io/crates/aho-corasick/aho-corasick-1.1.5.crate",
+          "sha256": "c982642fa9e8606056828ee9a8505737230110bb1099153c79efe865c59d12ba",
+          "declared_license": "Unlicense OR MIT",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/aho-corasick-1.1.5/COPYING",
+            "required-notices/Rollup-Rust-crates/aho-corasick-1.1.5/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "Andrew Gallant <jamslam@gmail.com>"
+          ],
+          "published_repository": "https://github.com/BurntSushi/aho-corasick",
+          "published_homepage": "https://github.com/BurntSushi/aho-corasick"
+        },
+        {
+          "name": "allocator-api2",
+          "version": "0.2.21",
+          "source_url": "https://static.crates.io/crates/allocator-api2/allocator-api2-0.2.21.crate",
+          "sha256": "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/allocator-api2-0.2.21/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/allocator-api2-0.2.21/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "Zakarum <zaq.dev@icloud.com>"
+          ],
+          "published_repository": "https://github.com/zakarumych/allocator-api2",
+          "published_homepage": "https://github.com/zakarumych/allocator-api2"
+        },
+        {
+          "name": "anyhow",
+          "version": "1.0.104",
+          "source_url": "https://static.crates.io/crates/anyhow/anyhow-1.0.104.crate",
+          "sha256": "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/anyhow-1.0.104/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/anyhow-1.0.104/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "David Tolnay <dtolnay@gmail.com>"
+          ],
+          "published_repository": "https://github.com/dtolnay/anyhow",
+          "published_homepage": null
+        },
+        {
+          "name": "ar_archive_writer",
+          "version": "0.5.3",
+          "source_url": "https://static.crates.io/crates/ar_archive_writer/ar_archive_writer-0.5.3.crate",
+          "sha256": "73cd58deff2140a0a8eae87e417bd01db68a33e148aa93d1e8cd837e55e312b6",
+          "declared_license": "Apache-2.0 WITH LLVM-exception",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/ar_archive_writer-0.5.3/LICENSE.txt"
+          ],
+          "published_authors": [],
+          "published_repository": "https://github.com/rust-lang/ar_archive_writer",
+          "published_homepage": null
+        },
+        {
+          "name": "arrayvec",
+          "version": "0.7.8",
+          "source_url": "https://static.crates.io/crates/arrayvec/arrayvec-0.7.8.crate",
+          "sha256": "d3fb67a6e08acf24fdeccbac2cb6ac4305825bd1f117462e0e6f2f193345ad56",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/arrayvec-0.7.8/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/arrayvec-0.7.8/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "bluss"
+          ],
+          "published_repository": "https://github.com/bluss/arrayvec",
+          "published_homepage": null
+        },
+        {
+          "name": "ascii",
+          "version": "1.1.0",
+          "source_url": "https://static.crates.io/crates/ascii/ascii-1.1.0.crate",
+          "sha256": "d92bec98840b8f03a5ff5413de5293bfcd8bf96467cf5452609f939ec6f5de16",
+          "declared_license": "Apache-2.0 OR MIT",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/ascii-1.1.0/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/ascii-1.1.0/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "Thomas Bahn <thomas@thomas-bahn.net>",
+            "Torbj\u00f8rn Birch Moltu <t.b.moltu@lyse.net>",
+            "Simon Sapin <simon.sapin@exyr.org>"
+          ],
+          "published_repository": "https://github.com/tomprogrammer/rust-ascii",
+          "published_homepage": null
+        },
+        {
+          "name": "ast_node",
+          "version": "7.0.0",
+          "source_url": "https://static.crates.io/crates/ast_node/ast_node-7.0.0.crate",
+          "sha256": "edf54a7a1bf98e127c22e9e2b9d19619092c74283fdc14e4d67da69780f90db6",
+          "declared_license": "Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/ast_node-7.0.0/PUBLISHED-LICENSE-METADATA.json",
+            "required-notices/swc-LICENSE"
+          ],
+          "supplement": {
+            "url": "https://raw.githubusercontent.com/swc-project/swc/dc9d310e3c8bb63312a9a5ec6803d585034ecb14/LICENSE",
+            "sha256": "d96eba1f1881334d50ffc144276dfa98e147a415e7c591ecdfcb81680361dc91",
+            "path": "required-notices/swc-LICENSE"
+          },
+          "source_note": "Published SWC vcs hashes were not publicly resolvable. Exact crate SPDX Apache-2.0 declaration/author metadata is authoritative for the shipped archive; official project Apache terms are pinned separately, not represented as the same source revision.",
+          "published_authors": [
+            "\uac15\ub3d9\uc724 <kdy1997.dev@gmail.com>"
+          ],
+          "published_repository": "https://github.com/swc-project/swc.git",
+          "published_homepage": null
+        },
+        {
+          "name": "autocfg",
+          "version": "1.5.1",
+          "source_url": "https://static.crates.io/crates/autocfg/autocfg-1.5.1.crate",
+          "sha256": "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53",
+          "declared_license": "Apache-2.0 OR MIT",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/autocfg-1.5.1/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/autocfg-1.5.1/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "Josh Stone <cuviper@gmail.com>"
+          ],
+          "published_repository": "https://github.com/cuviper/autocfg",
+          "published_homepage": null
+        },
+        {
+          "name": "base-encode",
+          "version": "0.3.1",
+          "source_url": "https://static.crates.io/crates/base-encode/base-encode-0.3.1.crate",
+          "sha256": "a17bd29f7c70f32e9387f4d4acfa5ea7b7749ef784fb78cf382df97069337b8c",
+          "declared_license": "MIT",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/base-encode-0.3.1/PUBLISHED-LICENSE-METADATA.json",
+            "required-notices/Rollup-Rust-crates/base-encode-0.3.1/MIT-LICENSE.txt"
+          ],
+          "supplement": "Canonical SPDX MIT terms plus exact published author/license metadata; upstream repository has no license file at its recorded revision.",
+          "published_authors": [
+            "Janis Pritzkau <janispritzkau@gmail.com>"
+          ],
+          "published_repository": "https://github.com/janispritzkau/rust-base-encode",
+          "published_homepage": null
+        },
+        {
+          "name": "base64",
+          "version": "0.22.1",
+          "source_url": "https://static.crates.io/crates/base64/base64-0.22.1.crate",
+          "sha256": "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/base64-0.22.1/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/base64-0.22.1/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "Marshall Pierce <marshall@mpierce.org>"
+          ],
+          "published_repository": "https://github.com/marshallpierce/rust-base64",
+          "published_homepage": null
+        },
+        {
+          "name": "base64-simd",
+          "version": "0.8.0",
+          "source_url": "https://static.crates.io/crates/base64-simd/base64-simd-0.8.0.crate",
+          "sha256": "339abbe78e73178762e23bea9dfd08e697eb3f3301cd4be981c0f78ba5859195",
+          "declared_license": "MIT",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/base64-simd-0.8.0/PUBLISHED-LICENSE-METADATA.json",
+            "required-notices/simd-LICENSE"
+          ],
+          "supplement": {
+            "url": "https://raw.githubusercontent.com/Nugine/simd/d74c030d9dc4f3cae02146d1f497ff62726ef09a/LICENSE",
+            "sha256": "71674605ec4c087fe9eb534e3e4f9e26eb2e4aabcd76a29fd156c6a844d44b3d",
+            "path": "required-notices/simd-LICENSE"
+          },
+          "published_authors": [],
+          "published_repository": "https://github.com/Nugine/simd",
+          "published_homepage": null
+        },
+        {
+          "name": "better_scoped_tls",
+          "version": "1.0.1",
+          "source_url": "https://static.crates.io/crates/better_scoped_tls/better_scoped_tls-1.0.1.crate",
+          "sha256": "7cd228125315b132eed175bf47619ac79b945b26e56b848ba203ae4ea8603609",
+          "declared_license": "Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/better_scoped_tls-1.0.1/PUBLISHED-LICENSE-METADATA.json",
+            "required-notices/swc-LICENSE"
+          ],
+          "supplement": {
+            "url": "https://raw.githubusercontent.com/swc-project/swc/dc9d310e3c8bb63312a9a5ec6803d585034ecb14/LICENSE",
+            "sha256": "d96eba1f1881334d50ffc144276dfa98e147a415e7c591ecdfcb81680361dc91",
+            "path": "required-notices/swc-LICENSE"
+          },
+          "source_note": "Published SWC vcs hashes were not publicly resolvable. Exact crate SPDX Apache-2.0 declaration/author metadata is authoritative for the shipped archive; official project Apache terms are pinned separately, not represented as the same source revision.",
+          "published_authors": [
+            "\uac15\ub3d9\uc724 <kdy1997.dev@gmail.com>"
+          ],
+          "published_repository": "https://github.com/swc-project/swc.git",
+          "published_homepage": null
+        },
+        {
+          "name": "bitflags",
+          "version": "2.13.2",
+          "source_url": "https://static.crates.io/crates/bitflags/bitflags-2.13.2.crate",
+          "sha256": "3ded4057c258ba199e2d26386d3af3780957ecaee6c4ef4041c6b4b8b97c0b06",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/bitflags-2.13.2/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/bitflags-2.13.2/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "The Rust Project Developers"
+          ],
+          "published_repository": "https://github.com/bitflags/bitflags",
+          "published_homepage": "https://github.com/bitflags/bitflags"
+        },
+        {
+          "name": "bitvec",
+          "version": "1.1.1",
+          "source_url": "https://static.crates.io/crates/bitvec/bitvec-1.1.1.crate",
+          "sha256": "ddcec3d12c579d40898fe0a9a358a803c23e9c52ca3c425707f81c9436211837",
+          "declared_license": "MIT",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/bitvec-1.1.1/LICENSE.txt"
+          ],
+          "published_authors": [],
+          "published_repository": "https://github.com/bitvecto-rs/bitvec",
+          "published_homepage": "https://bitvecto-rs.github.io/bitvec"
+        },
+        {
+          "name": "bstr",
+          "version": "1.13.1",
+          "source_url": "https://static.crates.io/crates/bstr/bstr-1.13.1.crate",
+          "sha256": "6bb31b46c14244e20ee9984b11bf5c992b91fb6939fea616e3512c8baecdbe5f",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/bstr-1.13.1/COPYING",
+            "required-notices/Rollup-Rust-crates/bstr-1.13.1/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/bstr-1.13.1/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "Andrew Gallant <jamslam@gmail.com>"
+          ],
+          "published_repository": "https://github.com/BurntSushi/bstr",
+          "published_homepage": "https://github.com/BurntSushi/bstr"
+        },
+        {
+          "name": "bumpalo",
+          "version": "3.20.3",
+          "source_url": "https://static.crates.io/crates/bumpalo/bumpalo-3.20.3.crate",
+          "sha256": "72f5acc6cb2ba439de613abc23857ec3d78374d8ed5ac84e9d11336e87da8649",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/bumpalo-3.20.3/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/bumpalo-3.20.3/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "Nick Fitzgerald <fitzgen@gmail.com>"
+          ],
+          "published_repository": "https://github.com/fitzgen/bumpalo",
+          "published_homepage": null
+        },
+        {
+          "name": "bytes",
+          "version": "1.12.1",
+          "source_url": "https://static.crates.io/crates/bytes/bytes-1.12.1.crate",
+          "sha256": "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04",
+          "declared_license": "MIT",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/bytes-1.12.1/LICENSE"
+          ],
+          "published_authors": [
+            "Carl Lerche <me@carllerche.com>",
+            "Sean McArthur <sean@seanmonstar.com>"
+          ],
+          "published_repository": "https://github.com/tokio-rs/bytes",
+          "published_homepage": null
+        },
+        {
+          "name": "bytes-str",
+          "version": "0.2.9",
+          "source_url": "https://static.crates.io/crates/bytes-str/bytes-str-0.2.9.crate",
+          "sha256": "4dde6d05e75a31ec9610eb6446a6f0a10dd30ff5100d720fee4c7c7a9008b5ba",
+          "declared_license": "Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/bytes-str-0.2.9/PUBLISHED-LICENSE-METADATA.json",
+            "required-notices/ddbase-LICENSE"
+          ],
+          "supplement": {
+            "url": "https://raw.githubusercontent.com/dudykr/ddbase/19f6487518dbebbc198346bfb979313ef457199e/LICENSE",
+            "sha256": "58d1e17ffe5109a7ae296caafcadfdbe6a7d176f0bc4ab01e12a689b0499d8bd",
+            "path": "required-notices/ddbase-LICENSE"
+          },
+          "published_authors": [
+            "Donny <kdy1997.dev@gmail.com>"
+          ],
+          "published_repository": "https://github.com/dudykr/ddbase.git",
+          "published_homepage": null
+        },
+        {
+          "name": "castaway",
+          "version": "0.2.4",
+          "source_url": "https://static.crates.io/crates/castaway/castaway-0.2.4.crate",
+          "sha256": "dec551ab6e7578819132c713a93c022a05d60159dc86e7a7050223577484c55a",
+          "declared_license": "MIT",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/castaway-0.2.4/LICENSE"
+          ],
+          "published_authors": [
+            "Stephen M. Coakley <me@stephencoakley.com>"
+          ],
+          "published_repository": "https://github.com/sagebind/castaway",
+          "published_homepage": null
+        },
+        {
+          "name": "cc",
+          "version": "1.4.6",
+          "source_url": "https://static.crates.io/crates/cc/cc-1.4.6.crate",
+          "sha256": "a3eb0f42d6c360dc3f8a821f6bf2fdea7f72bfd36b3076eb0e6d1e9e0752fff4",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/cc-1.4.6/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/cc-1.4.6/LICENSE-MIT"
+          ],
+          "published_authors": [],
+          "published_repository": "https://github.com/rust-lang/cc-rs",
+          "published_homepage": "https://github.com/rust-lang/cc-rs"
+        },
+        {
+          "name": "cfg-if",
+          "version": "1.0.5",
+          "source_url": "https://static.crates.io/crates/cfg-if/cfg-if-1.0.5.crate",
+          "sha256": "4e7648175b45a9a48536d676f68d918270699102aa8dab5496df06904c914600",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/cfg-if-1.0.5/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/cfg-if-1.0.5/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "Alex Crichton <alex@alexcrichton.com>"
+          ],
+          "published_repository": "https://github.com/rust-lang/cfg-if",
+          "published_homepage": null
+        },
+        {
+          "name": "compact_str",
+          "version": "0.7.1",
+          "source_url": "https://static.crates.io/crates/compact_str/compact_str-0.7.1.crate",
+          "sha256": "f86b9c4c00838774a6d902ef931eff7470720c51d90c2e32cfe15dc304737b3f",
+          "declared_license": "MIT",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/compact_str-0.7.1/LICENSE"
+          ],
+          "published_authors": [
+            "Parker Timmerman <parker@parkertimmerman.com>"
+          ],
+          "published_repository": "https://github.com/ParkMyCar/compact_str",
+          "published_homepage": "https://github.com/ParkMyCar/compact_str"
+        },
+        {
+          "name": "console_error_panic_hook",
+          "version": "0.1.7",
+          "source_url": "https://static.crates.io/crates/console_error_panic_hook/console_error_panic_hook-0.1.7.crate",
+          "sha256": "a06aeb73f470f66dcdbf7223caeebb85984942f22f1adb2a088cf9668146bbbc",
+          "declared_license": "Apache-2.0/MIT",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/console_error_panic_hook-0.1.7/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/console_error_panic_hook-0.1.7/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "Nick Fitzgerald <fitzgen@gmail.com>"
+          ],
+          "published_repository": "https://github.com/rustwasm/console_error_panic_hook",
+          "published_homepage": null
+        },
+        {
+          "name": "crossbeam-utils",
+          "version": "0.8.23",
+          "source_url": "https://static.crates.io/crates/crossbeam-utils/crossbeam-utils-0.8.23.crate",
+          "sha256": "a31eee39dddec8330830986fcd7625edb5a24ec90ea038215273bbc3adb08ac6",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/crossbeam-utils-0.8.23/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/crossbeam-utils-0.8.23/LICENSE-MIT"
+          ],
+          "published_authors": [],
+          "published_repository": "https://github.com/crossbeam-rs/crossbeam",
+          "published_homepage": "https://github.com/crossbeam-rs/crossbeam/tree/master/crossbeam-utils"
+        },
+        {
+          "name": "dashmap",
+          "version": "6.2.1",
+          "source_url": "https://static.crates.io/crates/dashmap/dashmap-6.2.1.crate",
+          "sha256": "e6361d5c062261c78a176addb82d4c821ae42bed6089de0e12603cd25de2059c",
+          "declared_license": "MIT",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/dashmap-6.2.1/LICENSE"
+          ],
+          "published_authors": [
+            "Acrimon <joel.wejdenstal@gmail.com>"
+          ],
+          "published_repository": "https://github.com/xacrimon/dashmap",
+          "published_homepage": "https://github.com/xacrimon/dashmap"
+        },
+        {
+          "name": "data-encoding",
+          "version": "2.11.1",
+          "source_url": "https://static.crates.io/crates/data-encoding/data-encoding-2.11.1.crate",
+          "sha256": "4583a4551df46e2792f82ceeac45e850d2e2d5debba0b91f102385cda5b11f06",
+          "declared_license": "MIT",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/data-encoding-2.11.1/LICENSE"
+          ],
+          "published_authors": [],
+          "published_repository": "https://github.com/ia0/data-encoding",
+          "published_homepage": null
+        },
+        {
+          "name": "debugid",
+          "version": "0.8.0",
+          "source_url": "https://static.crates.io/crates/debugid/debugid-0.8.0.crate",
+          "sha256": "bef552e6f588e446098f6ba40d89ac146c8c7b64aade83c051ee00bb5d2bc18d",
+          "declared_license": "Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/debugid-0.8.0/LICENSE"
+          ],
+          "published_authors": [
+            "Sentry <hello@sentry.io>"
+          ],
+          "published_repository": "https://github.com/getsentry/rust-debugid",
+          "published_homepage": "https://sentry.io/"
+        },
+        {
+          "name": "displaydoc",
+          "version": "0.2.7",
+          "source_url": "https://static.crates.io/crates/displaydoc/displaydoc-0.2.7.crate",
+          "sha256": "c6232dd377dcc64799954cbd3a9bb882e9cdc1308ccd87b1c098f1fb2eaf82a8",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/displaydoc-0.2.7/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/displaydoc-0.2.7/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "Jane Lusby <jlusby@yaah.dev>"
+          ],
+          "published_repository": "https://github.com/yaahc/displaydoc",
+          "published_homepage": "https://github.com/yaahc/displaydoc"
+        },
+        {
+          "name": "dragonbox_ecma",
+          "version": "0.1.12",
+          "source_url": "https://static.crates.io/crates/dragonbox_ecma/dragonbox_ecma-0.1.12.crate",
+          "sha256": "fd8e701084c37e7ef62d3f9e453b618130cbc0ef3573847785952a3ac3f746bf",
+          "declared_license": "Apache-2.0 WITH LLVM-exception OR BSL-1.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/dragonbox_ecma-0.1.12/LICENSE-Apache2-LLVM",
+            "required-notices/Rollup-Rust-crates/dragonbox_ecma-0.1.12/LICENSE-Boost"
+          ],
+          "published_authors": [
+            "David Tolnay <dtolnay@gmail.com>",
+            "magic-akari <akari.ccino@gmail.com>"
+          ],
+          "published_repository": "https://github.com/magic-akari/dragonbox",
+          "published_homepage": null
+        },
+        {
+          "name": "either",
+          "version": "1.19.0",
+          "source_url": "https://static.crates.io/crates/either/either-1.19.0.crate",
+          "sha256": "0e9c71c2167ca323c882b99918929403426e2373ea17242ff5653e0d5e1058be",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/either-1.19.0/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/either-1.19.0/LICENSE-MIT"
+          ],
+          "published_authors": [],
+          "published_repository": "https://github.com/rayon-rs/either",
+          "published_homepage": null
+        },
+        {
+          "name": "equivalent",
+          "version": "1.0.3",
+          "source_url": "https://static.crates.io/crates/equivalent/equivalent-1.0.3.crate",
+          "sha256": "00d174d5400e5e8fd687ad1049e2f578285fa914201b1af7e8b112a4546bd826",
+          "declared_license": "Apache-2.0 OR MIT",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/equivalent-1.0.3/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/equivalent-1.0.3/LICENSE-MIT"
+          ],
+          "published_authors": [],
+          "published_repository": "https://github.com/indexmap-rs/equivalent",
+          "published_homepage": null
+        },
+        {
+          "name": "find-msvc-tools",
+          "version": "0.1.12",
+          "source_url": "https://static.crates.io/crates/find-msvc-tools/find-msvc-tools-0.1.12.crate",
+          "sha256": "3e0f1c7c3a72c66fd80abe965175f7523475c0489a87d3ff9d6e8c87d87a9d2d",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/find-msvc-tools-0.1.12/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/find-msvc-tools-0.1.12/LICENSE-MIT"
+          ],
+          "published_authors": [],
+          "published_repository": "https://github.com/rust-lang/cc-rs",
+          "published_homepage": null
+        },
+        {
+          "name": "fixedbitset",
+          "version": "0.5.7",
+          "source_url": "https://static.crates.io/crates/fixedbitset/fixedbitset-0.5.7.crate",
+          "sha256": "1d674e81391d1e1ab681a28d99df07927c6d4aa5b027d7da16ba32d1d21ecd99",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/fixedbitset-0.5.7/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/fixedbitset-0.5.7/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "bluss"
+          ],
+          "published_repository": "https://github.com/petgraph/fixedbitset",
+          "published_homepage": null
+        },
+        {
+          "name": "foldhash",
+          "version": "0.2.0",
+          "source_url": "https://static.crates.io/crates/foldhash/foldhash-0.2.0.crate",
+          "sha256": "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb",
+          "declared_license": "Zlib",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/foldhash-0.2.0/LICENSE"
+          ],
+          "published_authors": [
+            "Orson Peters <orsonpeters@gmail.com>"
+          ],
+          "published_repository": "https://github.com/orlp/foldhash",
+          "published_homepage": null
+        },
+        {
+          "name": "form_urlencoded",
+          "version": "1.2.2",
+          "source_url": "https://static.crates.io/crates/form_urlencoded/form_urlencoded-1.2.2.crate",
+          "sha256": "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/form_urlencoded-1.2.2/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/form_urlencoded-1.2.2/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "The rust-url developers"
+          ],
+          "published_repository": "https://github.com/servo/rust-url",
+          "published_homepage": null
+        },
+        {
+          "name": "from_variant",
+          "version": "3.0.0",
+          "source_url": "https://static.crates.io/crates/from_variant/from_variant-3.0.0.crate",
+          "sha256": "e5ff35a391aef949120a0340d690269b3d9f63460a6106e99bd07b961f345ea9",
+          "declared_license": "Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/from_variant-3.0.0/PUBLISHED-LICENSE-METADATA.json",
+            "required-notices/swc-LICENSE"
+          ],
+          "supplement": {
+            "url": "https://raw.githubusercontent.com/swc-project/swc/dc9d310e3c8bb63312a9a5ec6803d585034ecb14/LICENSE",
+            "sha256": "d96eba1f1881334d50ffc144276dfa98e147a415e7c591ecdfcb81680361dc91",
+            "path": "required-notices/swc-LICENSE"
+          },
+          "source_note": "Published SWC vcs hashes were not publicly resolvable. Exact crate SPDX Apache-2.0 declaration/author metadata is authoritative for the shipped archive; official project Apache terms are pinned separately, not represented as the same source revision.",
+          "published_authors": [
+            "\uac15\ub3d9\uc724 <kdy1997.dev@gmail.com>"
+          ],
+          "published_repository": "https://github.com/swc-project/swc.git",
+          "published_homepage": null
+        },
+        {
+          "name": "funty",
+          "version": "2.0.0",
+          "source_url": "https://static.crates.io/crates/funty/funty-2.0.0.crate",
+          "sha256": "e6d5a32815ae3f33302d95fdcb2ce17862f8c65363dcfd29360480ba1001fc9c",
+          "declared_license": "MIT",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/funty-2.0.0/LICENSE.txt"
+          ],
+          "published_authors": [
+            "myrrlyn <self@myrrlyn.dev>"
+          ],
+          "published_repository": "https://github.com/myrrlyn/funty",
+          "published_homepage": null
+        },
+        {
+          "name": "futures-channel",
+          "version": "0.3.34",
+          "source_url": "https://static.crates.io/crates/futures-channel/futures-channel-0.3.34.crate",
+          "sha256": "b1f9e3d69d39e4862ffed03ed071a76f9a13ba1d9109d355b0f0aa6b15e393c4",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/futures-channel-0.3.34/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/futures-channel-0.3.34/LICENSE-MIT"
+          ],
+          "published_authors": [],
+          "published_repository": "https://github.com/rust-lang/futures-rs",
+          "published_homepage": "https://rust-lang.github.io/futures-rs"
+        },
+        {
+          "name": "futures-core",
+          "version": "0.3.34",
+          "source_url": "https://static.crates.io/crates/futures-core/futures-core-0.3.34.crate",
+          "sha256": "92d699e522242e69e3003b94ecc1f960f3a5e015aa7c5d7486e65ad01dd94f5e",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/futures-core-0.3.34/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/futures-core-0.3.34/LICENSE-MIT"
+          ],
+          "published_authors": [],
+          "published_repository": "https://github.com/rust-lang/futures-rs",
+          "published_homepage": "https://rust-lang.github.io/futures-rs"
+        },
+        {
+          "name": "futures-io",
+          "version": "0.3.34",
+          "source_url": "https://static.crates.io/crates/futures-io/futures-io-0.3.34.crate",
+          "sha256": "53c0fa8157de1303bfffdaa1cc2a673bfffb60102f76b0ef4441659124373fed",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/futures-io-0.3.34/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/futures-io-0.3.34/LICENSE-MIT"
+          ],
+          "published_authors": [],
+          "published_repository": "https://github.com/rust-lang/futures-rs",
+          "published_homepage": "https://rust-lang.github.io/futures-rs"
+        },
+        {
+          "name": "futures-macro",
+          "version": "0.3.34",
+          "source_url": "https://static.crates.io/crates/futures-macro/futures-macro-0.3.34.crate",
+          "sha256": "9fb9654ba8355388abeb8dcb4fc62f511300867002afc858860463bdd9fe0c44",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/futures-macro-0.3.34/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/futures-macro-0.3.34/LICENSE-MIT"
+          ],
+          "published_authors": [],
+          "published_repository": "https://github.com/rust-lang/futures-rs",
+          "published_homepage": "https://rust-lang.github.io/futures-rs"
+        },
+        {
+          "name": "futures-sink",
+          "version": "0.3.34",
+          "source_url": "https://static.crates.io/crates/futures-sink/futures-sink-0.3.34.crate",
+          "sha256": "1944426bf7d03f1d14f708785e4b33efd750b36d48a157b836b3efc15ede8e1d",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/futures-sink-0.3.34/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/futures-sink-0.3.34/LICENSE-MIT"
+          ],
+          "published_authors": [],
+          "published_repository": "https://github.com/rust-lang/futures-rs",
+          "published_homepage": "https://rust-lang.github.io/futures-rs"
+        },
+        {
+          "name": "futures-task",
+          "version": "0.3.34",
+          "source_url": "https://static.crates.io/crates/futures-task/futures-task-0.3.34.crate",
+          "sha256": "cd417de3d1d015fc3bfd2b1ea46dfc7bab72ef86f1cc7cc9c78e728b34a6d1fd",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/futures-task-0.3.34/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/futures-task-0.3.34/LICENSE-MIT"
+          ],
+          "published_authors": [],
+          "published_repository": "https://github.com/rust-lang/futures-rs",
+          "published_homepage": "https://rust-lang.github.io/futures-rs"
+        },
+        {
+          "name": "futures-util",
+          "version": "0.3.34",
+          "source_url": "https://static.crates.io/crates/futures-util/futures-util-0.3.34.crate",
+          "sha256": "0d50a92467f8ba5dd6e3ee5d4bd04d73ab2e4e1c44474a0674821dfce14b79bc",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/futures-util-0.3.34/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/futures-util-0.3.34/LICENSE-MIT"
+          ],
+          "published_authors": [],
+          "published_repository": "https://github.com/rust-lang/futures-rs",
+          "published_homepage": "https://rust-lang.github.io/futures-rs"
+        },
+        {
+          "name": "globset",
+          "version": "0.4.21",
+          "source_url": "https://static.crates.io/crates/globset/globset-0.4.21.crate",
+          "sha256": "f98b0d85522dc0a824cfebbc9594ff4a9b289c568bea0370319dfbdf20ccdd2d",
+          "declared_license": "Unlicense OR MIT",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/globset-0.4.21/COPYING",
+            "required-notices/Rollup-Rust-crates/globset-0.4.21/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "Andrew Gallant <jamslam@gmail.com>"
+          ],
+          "published_repository": "https://github.com/BurntSushi/ripgrep/tree/master/crates/globset",
+          "published_homepage": null
+        },
+        {
+          "name": "hashbrown",
+          "version": "0.14.5",
+          "source_url": "https://static.crates.io/crates/hashbrown/hashbrown-0.14.5.crate",
+          "sha256": "e5274423e17b7c9fc20b6e7e208532f9b19825d82dfd615708b70edd83df41f1",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/hashbrown-0.14.5/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/hashbrown-0.14.5/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "Amanieu d'Antras <amanieu@gmail.com>"
+          ],
+          "published_repository": "https://github.com/rust-lang/hashbrown",
+          "published_homepage": null
+        },
+        {
+          "name": "hashbrown",
+          "version": "0.16.1",
+          "source_url": "https://static.crates.io/crates/hashbrown/hashbrown-0.16.1.crate",
+          "sha256": "841d1cc9bed7f9236f321df977030373f4a4163ae1a7dbfe1a51a2c1a51d9100",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/hashbrown-0.16.1/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/hashbrown-0.16.1/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "Amanieu d'Antras <amanieu@gmail.com>"
+          ],
+          "published_repository": "https://github.com/rust-lang/hashbrown",
+          "published_homepage": null
+        },
+        {
+          "name": "hashbrown",
+          "version": "0.17.1",
+          "source_url": "https://static.crates.io/crates/hashbrown/hashbrown-0.17.1.crate",
+          "sha256": "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/hashbrown-0.17.1/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/hashbrown-0.17.1/LICENSE-MIT"
+          ],
+          "published_authors": [],
+          "published_repository": "https://github.com/rust-lang/hashbrown",
+          "published_homepage": null
+        },
+        {
+          "name": "heck",
+          "version": "0.5.0",
+          "source_url": "https://static.crates.io/crates/heck/heck-0.5.0.crate",
+          "sha256": "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/heck-0.5.0/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/heck-0.5.0/LICENSE-MIT"
+          ],
+          "published_authors": [],
+          "published_repository": "https://github.com/withoutboats/heck",
+          "published_homepage": null
+        },
+        {
+          "name": "hermit-abi",
+          "version": "0.5.3",
+          "source_url": "https://static.crates.io/crates/hermit-abi/hermit-abi-0.5.3.crate",
+          "sha256": "e17592d60ebacc7d5e169f4663c5f84f9161cc90328abcfe8456f41e4dfcb284",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/hermit-abi-0.5.3/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/hermit-abi-0.5.3/LICENSE-MIT"
+          ],
+          "published_authors": [],
+          "published_repository": "https://github.com/hermit-os/hermit-rs",
+          "published_homepage": null
+        },
+        {
+          "name": "hstr",
+          "version": "4.0.3",
+          "source_url": "https://static.crates.io/crates/hstr/hstr-4.0.3.crate",
+          "sha256": "2b904c58532ecdbf77f46013daec3ecfa9aec83ec17cf4c8053be80a9c1d8d15",
+          "declared_license": "Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/hstr-4.0.3/LICENSE"
+          ],
+          "published_authors": [
+            "\uac15\ub3d9\uc724 <kdy1997.dev@gmail.com>"
+          ],
+          "published_repository": "https://github.com/swc-project/swc.git",
+          "published_homepage": null
+        },
+        {
+          "name": "icu_collections",
+          "version": "2.4.0",
+          "source_url": "https://static.crates.io/crates/icu_collections/icu_collections-2.4.0.crate",
+          "sha256": "fe090a42a0d3140fed8c63263ed1fecc02422cb2f4bfe55cd8de2de1b8e105dd",
+          "declared_license": "Unicode-3.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/icu_collections-2.4.0/LICENSE"
+          ],
+          "published_authors": [
+            "The ICU4X Project Developers"
+          ],
+          "published_repository": "https://github.com/unicode-org/icu4x",
+          "published_homepage": "https://icu4x.unicode.org"
+        },
+        {
+          "name": "icu_locale_core",
+          "version": "2.4.0",
+          "source_url": "https://static.crates.io/crates/icu_locale_core/icu_locale_core-2.4.0.crate",
+          "sha256": "25d29b57c17c6528d0dc4c2141cfa2d08200465acb537a3909c8b9b8a4a984c0",
+          "declared_license": "Unicode-3.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/icu_locale_core-2.4.0/LICENSE"
+          ],
+          "published_authors": [
+            "The ICU4X Project Developers"
+          ],
+          "published_repository": "https://github.com/unicode-org/icu4x",
+          "published_homepage": "https://icu4x.unicode.org"
+        },
+        {
+          "name": "icu_normalizer",
+          "version": "2.4.0",
+          "source_url": "https://static.crates.io/crates/icu_normalizer/icu_normalizer-2.4.0.crate",
+          "sha256": "404a3b8c486f205c87fe7f23ab6894d84a4ad76d6e4671ae1981ba7def87c599",
+          "declared_license": "Unicode-3.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/icu_normalizer-2.4.0/LICENSE"
+          ],
+          "published_authors": [
+            "The ICU4X Project Developers"
+          ],
+          "published_repository": "https://github.com/unicode-org/icu4x",
+          "published_homepage": "https://icu4x.unicode.org"
+        },
+        {
+          "name": "icu_normalizer_data",
+          "version": "2.4.0",
+          "source_url": "https://static.crates.io/crates/icu_normalizer_data/icu_normalizer_data-2.4.0.crate",
+          "sha256": "20f0088bfb7441f7a37fa0c9e20cb1e9cba1cac6b9ce8cd2a6dc44294f8e8cbc",
+          "declared_license": "Unicode-3.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/icu_normalizer_data-2.4.0/LICENSE"
+          ],
+          "published_authors": [
+            "The ICU4X Project Developers"
+          ],
+          "published_repository": "https://github.com/unicode-org/icu4x",
+          "published_homepage": "https://icu4x.unicode.org"
+        },
+        {
+          "name": "icu_properties",
+          "version": "2.4.0",
+          "source_url": "https://static.crates.io/crates/icu_properties/icu_properties-2.4.0.crate",
+          "sha256": "2ea83d991c56158f7cf898bf86436c1dfe7c07ee82fe88951f2695c9f37a379f",
+          "declared_license": "Unicode-3.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/icu_properties-2.4.0/LICENSE"
+          ],
+          "published_authors": [
+            "The ICU4X Project Developers"
+          ],
+          "published_repository": "https://github.com/unicode-org/icu4x",
+          "published_homepage": "https://icu4x.unicode.org"
+        },
+        {
+          "name": "icu_properties_data",
+          "version": "2.4.0",
+          "source_url": "https://static.crates.io/crates/icu_properties_data/icu_properties_data-2.4.0.crate",
+          "sha256": "b98f29af82d02b163fe50161388350e743bb3107cc8e8c2f7314cb505faddfcf",
+          "declared_license": "Unicode-3.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/icu_properties_data-2.4.0/LICENSE"
+          ],
+          "published_authors": [
+            "The ICU4X Project Developers"
+          ],
+          "published_repository": "https://github.com/unicode-org/icu4x",
+          "published_homepage": "https://icu4x.unicode.org"
+        },
+        {
+          "name": "icu_provider",
+          "version": "2.4.0",
+          "source_url": "https://static.crates.io/crates/icu_provider/icu_provider-2.4.0.crate",
+          "sha256": "413099315636c588ee8f011190b329b971a09a8fae9d157e01dcae8379468514",
+          "declared_license": "Unicode-3.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/icu_provider-2.4.0/LICENSE"
+          ],
+          "published_authors": [
+            "The ICU4X Project Developers"
+          ],
+          "published_repository": "https://github.com/unicode-org/icu4x",
+          "published_homepage": "https://icu4x.unicode.org"
+        },
+        {
+          "name": "idna",
+          "version": "1.1.0",
+          "source_url": "https://static.crates.io/crates/idna/idna-1.1.0.crate",
+          "sha256": "3b0875f23caa03898994f6ddc501886a45c7d3d62d04d2d90788d47be1b1e4de",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/idna-1.1.0/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/idna-1.1.0/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "The rust-url developers"
+          ],
+          "published_repository": "https://github.com/servo/rust-url/",
+          "published_homepage": null
+        },
+        {
+          "name": "idna_adapter",
+          "version": "1.2.2",
+          "source_url": "https://static.crates.io/crates/idna_adapter/idna_adapter-1.2.2.crate",
+          "sha256": "cb68373c0d6620ef8105e855e7745e18b0d00d3bdb07fb532e434244cdb9a714",
+          "declared_license": "Apache-2.0 OR MIT",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/idna_adapter-1.2.2/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/idna_adapter-1.2.2/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "The rust-url developers"
+          ],
+          "published_repository": "https://github.com/hsivonen/idna_adapter",
+          "published_homepage": "https://docs.rs/crate/idna_adapter/latest"
+        },
+        {
+          "name": "if_chain",
+          "version": "1.0.3",
+          "source_url": "https://static.crates.io/crates/if_chain/if_chain-1.0.3.crate",
+          "sha256": "cd62e6b5e86ea8eeeb8db1de02880a6abc01a397b2ebb64b5d74ac255318f5cb",
+          "declared_license": "MIT/Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/if_chain-1.0.3/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/if_chain-1.0.3/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "Chris Wong <lambda.fairy@gmail.com>"
+          ],
+          "published_repository": "https://github.com/lambda-fairy/if_chain",
+          "published_homepage": null
+        },
+        {
+          "name": "indexmap",
+          "version": "2.14.2",
+          "source_url": "https://static.crates.io/crates/indexmap/indexmap-2.14.2.crate",
+          "sha256": "cc4e190f5d26ca7051642629da2c52fc03bde85a03197c99408dcd291734c855",
+          "declared_license": "Apache-2.0 OR MIT",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/indexmap-2.14.2/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/indexmap-2.14.2/LICENSE-MIT"
+          ],
+          "published_authors": [],
+          "published_repository": "https://github.com/indexmap-rs/indexmap",
+          "published_homepage": null
+        },
+        {
+          "name": "is-macro",
+          "version": "0.3.8",
+          "source_url": "https://static.crates.io/crates/is-macro/is-macro-0.3.8.crate",
+          "sha256": "8267aa6001e25494f3015f9663bbd88a18240c74483afa5f0934a1b3e4c388e9",
+          "declared_license": "Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/is-macro-0.3.8/LICENSE"
+          ],
+          "published_authors": [
+            "\uac15\ub3d9\uc724 <kdy1997.dev@gmail.com>"
+          ],
+          "published_repository": "https://github.com/dudykr/ddbase.git",
+          "published_homepage": null
+        },
+        {
+          "name": "itoa",
+          "version": "1.0.18",
+          "source_url": "https://static.crates.io/crates/itoa/itoa-1.0.18.crate",
+          "sha256": "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/itoa-1.0.18/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/itoa-1.0.18/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "David Tolnay <dtolnay@gmail.com>"
+          ],
+          "published_repository": "https://github.com/dtolnay/itoa",
+          "published_homepage": null
+        },
+        {
+          "name": "js-sys",
+          "version": "0.3.107",
+          "source_url": "https://static.crates.io/crates/js-sys/js-sys-0.3.107.crate",
+          "sha256": "8dc09d2154098bbf4ef54eab6b117a3c24cbbffe94046b16ee6d6d4510584d3a",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/js-sys-0.3.107/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/js-sys-0.3.107/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "The wasm-bindgen Developers"
+          ],
+          "published_repository": "https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/js-sys",
+          "published_homepage": "https://wasm-bindgen.github.io/wasm-bindgen/"
+        },
+        {
+          "name": "libc",
+          "version": "0.2.191",
+          "source_url": "https://static.crates.io/crates/libc/libc-0.2.191.crate",
+          "sha256": "65cd87c9a6d60536580b316ad985726104730a5151c99845f2490428ef91240a",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/libc-0.2.191/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/libc-0.2.191/LICENSE-MIT"
+          ],
+          "published_authors": [],
+          "published_repository": "https://github.com/rust-lang/libc",
+          "published_homepage": null
+        },
+        {
+          "name": "litemap",
+          "version": "0.8.3",
+          "source_url": "https://static.crates.io/crates/litemap/litemap-0.8.3.crate",
+          "sha256": "47d9d19d1d6efa0109d2f65ff4c85cddd50bd572e5a00127ab10987290bcefae",
+          "declared_license": "Unicode-3.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/litemap-0.8.3/LICENSE"
+          ],
+          "published_authors": [
+            "The ICU4X Project Developers"
+          ],
+          "published_repository": "https://github.com/unicode-org/icu4x",
+          "published_homepage": null
+        },
+        {
+          "name": "lock_api",
+          "version": "0.4.14",
+          "source_url": "https://static.crates.io/crates/lock_api/lock_api-0.4.14.crate",
+          "sha256": "224399e74b87b5f3557511d98dff8b14089b3dadafcab6bb93eab67d3aace965",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/lock_api-0.4.14/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/lock_api-0.4.14/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "Amanieu d'Antras <amanieu@gmail.com>"
+          ],
+          "published_repository": "https://github.com/Amanieu/parking_lot",
+          "published_homepage": null
+        },
+        {
+          "name": "memchr",
+          "version": "2.8.3",
+          "source_url": "https://static.crates.io/crates/memchr/memchr-2.8.3.crate",
+          "sha256": "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98",
+          "declared_license": "Unlicense OR MIT",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/memchr-2.8.3/COPYING",
+            "required-notices/Rollup-Rust-crates/memchr-2.8.3/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "Andrew Gallant <jamslam@gmail.com>",
+            "bluss"
+          ],
+          "published_repository": "https://github.com/BurntSushi/memchr",
+          "published_homepage": "https://github.com/BurntSushi/memchr"
+        },
+        {
+          "name": "new_debug_unreachable",
+          "version": "1.0.6",
+          "source_url": "https://static.crates.io/crates/new_debug_unreachable/new_debug_unreachable-1.0.6.crate",
+          "sha256": "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086",
+          "declared_license": "MIT",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/new_debug_unreachable-1.0.6/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "Matt Brubeck <mbrubeck@limpet.net>",
+            "Jonathan Reem <jonathan.reem@gmail.com>"
+          ],
+          "published_repository": "https://github.com/mbrubeck/rust-debug-unreachable",
+          "published_homepage": null
+        },
+        {
+          "name": "num-bigint",
+          "version": "0.4.8",
+          "source_url": "https://static.crates.io/crates/num-bigint/num-bigint-0.4.8.crate",
+          "sha256": "c89e69e7e0f03bea5ef08013795c25018e101932225a656383bd384495ecc367",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/num-bigint-0.4.8/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/num-bigint-0.4.8/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "The Rust Project Developers"
+          ],
+          "published_repository": "https://github.com/rust-num/num-bigint",
+          "published_homepage": "https://github.com/rust-num/num-bigint"
+        },
+        {
+          "name": "num-integer",
+          "version": "0.1.47",
+          "source_url": "https://static.crates.io/crates/num-integer/num-integer-0.1.47.crate",
+          "sha256": "7ce2d95d4b3734dc35aa2f45e1aa22cd416814592a4f9d9205e11affd5b8e10b",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/num-integer-0.1.47/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/num-integer-0.1.47/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "The Rust Project Developers"
+          ],
+          "published_repository": "https://github.com/rust-num/num-integer",
+          "published_homepage": "https://github.com/rust-num/num-integer"
+        },
+        {
+          "name": "num-traits",
+          "version": "0.2.19",
+          "source_url": "https://static.crates.io/crates/num-traits/num-traits-0.2.19.crate",
+          "sha256": "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/num-traits-0.2.19/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/num-traits-0.2.19/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "The Rust Project Developers"
+          ],
+          "published_repository": "https://github.com/rust-num/num-traits",
+          "published_homepage": "https://github.com/rust-num/num-traits"
+        },
+        {
+          "name": "num_cpus",
+          "version": "1.17.0",
+          "source_url": "https://static.crates.io/crates/num_cpus/num_cpus-1.17.0.crate",
+          "sha256": "91df4bbde75afed763b708b7eee1e8e7651e02d97f6d5dd763e89367e957b23b",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/num_cpus-1.17.0/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/num_cpus-1.17.0/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "Sean McArthur <sean@seanmonstar.com>"
+          ],
+          "published_repository": "https://github.com/seanmonstar/num_cpus",
+          "published_homepage": null
+        },
+        {
+          "name": "object",
+          "version": "0.39.1",
+          "source_url": "https://static.crates.io/crates/object/object-0.39.1.crate",
+          "sha256": "2e5a6c098c7a3b6547378093f5cc30bc54fd361ce711e05293a5cc589562739b",
+          "declared_license": "Apache-2.0 OR MIT",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/object-0.39.1/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/object-0.39.1/LICENSE-MIT"
+          ],
+          "published_authors": [],
+          "published_repository": "https://github.com/gimli-rs/object",
+          "published_homepage": null
+        },
+        {
+          "name": "once_cell",
+          "version": "1.21.4",
+          "source_url": "https://static.crates.io/crates/once_cell/once_cell-1.21.4.crate",
+          "sha256": "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/once_cell-1.21.4/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/once_cell-1.21.4/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "Aleksey Kladov <aleksey.kladov@gmail.com>"
+          ],
+          "published_repository": "https://github.com/matklad/once_cell",
+          "published_homepage": null
+        },
+        {
+          "name": "outref",
+          "version": "0.5.2",
+          "source_url": "https://static.crates.io/crates/outref/outref-0.5.2.crate",
+          "sha256": "1a80800c0488c3a21695ea981a54918fbb37abf04f4d0720c453632255e2ff0e",
+          "declared_license": "MIT",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/outref-0.5.2/LICENSE"
+          ],
+          "published_authors": [],
+          "published_repository": "https://github.com/Nugine/outref",
+          "published_homepage": null
+        },
+        {
+          "name": "par-core",
+          "version": "2.0.0",
+          "source_url": "https://static.crates.io/crates/par-core/par-core-2.0.0.crate",
+          "sha256": "e96cbd21255b7fb29a5d51ef38a779b517a91abd59e2756c039583f43ef4c90f",
+          "declared_license": "Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/par-core-2.0.0/PUBLISHED-LICENSE-METADATA.json",
+            "required-notices/ddbase-LICENSE"
+          ],
+          "supplement": {
+            "url": "https://raw.githubusercontent.com/dudykr/ddbase/19f6487518dbebbc198346bfb979313ef457199e/LICENSE",
+            "sha256": "58d1e17ffe5109a7ae296caafcadfdbe6a7d176f0bc4ab01e12a689b0499d8bd",
+            "path": "required-notices/ddbase-LICENSE"
+          },
+          "published_authors": [
+            "\uac15\ub3d9\uc724 <kdy1997.dev@gmail.com>"
+          ],
+          "published_repository": "https://github.com/dudykr/ddbase.git",
+          "published_homepage": null
+        },
+        {
+          "name": "par-iter",
+          "version": "2.0.0",
+          "source_url": "https://static.crates.io/crates/par-iter/par-iter-2.0.0.crate",
+          "sha256": "3eae0176a010bb94b9a67f0eb9da0fd31410817d58850649c54f485124c9a71a",
+          "declared_license": "Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/par-iter-2.0.0/LICENSE"
+          ],
+          "published_authors": [],
+          "published_repository": "https://github.com/dudykr/ddbase.git",
+          "published_homepage": null
+        },
+        {
+          "name": "parking_lot",
+          "version": "0.12.5",
+          "source_url": "https://static.crates.io/crates/parking_lot/parking_lot-0.12.5.crate",
+          "sha256": "93857453250e3077bd71ff98b6a65ea6621a19bb0f559a85248955ac12c45a1a",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/parking_lot-0.12.5/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/parking_lot-0.12.5/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "Amanieu d'Antras <amanieu@gmail.com>"
+          ],
+          "published_repository": "https://github.com/Amanieu/parking_lot",
+          "published_homepage": null
+        },
+        {
+          "name": "parking_lot_core",
+          "version": "0.9.12",
+          "source_url": "https://static.crates.io/crates/parking_lot_core/parking_lot_core-0.9.12.crate",
+          "sha256": "2621685985a2ebf1c516881c026032ac7deafcda1a2c9b7850dc81e3dfcb64c1",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/parking_lot_core-0.9.12/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/parking_lot_core-0.9.12/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "Amanieu d'Antras <amanieu@gmail.com>"
+          ],
+          "published_repository": "https://github.com/Amanieu/parking_lot",
+          "published_homepage": null
+        },
+        {
+          "name": "pathdiff",
+          "version": "0.2.3",
+          "source_url": "https://static.crates.io/crates/pathdiff/pathdiff-0.2.3.crate",
+          "sha256": "df94ce210e5bc13cb6651479fa48d14f601d9858cfe0467f43ae157023b938d3",
+          "declared_license": "MIT/Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/pathdiff-0.2.3/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/pathdiff-0.2.3/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "Manish Goregaokar <manishsmail@gmail.com>"
+          ],
+          "published_repository": "https://github.com/Manishearth/pathdiff",
+          "published_homepage": null
+        },
+        {
+          "name": "percent-encoding",
+          "version": "2.3.2",
+          "source_url": "https://static.crates.io/crates/percent-encoding/percent-encoding-2.3.2.crate",
+          "sha256": "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/percent-encoding-2.3.2/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/percent-encoding-2.3.2/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "The rust-url developers"
+          ],
+          "published_repository": "https://github.com/servo/rust-url/",
+          "published_homepage": null
+        },
+        {
+          "name": "petgraph",
+          "version": "0.7.1",
+          "source_url": "https://static.crates.io/crates/petgraph/petgraph-0.7.1.crate",
+          "sha256": "3672b37090dbd86368a4145bc067582552b29c27377cad4e0a306c97f9bd7772",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/petgraph-0.7.1/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/petgraph-0.7.1/LICENSE-MIT",
+            "required-notices/Rollup-Rust-crates/petgraph-0.7.1/assets_LICENSE.md"
+          ],
+          "published_authors": [
+            "bluss",
+            "mitchmindtree"
+          ],
+          "published_repository": "https://github.com/petgraph/petgraph",
+          "published_homepage": null
+        },
+        {
+          "name": "phf",
+          "version": "0.11.3",
+          "source_url": "https://static.crates.io/crates/phf/phf-0.11.3.crate",
+          "sha256": "1fd6780a80ae0c52cc120a26a1a42c1ae51b247a253e4e06113d23d2c2edd078",
+          "declared_license": "MIT",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/phf-0.11.3/LICENSE"
+          ],
+          "published_authors": [
+            "Steven Fackler <sfackler@gmail.com>"
+          ],
+          "published_repository": "https://github.com/rust-phf/rust-phf",
+          "published_homepage": null
+        },
+        {
+          "name": "phf_generator",
+          "version": "0.11.3",
+          "source_url": "https://static.crates.io/crates/phf_generator/phf_generator-0.11.3.crate",
+          "sha256": "3c80231409c20246a13fddb31776fb942c38553c51e871f8cbd687a4cfb5843d",
+          "declared_license": "MIT",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/phf_generator-0.11.3/LICENSE"
+          ],
+          "published_authors": [
+            "Steven Fackler <sfackler@gmail.com>"
+          ],
+          "published_repository": "https://github.com/rust-phf/rust-phf",
+          "published_homepage": null
+        },
+        {
+          "name": "phf_macros",
+          "version": "0.11.3",
+          "source_url": "https://static.crates.io/crates/phf_macros/phf_macros-0.11.3.crate",
+          "sha256": "f84ac04429c13a7ff43785d75ad27569f2951ce0ffd30a3321230db2fc727216",
+          "declared_license": "MIT",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/phf_macros-0.11.3/LICENSE"
+          ],
+          "published_authors": [
+            "Steven Fackler <sfackler@gmail.com>"
+          ],
+          "published_repository": "https://github.com/rust-phf/rust-phf",
+          "published_homepage": null
+        },
+        {
+          "name": "phf_shared",
+          "version": "0.11.3",
+          "source_url": "https://static.crates.io/crates/phf_shared/phf_shared-0.11.3.crate",
+          "sha256": "67eabc2ef2a60eb7faa00097bd1ffdb5bd28e62bf39990626a582201b7a754e5",
+          "declared_license": "MIT",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/phf_shared-0.11.3/LICENSE"
+          ],
+          "published_authors": [
+            "Steven Fackler <sfackler@gmail.com>"
+          ],
+          "published_repository": "https://github.com/rust-phf/rust-phf",
+          "published_homepage": null
+        },
+        {
+          "name": "pin-project-lite",
+          "version": "0.2.17",
+          "source_url": "https://static.crates.io/crates/pin-project-lite/pin-project-lite-0.2.17.crate",
+          "sha256": "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd",
+          "declared_license": "Apache-2.0 OR MIT",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/pin-project-lite-0.2.17/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/pin-project-lite-0.2.17/LICENSE-MIT"
+          ],
+          "published_authors": [],
+          "published_repository": "https://github.com/taiki-e/pin-project-lite",
+          "published_homepage": null
+        },
+        {
+          "name": "potential_utf",
+          "version": "0.1.6",
+          "source_url": "https://static.crates.io/crates/potential_utf/potential_utf-0.1.6.crate",
+          "sha256": "d83eb9bc6d8e5cf568e7a1101d60ee05e81ed50ea106026f3d18deeb046d7661",
+          "declared_license": "Unicode-3.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/potential_utf-0.1.6/LICENSE"
+          ],
+          "published_authors": [
+            "The ICU4X Project Developers"
+          ],
+          "published_repository": "https://github.com/unicode-org/icu4x",
+          "published_homepage": "https://icu4x.unicode.org"
+        },
+        {
+          "name": "proc-macro2",
+          "version": "1.0.107",
+          "source_url": "https://static.crates.io/crates/proc-macro2/proc-macro2-1.0.107.crate",
+          "sha256": "985e7ec9bb745e6ce6535b544d84d6cd6f7ad8bd711c398938ae983b91a766d9",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/proc-macro2-1.0.107/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/proc-macro2-1.0.107/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "David Tolnay <dtolnay@gmail.com>",
+            "Alex Crichton <alex@alexcrichton.com>"
+          ],
+          "published_repository": "https://github.com/dtolnay/proc-macro2",
+          "published_homepage": null
+        },
+        {
+          "name": "psm",
+          "version": "0.1.32",
+          "source_url": "https://static.crates.io/crates/psm/psm-0.1.32.crate",
+          "sha256": "4dcd034599e63b970727f70d79e02d62390a4a84f7c6b827c27c46d5ac3fa622",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/psm-0.1.32/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/psm-0.1.32/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "Simonas Kazlauskas <psm@kazlauskas.me>"
+          ],
+          "published_repository": "https://github.com/rust-lang/stacker/",
+          "published_homepage": null
+        },
+        {
+          "name": "quote",
+          "version": "1.0.47",
+          "source_url": "https://static.crates.io/crates/quote/quote-1.0.47.crate",
+          "sha256": "1fbf4db142a473a8d80c26bbf18454ed458bf8d26c8219c331daecfdbd079001",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/quote-1.0.47/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/quote-1.0.47/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "David Tolnay <dtolnay@gmail.com>"
+          ],
+          "published_repository": "https://github.com/dtolnay/quote",
+          "published_homepage": null
+        },
+        {
+          "name": "radium",
+          "version": "0.7.0",
+          "source_url": "https://static.crates.io/crates/radium/radium-0.7.0.crate",
+          "sha256": "dc33ff2d4973d518d823d61aa239014831e521c75da58e3df4840d3f47749d09",
+          "declared_license": "MIT",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/radium-0.7.0/LICENSE.txt"
+          ],
+          "published_authors": [
+            "Nika Layzell <nika@thelayzells.com>",
+            "myrrlyn <self@myrrlyn.dev>"
+          ],
+          "published_repository": "https://github.com/bitvecto-rs/radium",
+          "published_homepage": "https://github.com/bitvecto-rs/radium"
+        },
+        {
+          "name": "radix_fmt",
+          "version": "1.0.0",
+          "source_url": "https://static.crates.io/crates/radix_fmt/radix_fmt-1.0.0.crate",
+          "sha256": "ce082a9940a7ace2ad4a8b7d0b1eac6aa378895f18be598230c5f2284ac05426",
+          "declared_license": "Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/radix_fmt-1.0.0/LICENSE"
+          ],
+          "published_authors": [
+            "F\u00e9lix <felix-dev@daudre-vignier.fr>"
+          ],
+          "published_repository": "https://gitlab.com/Boiethios/radix_fmt_rs",
+          "published_homepage": null
+        },
+        {
+          "name": "rand",
+          "version": "0.8.8",
+          "source_url": "https://static.crates.io/crates/rand/rand-0.8.8.crate",
+          "sha256": "e058c7de0b26af77780c769414d6257830bb240f3c38477dbc2c16e5f54d6d4c",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/rand-0.8.8/COPYRIGHT",
+            "required-notices/Rollup-Rust-crates/rand-0.8.8/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/rand-0.8.8/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "The Rand Project Developers",
+            "The Rust Project Developers"
+          ],
+          "published_repository": "https://github.com/rust-random/rand",
+          "published_homepage": "https://rust-random.github.io/book"
+        },
+        {
+          "name": "rand_core",
+          "version": "0.6.4",
+          "source_url": "https://static.crates.io/crates/rand_core/rand_core-0.6.4.crate",
+          "sha256": "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/rand_core-0.6.4/COPYRIGHT",
+            "required-notices/Rollup-Rust-crates/rand_core-0.6.4/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/rand_core-0.6.4/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "The Rand Project Developers",
+            "The Rust Project Developers"
+          ],
+          "published_repository": "https://github.com/rust-random/rand",
+          "published_homepage": "https://rust-random.github.io/book"
+        },
+        {
+          "name": "redox_syscall",
+          "version": "0.5.18",
+          "source_url": "https://static.crates.io/crates/redox_syscall/redox_syscall-0.5.18.crate",
+          "sha256": "ed2bf2547551a7053d6fdfafda3f938979645c44812fbfcda098faae3f1a362d",
+          "declared_license": "MIT",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/redox_syscall-0.5.18/LICENSE"
+          ],
+          "published_authors": [
+            "Jeremy Soller <jackpot51@gmail.com>"
+          ],
+          "published_repository": "https://gitlab.redox-os.org/redox-os/syscall",
+          "published_homepage": null
+        },
+        {
+          "name": "regex",
+          "version": "1.13.1",
+          "source_url": "https://static.crates.io/crates/regex/regex-1.13.1.crate",
+          "sha256": "f020237b6c8eed93db2e2cb53c00c60a8e1bc73da7d073199a1180401450218d",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/regex-1.13.1/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/regex-1.13.1/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "The Rust Project Developers",
+            "Andrew Gallant <jamslam@gmail.com>"
+          ],
+          "published_repository": "https://github.com/rust-lang/regex",
+          "published_homepage": "https://github.com/rust-lang/regex"
+        },
+        {
+          "name": "regex-automata",
+          "version": "0.4.18",
+          "source_url": "https://static.crates.io/crates/regex-automata/regex-automata-0.4.18.crate",
+          "sha256": "ad8553b9b26413251cbf30e620595c7a41b3887f03da04579c0e6b0d6a06b4b2",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/regex-automata-0.4.18/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/regex-automata-0.4.18/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "The Rust Project Developers",
+            "Andrew Gallant <jamslam@gmail.com>"
+          ],
+          "published_repository": "https://github.com/rust-lang/regex",
+          "published_homepage": "https://github.com/rust-lang/regex/tree/master/regex-automata"
+        },
+        {
+          "name": "regex-syntax",
+          "version": "0.8.11",
+          "source_url": "https://static.crates.io/crates/regex-syntax/regex-syntax-0.8.11.crate",
+          "sha256": "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/regex-syntax-0.8.11/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/regex-syntax-0.8.11/LICENSE-MIT",
+            "required-notices/Rollup-Rust-crates/regex-syntax-0.8.11/src_unicode_tables_LICENSE-UNICODE"
+          ],
+          "published_authors": [
+            "The Rust Project Developers",
+            "Andrew Gallant <jamslam@gmail.com>"
+          ],
+          "published_repository": "https://github.com/rust-lang/regex",
+          "published_homepage": "https://github.com/rust-lang/regex/tree/master/regex-syntax"
+        },
+        {
+          "name": "regress",
+          "version": "0.11.1",
+          "source_url": "https://static.crates.io/crates/regress/regress-0.11.1.crate",
+          "sha256": "158a764437582235e3501f683b93a0a6f8d825d04a789dbe5ed30b8799b8908a",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/regress-0.11.1/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/regress-0.11.1/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "ridiculousfish <corydoras@ridiculousfish.com>"
+          ],
+          "published_repository": "https://github.com/ridiculousfish/regress",
+          "published_homepage": null
+        },
+        {
+          "name": "rustc-hash",
+          "version": "2.1.3",
+          "source_url": "https://static.crates.io/crates/rustc-hash/rustc-hash-2.1.3.crate",
+          "sha256": "6b1e7f9a428571be2dc5bc0505c13fb6bf936822b894ec87abf8a08a4e51742d",
+          "declared_license": "Apache-2.0 OR MIT",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/rustc-hash-2.1.3/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/rustc-hash-2.1.3/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "The Rust Project Developers"
+          ],
+          "published_repository": "https://github.com/rust-lang/rustc-hash",
+          "published_homepage": null
+        },
+        {
+          "name": "rustversion",
+          "version": "1.0.23",
+          "source_url": "https://static.crates.io/crates/rustversion/rustversion-1.0.23.crate",
+          "sha256": "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/rustversion-1.0.23/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/rustversion-1.0.23/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "David Tolnay <dtolnay@gmail.com>"
+          ],
+          "published_repository": "https://github.com/dtolnay/rustversion",
+          "published_homepage": null
+        },
+        {
+          "name": "ryu",
+          "version": "1.0.23",
+          "source_url": "https://static.crates.io/crates/ryu/ryu-1.0.23.crate",
+          "sha256": "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f",
+          "declared_license": "Apache-2.0 OR BSL-1.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/ryu-1.0.23/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/ryu-1.0.23/LICENSE-BOOST"
+          ],
+          "published_authors": [
+            "David Tolnay <dtolnay@gmail.com>"
+          ],
+          "published_repository": "https://github.com/dtolnay/ryu",
+          "published_homepage": null
+        },
+        {
+          "name": "ryu-js",
+          "version": "1.0.3",
+          "source_url": "https://static.crates.io/crates/ryu-js/ryu-js-1.0.3.crate",
+          "sha256": "04d056b875a9d2e6cb9a61d127afee9ac5999b9f87bcb32079d1318e505be714",
+          "declared_license": "Apache-2.0 OR BSL-1.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/ryu-js-1.0.3/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/ryu-js-1.0.3/LICENSE-BOOST"
+          ],
+          "published_authors": [
+            "David Tolnay <dtolnay@gmail.com>",
+            "boa-dev"
+          ],
+          "published_repository": "https://github.com/boa-dev/ryu-js",
+          "published_homepage": null
+        },
+        {
+          "name": "scoped-tls",
+          "version": "1.0.1",
+          "source_url": "https://static.crates.io/crates/scoped-tls/scoped-tls-1.0.1.crate",
+          "sha256": "e1cf6437eb19a8f4a6cc0f7dca544973b0b78843adbfeb3683d1a94a0024a294",
+          "declared_license": "MIT/Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/scoped-tls-1.0.1/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/scoped-tls-1.0.1/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "Alex Crichton <alex@alexcrichton.com>"
+          ],
+          "published_repository": "https://github.com/alexcrichton/scoped-tls",
+          "published_homepage": "https://github.com/alexcrichton/scoped-tls"
+        },
+        {
+          "name": "scopeguard",
+          "version": "1.2.0",
+          "source_url": "https://static.crates.io/crates/scopeguard/scopeguard-1.2.0.crate",
+          "sha256": "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/scopeguard-1.2.0/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/scopeguard-1.2.0/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "bluss"
+          ],
+          "published_repository": "https://github.com/bluss/scopeguard",
+          "published_homepage": null
+        },
+        {
+          "name": "seq-macro",
+          "version": "0.3.6",
+          "source_url": "https://static.crates.io/crates/seq-macro/seq-macro-0.3.6.crate",
+          "sha256": "1bc711410fbe7399f390ca1c3b60ad0f53f80e95c5eb935e52268a0e2cd49acc",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/seq-macro-0.3.6/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/seq-macro-0.3.6/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "David Tolnay <dtolnay@gmail.com>"
+          ],
+          "published_repository": "https://github.com/dtolnay/seq-macro",
+          "published_homepage": null
+        },
+        {
+          "name": "serde",
+          "version": "1.0.229",
+          "source_url": "https://static.crates.io/crates/serde/serde-1.0.229.crate",
+          "sha256": "4148590afebada386688f18773da617792bf2ef03ffc1e4cbd2b1d45b023e0ba",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/serde-1.0.229/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/serde-1.0.229/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "Erick Tryzelaar <erick.tryzelaar@gmail.com>",
+            "David Tolnay <dtolnay@gmail.com>"
+          ],
+          "published_repository": "https://github.com/serde-rs/serde",
+          "published_homepage": "https://serde.rs"
+        },
+        {
+          "name": "serde_core",
+          "version": "1.0.229",
+          "source_url": "https://static.crates.io/crates/serde_core/serde_core-1.0.229.crate",
+          "sha256": "67dca2c9c51e58a4791a4b1ed58308b39c64224d349a935ab5039aa360942a48",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/serde_core-1.0.229/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/serde_core-1.0.229/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "Erick Tryzelaar <erick.tryzelaar@gmail.com>",
+            "David Tolnay <dtolnay@gmail.com>"
+          ],
+          "published_repository": "https://github.com/serde-rs/serde",
+          "published_homepage": "https://serde.rs"
+        },
+        {
+          "name": "serde_derive",
+          "version": "1.0.229",
+          "source_url": "https://static.crates.io/crates/serde_derive/serde_derive-1.0.229.crate",
+          "sha256": "e7a5d71263a5a7d47b41f6b3f06ba276f10cc18b0931f1799f710578e2309348",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/serde_derive-1.0.229/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/serde_derive-1.0.229/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "Erick Tryzelaar <erick.tryzelaar@gmail.com>",
+            "David Tolnay <dtolnay@gmail.com>"
+          ],
+          "published_repository": "https://github.com/serde-rs/serde",
+          "published_homepage": "https://serde.rs"
+        },
+        {
+          "name": "serde_json",
+          "version": "1.0.154",
+          "source_url": "https://static.crates.io/crates/serde_json/serde_json-1.0.154.crate",
+          "sha256": "e7e9cc8b1b85264074fbcc02a88680c4096b1e47df8f739dceb03bf482f04bd6",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/serde_json-1.0.154/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/serde_json-1.0.154/LICENSE-MIT"
+          ],
+          "published_authors": [],
+          "published_repository": "https://github.com/serde-rs/json",
+          "published_homepage": null
+        },
+        {
+          "name": "shlex",
+          "version": "2.0.1",
+          "source_url": "https://static.crates.io/crates/shlex/shlex-2.0.1.crate",
+          "sha256": "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/shlex-2.0.1/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/shlex-2.0.1/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "comex <comexk@gmail.com>",
+            "Fenhl <fenhl@fenhl.net>",
+            "Adrian Taylor <adetaylor@chromium.org>",
+            "Alex Touchet <alextouchet@outlook.com>",
+            "Daniel Parks <dp+git@oxidized.org>",
+            "Garrett Berg <googberg@gmail.com>"
+          ],
+          "published_repository": "https://github.com/comex/rust-shlex",
+          "published_homepage": null
+        },
+        {
+          "name": "siphasher",
+          "version": "1.0.4",
+          "source_url": "https://static.crates.io/crates/siphasher/siphasher-1.0.4.crate",
+          "sha256": "33f4fe9184a62d842c9ef383018f3306d8ba224fd9d836f56d7288308847c256",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/siphasher-1.0.4/COPYING",
+            "required-notices/Rollup-Rust-crates/siphasher-1.0.4/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/siphasher-1.0.4/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "Frank Denis <github@pureftpd.org>"
+          ],
+          "published_repository": "https://github.com/jedisct1/rust-siphash",
+          "published_homepage": "https://docs.rs/siphasher"
+        },
+        {
+          "name": "slab",
+          "version": "0.4.12",
+          "source_url": "https://static.crates.io/crates/slab/slab-0.4.12.crate",
+          "sha256": "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5",
+          "declared_license": "MIT",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/slab-0.4.12/LICENSE"
+          ],
+          "published_authors": [
+            "Carl Lerche <me@carllerche.com>"
+          ],
+          "published_repository": "https://github.com/tokio-rs/slab",
+          "published_homepage": null
+        },
+        {
+          "name": "smallvec",
+          "version": "1.16.4",
+          "source_url": "https://static.crates.io/crates/smallvec/smallvec-1.16.4.crate",
+          "sha256": "d0d5d4b1981b8bbbb7aed204cae5726d683d5d6ac7e74ec54122ea28f315e7c8",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/smallvec-1.16.4/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/smallvec-1.16.4/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "The Servo Project Developers"
+          ],
+          "published_repository": "https://github.com/servo/rust-smallvec",
+          "published_homepage": null
+        },
+        {
+          "name": "stable_deref_trait",
+          "version": "1.2.1",
+          "source_url": "https://static.crates.io/crates/stable_deref_trait/stable_deref_trait-1.2.1.crate",
+          "sha256": "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/stable_deref_trait-1.2.1/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/stable_deref_trait-1.2.1/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "Robert Grosse <n210241048576@gmail.com>"
+          ],
+          "published_repository": "https://github.com/storyyeller/stable_deref_trait",
+          "published_homepage": null
+        },
+        {
+          "name": "stacker",
+          "version": "0.1.25",
+          "source_url": "https://static.crates.io/crates/stacker/stacker-0.1.25.crate",
+          "sha256": "707f49d46706bacf8a2b00d51dace3f9de527c13eec3778f570c411f89e69967",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/stacker-0.1.25/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/stacker-0.1.25/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "Alex Crichton <alex@alexcrichton.com>",
+            "Simonas Kazlauskas <stacker@kazlauskas.me>"
+          ],
+          "published_repository": "https://github.com/rust-lang/stacker",
+          "published_homepage": "https://github.com/rust-lang/stacker"
+        },
+        {
+          "name": "static_assertions",
+          "version": "1.1.0",
+          "source_url": "https://static.crates.io/crates/static_assertions/static_assertions-1.1.0.crate",
+          "sha256": "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/static_assertions-1.1.0/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/static_assertions-1.1.0/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "Nikolai Vazquez"
+          ],
+          "published_repository": "https://github.com/nvzqz/static-assertions-rs",
+          "published_homepage": "https://github.com/nvzqz/static-assertions-rs"
+        },
+        {
+          "name": "string_enum",
+          "version": "1.0.2",
+          "source_url": "https://static.crates.io/crates/string_enum/string_enum-1.0.2.crate",
+          "sha256": "ae36a4951ca7bd1cfd991c241584a9824a70f6aff1e7d4f693fb3f2465e4030e",
+          "declared_license": "Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/string_enum-1.0.2/PUBLISHED-LICENSE-METADATA.json",
+            "required-notices/swc-LICENSE"
+          ],
+          "supplement": {
+            "url": "https://raw.githubusercontent.com/swc-project/swc/dc9d310e3c8bb63312a9a5ec6803d585034ecb14/LICENSE",
+            "sha256": "d96eba1f1881334d50ffc144276dfa98e147a415e7c591ecdfcb81680361dc91",
+            "path": "required-notices/swc-LICENSE"
+          },
+          "source_note": "Published SWC vcs hashes were not publicly resolvable. Exact crate SPDX Apache-2.0 declaration/author metadata is authoritative for the shipped archive; official project Apache terms are pinned separately, not represented as the same source revision.",
+          "published_authors": [
+            "\uac15\ub3d9\uc724 <kdy1997.dev@gmail.com>"
+          ],
+          "published_repository": "https://github.com/swc-project/swc.git",
+          "published_homepage": null
+        },
+        {
+          "name": "swc_allocator",
+          "version": "5.0.1",
+          "source_url": "https://static.crates.io/crates/swc_allocator/swc_allocator-5.0.1.crate",
+          "sha256": "0f2e587c2b183333ba3547a916d180b7caaaa90610f1be5699710837bb635b8a",
+          "declared_license": "Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/swc_allocator-5.0.1/PUBLISHED-LICENSE-METADATA.json",
+            "required-notices/swc-LICENSE"
+          ],
+          "supplement": {
+            "url": "https://raw.githubusercontent.com/swc-project/swc/dc9d310e3c8bb63312a9a5ec6803d585034ecb14/LICENSE",
+            "sha256": "d96eba1f1881334d50ffc144276dfa98e147a415e7c591ecdfcb81680361dc91",
+            "path": "required-notices/swc-LICENSE"
+          },
+          "source_note": "Published SWC vcs hashes were not publicly resolvable. Exact crate SPDX Apache-2.0 declaration/author metadata is authoritative for the shipped archive; official project Apache terms are pinned separately, not represented as the same source revision.",
+          "published_authors": [
+            "\uac15\ub3d9\uc724 <kdy1997.dev@gmail.com>"
+          ],
+          "published_repository": "https://github.com/swc-project/swc.git",
+          "published_homepage": null
+        },
+        {
+          "name": "swc_atoms",
+          "version": "10.0.1",
+          "source_url": "https://static.crates.io/crates/swc_atoms/swc_atoms-10.0.1.crate",
+          "sha256": "50bb5f0ddb3d05cf1d46368de41dd82db7401fdd53f4b8271612be91573308a3",
+          "declared_license": "Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/swc_atoms-10.0.1/PUBLISHED-LICENSE-METADATA.json",
+            "required-notices/swc-LICENSE"
+          ],
+          "supplement": {
+            "url": "https://raw.githubusercontent.com/swc-project/swc/dc9d310e3c8bb63312a9a5ec6803d585034ecb14/LICENSE",
+            "sha256": "d96eba1f1881334d50ffc144276dfa98e147a415e7c591ecdfcb81680361dc91",
+            "path": "required-notices/swc-LICENSE"
+          },
+          "source_note": "Published SWC vcs hashes were not publicly resolvable. Exact crate SPDX Apache-2.0 declaration/author metadata is authoritative for the shipped archive; official project Apache terms are pinned separately, not represented as the same source revision.",
+          "published_authors": [
+            "\uac15\ub3d9\uc724 <kdy1997.dev@gmail.com>"
+          ],
+          "published_repository": "https://github.com/swc-project/swc.git",
+          "published_homepage": null
+        },
+        {
+          "name": "swc_common",
+          "version": "27.0.0",
+          "source_url": "https://static.crates.io/crates/swc_common/swc_common-27.0.0.crate",
+          "sha256": "1953f0e786c305582e21ef5a093cfe16cfeaa4231f56f780db82e4952b7ef5b2",
+          "declared_license": "Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/swc_common-27.0.0/PUBLISHED-LICENSE-METADATA.json",
+            "required-notices/swc-LICENSE"
+          ],
+          "supplement": {
+            "url": "https://raw.githubusercontent.com/swc-project/swc/dc9d310e3c8bb63312a9a5ec6803d585034ecb14/LICENSE",
+            "sha256": "d96eba1f1881334d50ffc144276dfa98e147a415e7c591ecdfcb81680361dc91",
+            "path": "required-notices/swc-LICENSE"
+          },
+          "source_note": "Published SWC vcs hashes were not publicly resolvable. Exact crate SPDX Apache-2.0 declaration/author metadata is authoritative for the shipped archive; official project Apache terms are pinned separately, not represented as the same source revision.",
+          "published_authors": [
+            "\uac15\ub3d9\uc724 <kdy1997.dev@gmail.com>"
+          ],
+          "published_repository": "https://github.com/swc-project/swc.git",
+          "published_homepage": null
+        },
+        {
+          "name": "swc_compiler_base",
+          "version": "67.0.0",
+          "source_url": "https://static.crates.io/crates/swc_compiler_base/swc_compiler_base-67.0.0.crate",
+          "sha256": "282a86e0d04822c445b00567d4fcdfca4ff9afdd5a428051b07e27237136eb9e",
+          "declared_license": "Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/swc_compiler_base-67.0.0/PUBLISHED-LICENSE-METADATA.json",
+            "required-notices/swc-LICENSE"
+          ],
+          "supplement": {
+            "url": "https://raw.githubusercontent.com/swc-project/swc/dc9d310e3c8bb63312a9a5ec6803d585034ecb14/LICENSE",
+            "sha256": "d96eba1f1881334d50ffc144276dfa98e147a415e7c591ecdfcb81680361dc91",
+            "path": "required-notices/swc-LICENSE"
+          },
+          "source_note": "Published SWC vcs hashes were not publicly resolvable. Exact crate SPDX Apache-2.0 declaration/author metadata is authoritative for the shipped archive; official project Apache terms are pinned separately, not represented as the same source revision.",
+          "published_authors": [
+            "\uac15\ub3d9\uc724 <kdy1997.dev@gmail.com>"
+          ],
+          "published_repository": "https://github.com/swc-project/swc.git",
+          "published_homepage": null
+        },
+        {
+          "name": "swc_config",
+          "version": "6.0.1",
+          "source_url": "https://static.crates.io/crates/swc_config/swc_config-6.0.1.crate",
+          "sha256": "bf6924ef781f1f8af3dfdac9674e94f0ab0c20af6b88b2e116af57b1e755b591",
+          "declared_license": "Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/swc_config-6.0.1/PUBLISHED-LICENSE-METADATA.json",
+            "required-notices/swc-LICENSE"
+          ],
+          "supplement": {
+            "url": "https://raw.githubusercontent.com/swc-project/swc/dc9d310e3c8bb63312a9a5ec6803d585034ecb14/LICENSE",
+            "sha256": "d96eba1f1881334d50ffc144276dfa98e147a415e7c591ecdfcb81680361dc91",
+            "path": "required-notices/swc-LICENSE"
+          },
+          "source_note": "Published SWC vcs hashes were not publicly resolvable. Exact crate SPDX Apache-2.0 declaration/author metadata is authoritative for the shipped archive; official project Apache terms are pinned separately, not represented as the same source revision.",
+          "published_authors": [
+            "\uac15\ub3d9\uc724 <kdy1997.dev@gmail.com>"
+          ],
+          "published_repository": "https://github.com/swc-project/swc.git",
+          "published_homepage": null
+        },
+        {
+          "name": "swc_config_macro",
+          "version": "1.0.1",
+          "source_url": "https://static.crates.io/crates/swc_config_macro/swc_config_macro-1.0.1.crate",
+          "sha256": "7b416e8ce6de17dc5ea496e10c7012b35bbc0e3fef38d2e065eed936490db0b3",
+          "declared_license": "Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/swc_config_macro-1.0.1/PUBLISHED-LICENSE-METADATA.json",
+            "required-notices/swc-LICENSE"
+          ],
+          "supplement": {
+            "url": "https://raw.githubusercontent.com/swc-project/swc/dc9d310e3c8bb63312a9a5ec6803d585034ecb14/LICENSE",
+            "sha256": "d96eba1f1881334d50ffc144276dfa98e147a415e7c591ecdfcb81680361dc91",
+            "path": "required-notices/swc-LICENSE"
+          },
+          "source_note": "Published SWC vcs hashes were not publicly resolvable. Exact crate SPDX Apache-2.0 declaration/author metadata is authoritative for the shipped archive; official project Apache terms are pinned separately, not represented as the same source revision.",
+          "published_authors": [
+            "\uac15\ub3d9\uc724 <kdy1997.dev@gmail.com>"
+          ],
+          "published_repository": "https://github.com/swc-project/swc.git",
+          "published_homepage": null
+        },
+        {
+          "name": "swc_ecma_ast",
+          "version": "30.0.2",
+          "source_url": "https://static.crates.io/crates/swc_ecma_ast/swc_ecma_ast-30.0.2.crate",
+          "sha256": "86bef17958307218ffee375556423bd47a82deb8f6ef8b54bc5a4086958cd1d1",
+          "declared_license": "Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/swc_ecma_ast-30.0.2/PUBLISHED-LICENSE-METADATA.json",
+            "required-notices/swc-LICENSE"
+          ],
+          "supplement": {
+            "url": "https://raw.githubusercontent.com/swc-project/swc/dc9d310e3c8bb63312a9a5ec6803d585034ecb14/LICENSE",
+            "sha256": "d96eba1f1881334d50ffc144276dfa98e147a415e7c591ecdfcb81680361dc91",
+            "path": "required-notices/swc-LICENSE"
+          },
+          "source_note": "Published SWC vcs hashes were not publicly resolvable. Exact crate SPDX Apache-2.0 declaration/author metadata is authoritative for the shipped archive; official project Apache terms are pinned separately, not represented as the same source revision.",
+          "published_authors": [
+            "\uac15\ub3d9\uc724 <kdy1997.dev@gmail.com>"
+          ],
+          "published_repository": "https://github.com/swc-project/swc.git",
+          "published_homepage": null
+        },
+        {
+          "name": "swc_ecma_codegen",
+          "version": "33.0.0",
+          "source_url": "https://static.crates.io/crates/swc_ecma_codegen/swc_ecma_codegen-33.0.0.crate",
+          "sha256": "4bb171b30bb7f179894e985085be5561cfef4b035a58d4ea51a2310570d4d9bc",
+          "declared_license": "Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/swc_ecma_codegen-33.0.0/PUBLISHED-LICENSE-METADATA.json",
+            "required-notices/swc-LICENSE"
+          ],
+          "supplement": {
+            "url": "https://raw.githubusercontent.com/swc-project/swc/dc9d310e3c8bb63312a9a5ec6803d585034ecb14/LICENSE",
+            "sha256": "d96eba1f1881334d50ffc144276dfa98e147a415e7c591ecdfcb81680361dc91",
+            "path": "required-notices/swc-LICENSE"
+          },
+          "source_note": "Published SWC vcs hashes were not publicly resolvable. Exact crate SPDX Apache-2.0 declaration/author metadata is authoritative for the shipped archive; official project Apache terms are pinned separately, not represented as the same source revision.",
+          "published_authors": [
+            "\uac15\ub3d9\uc724 <kdy1997.dev@gmail.com>"
+          ],
+          "published_repository": "https://github.com/swc-project/swc.git",
+          "published_homepage": null
+        },
+        {
+          "name": "swc_ecma_codegen_macros",
+          "version": "2.0.2",
+          "source_url": "https://static.crates.io/crates/swc_ecma_codegen_macros/swc_ecma_codegen_macros-2.0.2.crate",
+          "sha256": "e276dc62c0a2625a560397827989c82a93fd545fcf6f7faec0935a82cc4ddbb8",
+          "declared_license": "Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/swc_ecma_codegen_macros-2.0.2/PUBLISHED-LICENSE-METADATA.json",
+            "required-notices/swc-LICENSE"
+          ],
+          "supplement": {
+            "url": "https://raw.githubusercontent.com/swc-project/swc/dc9d310e3c8bb63312a9a5ec6803d585034ecb14/LICENSE",
+            "sha256": "d96eba1f1881334d50ffc144276dfa98e147a415e7c591ecdfcb81680361dc91",
+            "path": "required-notices/swc-LICENSE"
+          },
+          "source_note": "Published SWC vcs hashes were not publicly resolvable. Exact crate SPDX Apache-2.0 declaration/author metadata is authoritative for the shipped archive; official project Apache terms are pinned separately, not represented as the same source revision.",
+          "published_authors": [
+            "\uac15\ub3d9\uc724 <kdy1997.dev@gmail.com>"
+          ],
+          "published_repository": "https://github.com/swc-project/swc.git",
+          "published_homepage": null
+        },
+        {
+          "name": "swc_ecma_hooks",
+          "version": "2.0.0",
+          "source_url": "https://static.crates.io/crates/swc_ecma_hooks/swc_ecma_hooks-2.0.0.crate",
+          "sha256": "af2927f285c88c51f7fed0a07316389ca1311a02761fbd31c0f3d29d53774a1a",
+          "declared_license": "Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/swc_ecma_hooks-2.0.0/PUBLISHED-LICENSE-METADATA.json",
+            "required-notices/swc-LICENSE"
+          ],
+          "supplement": {
+            "url": "https://raw.githubusercontent.com/swc-project/swc/dc9d310e3c8bb63312a9a5ec6803d585034ecb14/LICENSE",
+            "sha256": "d96eba1f1881334d50ffc144276dfa98e147a415e7c591ecdfcb81680361dc91",
+            "path": "required-notices/swc-LICENSE"
+          },
+          "source_note": "Published SWC vcs hashes were not publicly resolvable. Exact crate SPDX Apache-2.0 declaration/author metadata is authoritative for the shipped archive; official project Apache terms are pinned separately, not represented as the same source revision.",
+          "published_authors": [
+            "\uac15\ub3d9\uc724 <kdy1997.dev@gmail.com>"
+          ],
+          "published_repository": "https://github.com/swc-project/swc.git",
+          "published_homepage": null
+        },
+        {
+          "name": "swc_ecma_minifier",
+          "version": "64.0.3",
+          "source_url": "https://static.crates.io/crates/swc_ecma_minifier/swc_ecma_minifier-64.0.3.crate",
+          "sha256": "635735a1a72b48a6c16f5e9e688c04cc156df460f347ff6e5de7786da3e62803",
+          "declared_license": "Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/swc_ecma_minifier-64.0.3/PUBLISHED-LICENSE-METADATA.json",
+            "required-notices/swc-LICENSE"
+          ],
+          "supplement": {
+            "url": "https://raw.githubusercontent.com/swc-project/swc/dc9d310e3c8bb63312a9a5ec6803d585034ecb14/LICENSE",
+            "sha256": "d96eba1f1881334d50ffc144276dfa98e147a415e7c591ecdfcb81680361dc91",
+            "path": "required-notices/swc-LICENSE"
+          },
+          "source_note": "Published SWC vcs hashes were not publicly resolvable. Exact crate SPDX Apache-2.0 declaration/author metadata is authoritative for the shipped archive; official project Apache terms are pinned separately, not represented as the same source revision.",
+          "published_authors": [
+            "\uac15\ub3d9\uc724 <kdy1997.dev@gmail.com>"
+          ],
+          "published_repository": "https://github.com/swc-project/swc.git",
+          "published_homepage": null
+        },
+        {
+          "name": "swc_ecma_parser",
+          "version": "47.0.0",
+          "source_url": "https://static.crates.io/crates/swc_ecma_parser/swc_ecma_parser-47.0.0.crate",
+          "sha256": "7ad049339465686a7526cba8e355a13f7422a66dd05f3e0887f33fed84fba69a",
+          "declared_license": "Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/swc_ecma_parser-47.0.0/PUBLISHED-LICENSE-METADATA.json",
+            "required-notices/swc-LICENSE"
+          ],
+          "supplement": {
+            "url": "https://raw.githubusercontent.com/swc-project/swc/dc9d310e3c8bb63312a9a5ec6803d585034ecb14/LICENSE",
+            "sha256": "d96eba1f1881334d50ffc144276dfa98e147a415e7c591ecdfcb81680361dc91",
+            "path": "required-notices/swc-LICENSE"
+          },
+          "source_note": "Published SWC vcs hashes were not publicly resolvable. Exact crate SPDX Apache-2.0 declaration/author metadata is authoritative for the shipped archive; official project Apache terms are pinned separately, not represented as the same source revision.",
+          "published_authors": [
+            "\uac15\ub3d9\uc724 <kdy1997.dev@gmail.com>"
+          ],
+          "published_repository": "https://github.com/swc-project/swc.git",
+          "published_homepage": null
+        },
+        {
+          "name": "swc_ecma_transforms_base",
+          "version": "51.0.1",
+          "source_url": "https://static.crates.io/crates/swc_ecma_transforms_base/swc_ecma_transforms_base-51.0.1.crate",
+          "sha256": "dc5dc7a85486a27483a9eb19737fd91cc31f74409e896ff950df522d5ce6179c",
+          "declared_license": "Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/swc_ecma_transforms_base-51.0.1/PUBLISHED-LICENSE-METADATA.json",
+            "required-notices/swc-LICENSE"
+          ],
+          "supplement": {
+            "url": "https://raw.githubusercontent.com/swc-project/swc/dc9d310e3c8bb63312a9a5ec6803d585034ecb14/LICENSE",
+            "sha256": "d96eba1f1881334d50ffc144276dfa98e147a415e7c591ecdfcb81680361dc91",
+            "path": "required-notices/swc-LICENSE"
+          },
+          "source_note": "Published SWC vcs hashes were not publicly resolvable. Exact crate SPDX Apache-2.0 declaration/author metadata is authoritative for the shipped archive; official project Apache terms are pinned separately, not represented as the same source revision.",
+          "published_authors": [
+            "\uac15\ub3d9\uc724 <kdy1997.dev@gmail.com>"
+          ],
+          "published_repository": "https://github.com/swc-project/swc.git",
+          "published_homepage": null
+        },
+        {
+          "name": "swc_ecma_transforms_optimization",
+          "version": "54.0.1",
+          "source_url": "https://static.crates.io/crates/swc_ecma_transforms_optimization/swc_ecma_transforms_optimization-54.0.1.crate",
+          "sha256": "64c11dd8ba1393d4636cf4a7cd9697927f06957acdf78f663ccd97129db91245",
+          "declared_license": "Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/swc_ecma_transforms_optimization-54.0.1/PUBLISHED-LICENSE-METADATA.json",
+            "required-notices/swc-LICENSE"
+          ],
+          "supplement": {
+            "url": "https://raw.githubusercontent.com/swc-project/swc/dc9d310e3c8bb63312a9a5ec6803d585034ecb14/LICENSE",
+            "sha256": "d96eba1f1881334d50ffc144276dfa98e147a415e7c591ecdfcb81680361dc91",
+            "path": "required-notices/swc-LICENSE"
+          },
+          "source_note": "Published SWC vcs hashes were not publicly resolvable. Exact crate SPDX Apache-2.0 declaration/author metadata is authoritative for the shipped archive; official project Apache terms are pinned separately, not represented as the same source revision.",
+          "published_authors": [
+            "\uac15\ub3d9\uc724 <kdy1997.dev@gmail.com>"
+          ],
+          "published_repository": "https://github.com/swc-project/swc.git",
+          "published_homepage": null
+        },
+        {
+          "name": "swc_ecma_utils",
+          "version": "36.1.0",
+          "source_url": "https://static.crates.io/crates/swc_ecma_utils/swc_ecma_utils-36.1.0.crate",
+          "sha256": "b59b32185a6e5dabfc087ab27fbab048f64dfd73e8290aa339a4aaffcb8fb439",
+          "declared_license": "Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/swc_ecma_utils-36.1.0/PUBLISHED-LICENSE-METADATA.json",
+            "required-notices/swc-LICENSE"
+          ],
+          "supplement": {
+            "url": "https://raw.githubusercontent.com/swc-project/swc/dc9d310e3c8bb63312a9a5ec6803d585034ecb14/LICENSE",
+            "sha256": "d96eba1f1881334d50ffc144276dfa98e147a415e7c591ecdfcb81680361dc91",
+            "path": "required-notices/swc-LICENSE"
+          },
+          "source_note": "Published SWC vcs hashes were not publicly resolvable. Exact crate SPDX Apache-2.0 declaration/author metadata is authoritative for the shipped archive; official project Apache terms are pinned separately, not represented as the same source revision.",
+          "published_authors": [
+            "\uac15\ub3d9\uc724 <kdy1997.dev@gmail.com>"
+          ],
+          "published_repository": "https://github.com/swc-project/swc.git",
+          "published_homepage": null
+        },
+        {
+          "name": "swc_ecma_visit",
+          "version": "30.0.0",
+          "source_url": "https://static.crates.io/crates/swc_ecma_visit/swc_ecma_visit-30.0.0.crate",
+          "sha256": "bc14fd3354020d23d7d4bbe37136c01f9887e84f106967e965ea2c03c002b6ea",
+          "declared_license": "Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/swc_ecma_visit-30.0.0/PUBLISHED-LICENSE-METADATA.json",
+            "required-notices/swc-LICENSE"
+          ],
+          "supplement": {
+            "url": "https://raw.githubusercontent.com/swc-project/swc/dc9d310e3c8bb63312a9a5ec6803d585034ecb14/LICENSE",
+            "sha256": "d96eba1f1881334d50ffc144276dfa98e147a415e7c591ecdfcb81680361dc91",
+            "path": "required-notices/swc-LICENSE"
+          },
+          "source_note": "Published SWC vcs hashes were not publicly resolvable. Exact crate SPDX Apache-2.0 declaration/author metadata is authoritative for the shipped archive; official project Apache terms are pinned separately, not represented as the same source revision.",
+          "published_authors": [
+            "\uac15\ub3d9\uc724 <kdy1997.dev@gmail.com>"
+          ],
+          "published_repository": "https://github.com/swc-project/swc.git",
+          "published_homepage": null
+        },
+        {
+          "name": "swc_eq_ignore_macros",
+          "version": "1.0.1",
+          "source_url": "https://static.crates.io/crates/swc_eq_ignore_macros/swc_eq_ignore_macros-1.0.1.crate",
+          "sha256": "c16ce73424a6316e95e09065ba6a207eba7765496fed113702278b7711d4b632",
+          "declared_license": "Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/swc_eq_ignore_macros-1.0.1/PUBLISHED-LICENSE-METADATA.json",
+            "required-notices/swc-LICENSE"
+          ],
+          "supplement": {
+            "url": "https://raw.githubusercontent.com/swc-project/swc/dc9d310e3c8bb63312a9a5ec6803d585034ecb14/LICENSE",
+            "sha256": "d96eba1f1881334d50ffc144276dfa98e147a415e7c591ecdfcb81680361dc91",
+            "path": "required-notices/swc-LICENSE"
+          },
+          "source_note": "Published SWC vcs hashes were not publicly resolvable. Exact crate SPDX Apache-2.0 declaration/author metadata is authoritative for the shipped archive; official project Apache terms are pinned separately, not represented as the same source revision.",
+          "published_authors": [
+            "\uac15\ub3d9\uc724 <kdy1@dudy.kr>"
+          ],
+          "published_repository": "https://github.com/swc-project/swc.git",
+          "published_homepage": null
+        },
+        {
+          "name": "swc_macros_common",
+          "version": "1.0.1",
+          "source_url": "https://static.crates.io/crates/swc_macros_common/swc_macros_common-1.0.1.crate",
+          "sha256": "aae1efbaa74943dc5ad2a2fb16cbd78b77d7e4d63188f3c5b4df2b4dcd2faaae",
+          "declared_license": "Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/swc_macros_common-1.0.1/PUBLISHED-LICENSE-METADATA.json",
+            "required-notices/swc-LICENSE"
+          ],
+          "supplement": {
+            "url": "https://raw.githubusercontent.com/swc-project/swc/dc9d310e3c8bb63312a9a5ec6803d585034ecb14/LICENSE",
+            "sha256": "d96eba1f1881334d50ffc144276dfa98e147a415e7c591ecdfcb81680361dc91",
+            "path": "required-notices/swc-LICENSE"
+          },
+          "source_note": "Published SWC vcs hashes were not publicly resolvable. Exact crate SPDX Apache-2.0 declaration/author metadata is authoritative for the shipped archive; official project Apache terms are pinned separately, not represented as the same source revision.",
+          "published_authors": [
+            "\uac15\ub3d9\uc724 <kdy1997.dev@gmail.com>"
+          ],
+          "published_repository": "https://github.com/swc-project/swc.git",
+          "published_homepage": null
+        },
+        {
+          "name": "swc_sourcemap",
+          "version": "10.0.3",
+          "source_url": "https://static.crates.io/crates/swc_sourcemap/swc_sourcemap-10.0.3.crate",
+          "sha256": "df9ce7c46dc9730284761c88b34d15a8cfbaf40884705f3deec65b9493765ac8",
+          "declared_license": "BSD-3-Clause",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/swc_sourcemap-10.0.3/PUBLISHED-LICENSE-METADATA.json",
+            "required-notices/swc-sourcemap-LICENSE"
+          ],
+          "supplement": {
+            "url": "https://raw.githubusercontent.com/swc-project/swc-sourcemap/64fcb47c16547d40fb37bbe4d8790b520716c741/LICENSE",
+            "sha256": "7516e1cf340213f60d96bca77bb012882dbf80e7cca5922c914174f605d9ef71",
+            "path": "required-notices/swc-sourcemap-LICENSE"
+          },
+          "published_authors": [
+            "Sentry <hello@sentry.io>",
+            "swc-project <https://swc.rs>"
+          ],
+          "published_repository": "https://github.com/swc-project/swc.git",
+          "published_homepage": "https://github.com/swc-project/swc-sourcemap"
+        },
+        {
+          "name": "swc_visit",
+          "version": "2.0.2",
+          "source_url": "https://static.crates.io/crates/swc_visit/swc_visit-2.0.2.crate",
+          "sha256": "e7df72a1be54e379864cebf04f26abb4d7ee637977f62f8ec8387233f7a27e88",
+          "declared_license": "Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/swc_visit-2.0.2/PUBLISHED-LICENSE-METADATA.json",
+            "required-notices/swc-LICENSE"
+          ],
+          "supplement": {
+            "url": "https://raw.githubusercontent.com/swc-project/swc/dc9d310e3c8bb63312a9a5ec6803d585034ecb14/LICENSE",
+            "sha256": "d96eba1f1881334d50ffc144276dfa98e147a415e7c591ecdfcb81680361dc91",
+            "path": "required-notices/swc-LICENSE"
+          },
+          "source_note": "Published SWC vcs hashes were not publicly resolvable. Exact crate SPDX Apache-2.0 declaration/author metadata is authoritative for the shipped archive; official project Apache terms are pinned separately, not represented as the same source revision.",
+          "published_authors": [
+            "\uac15\ub3d9\uc724 <kdy1997.dev@gmail.com>"
+          ],
+          "published_repository": "https://github.com/swc-project/swc.git",
+          "published_homepage": null
+        },
+        {
+          "name": "syn",
+          "version": "2.0.119",
+          "source_url": "https://static.crates.io/crates/syn/syn-2.0.119.crate",
+          "sha256": "872831b642d1a07999a962a351ed35b955ea2cfc8f3862091e2a240a84f17297",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/syn-2.0.119/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/syn-2.0.119/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "David Tolnay <dtolnay@gmail.com>"
+          ],
+          "published_repository": "https://github.com/dtolnay/syn",
+          "published_homepage": null
+        },
+        {
+          "name": "syn",
+          "version": "3.0.9",
+          "source_url": "https://static.crates.io/crates/syn/syn-3.0.9.crate",
+          "sha256": "d78c8dee4c7bf0e14673097256fed6142ce9d3b85a408189d07482442145823b",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/syn-3.0.9/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/syn-3.0.9/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "David Tolnay <dtolnay@gmail.com>"
+          ],
+          "published_repository": "https://github.com/dtolnay/syn",
+          "published_homepage": null
+        },
+        {
+          "name": "synstructure",
+          "version": "0.14.0",
+          "source_url": "https://static.crates.io/crates/synstructure/synstructure-0.14.0.crate",
+          "sha256": "901704edd0dfe137f1987838ee4f259e4e063c31371bdb423f7ae38ec6f77f02",
+          "declared_license": "MIT",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/synstructure-0.14.0/LICENSE"
+          ],
+          "published_authors": [
+            "Nika Layzell <nika@thelayzells.com>"
+          ],
+          "published_repository": "https://github.com/mystor/synstructure",
+          "published_homepage": null
+        },
+        {
+          "name": "tap",
+          "version": "1.0.1",
+          "source_url": "https://static.crates.io/crates/tap/tap-1.0.1.crate",
+          "sha256": "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369",
+          "declared_license": "MIT",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/tap-1.0.1/LICENSE.txt"
+          ],
+          "published_authors": [
+            "Elliott Linder <elliott.darfink@gmail.com>",
+            "myrrlyn <self@myrrlyn.dev>"
+          ],
+          "published_repository": "https://github.com/myrrlyn/tap",
+          "published_homepage": "https://github.com/myrrlyn/tap"
+        },
+        {
+          "name": "tinystr",
+          "version": "0.8.5",
+          "source_url": "https://static.crates.io/crates/tinystr/tinystr-0.8.5.crate",
+          "sha256": "abc840c238154d58f9e86b2792261edfde565a17696e1cda1a449de27979801a",
+          "declared_license": "Unicode-3.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/tinystr-0.8.5/LICENSE"
+          ],
+          "published_authors": [
+            "The ICU4X Project Developers"
+          ],
+          "published_repository": "https://github.com/unicode-org/icu4x",
+          "published_homepage": null
+        },
+        {
+          "name": "tracing",
+          "version": "0.1.44",
+          "source_url": "https://static.crates.io/crates/tracing/tracing-0.1.44.crate",
+          "sha256": "63e71662fa4b2a2c3a26f570f037eb95bb1f85397f3cd8076caed2f026a6d100",
+          "declared_license": "MIT",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/tracing-0.1.44/LICENSE"
+          ],
+          "published_authors": [
+            "Eliza Weisman <eliza@buoyant.io>",
+            "Tokio Contributors <team@tokio.rs>"
+          ],
+          "published_repository": "https://github.com/tokio-rs/tracing",
+          "published_homepage": "https://tokio.rs"
+        },
+        {
+          "name": "tracing-attributes",
+          "version": "0.1.31",
+          "source_url": "https://static.crates.io/crates/tracing-attributes/tracing-attributes-0.1.31.crate",
+          "sha256": "7490cfa5ec963746568740651ac6781f701c9c5ea257c58e057f3ba8cf69e8da",
+          "declared_license": "MIT",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/tracing-attributes-0.1.31/LICENSE"
+          ],
+          "published_authors": [
+            "Tokio Contributors <team@tokio.rs>",
+            "Eliza Weisman <eliza@buoyant.io>",
+            "David Barsky <dbarsky@amazon.com>"
+          ],
+          "published_repository": "https://github.com/tokio-rs/tracing",
+          "published_homepage": "https://tokio.rs"
+        },
+        {
+          "name": "tracing-core",
+          "version": "0.1.36",
+          "source_url": "https://static.crates.io/crates/tracing-core/tracing-core-0.1.36.crate",
+          "sha256": "db97caf9d906fbde555dd62fa95ddba9eecfd14cb388e4f491a66d74cd5fb79a",
+          "declared_license": "MIT",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/tracing-core-0.1.36/LICENSE",
+            "required-notices/Rollup-Rust-crates/tracing-core-0.1.36/src_spin_LICENSE"
+          ],
+          "published_authors": [
+            "Tokio Contributors <team@tokio.rs>"
+          ],
+          "published_repository": "https://github.com/tokio-rs/tracing",
+          "published_homepage": "https://tokio.rs"
+        },
+        {
+          "name": "triomphe",
+          "version": "0.1.17",
+          "source_url": "https://static.crates.io/crates/triomphe/triomphe-0.1.17.crate",
+          "sha256": "0d15f4f5898bcfc5d8a8e45ed30b2f108d710c1a2e5489dbf80e078f707181bc",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/triomphe-0.1.17/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/triomphe-0.1.17/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "Manish Goregaokar <manishsmail@gmail.com>",
+            "The Servo Project Developers"
+          ],
+          "published_repository": "https://github.com/Manishearth/triomphe",
+          "published_homepage": null
+        },
+        {
+          "name": "unicode-id-start",
+          "version": "1.5.0",
+          "source_url": "https://static.crates.io/crates/unicode-id-start/unicode-id-start-1.5.0.crate",
+          "sha256": "0825d2e09dcae814a4273c1e1435979d414ede25b2ee235b1545da6682483765",
+          "declared_license": "(MIT OR Apache-2.0) AND Unicode-3.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/unicode-id-start-1.5.0/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/unicode-id-start-1.5.0/LICENSE-MIT",
+            "required-notices/Rollup-Rust-crates/unicode-id-start-1.5.0/LICENSE-UNICODE"
+          ],
+          "published_authors": [
+            "David Tolnay <dtolnay@gmail.com>",
+            "Boshen <boshenc@gmail.com>"
+          ],
+          "published_repository": "https://github.com/Boshen/unicode-id-start",
+          "published_homepage": null
+        },
+        {
+          "name": "unicode-ident",
+          "version": "1.0.27",
+          "source_url": "https://static.crates.io/crates/unicode-ident/unicode-ident-1.0.27.crate",
+          "sha256": "a2c754d6c33795a1c324727428e5a7dedb5b06195f9890bdbcba760d3e246563",
+          "declared_license": "(MIT OR Apache-2.0) AND Unicode-3.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/unicode-ident-1.0.27/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/unicode-ident-1.0.27/LICENSE-MIT",
+            "required-notices/Rollup-Rust-crates/unicode-ident-1.0.27/LICENSE-UNICODE"
+          ],
+          "published_authors": [
+            "David Tolnay <dtolnay@gmail.com>"
+          ],
+          "published_repository": "https://github.com/dtolnay/unicode-ident",
+          "published_homepage": null
+        },
+        {
+          "name": "unicode-width",
+          "version": "0.2.3",
+          "source_url": "https://static.crates.io/crates/unicode-width/unicode-width-0.2.3.crate",
+          "sha256": "ca718471876992059f251e33aafc334346ada08042b7661dd1fe313a9bced557",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/unicode-width-0.2.3/COPYRIGHT",
+            "required-notices/Rollup-Rust-crates/unicode-width-0.2.3/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/unicode-width-0.2.3/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "kwantam <kwantam@gmail.com>",
+            "Manish Goregaokar <manishsmail@gmail.com>"
+          ],
+          "published_repository": "https://github.com/unicode-rs/unicode-width",
+          "published_homepage": "https://github.com/unicode-rs/unicode-width"
+        },
+        {
+          "name": "url",
+          "version": "2.5.8",
+          "source_url": "https://static.crates.io/crates/url/url-2.5.8.crate",
+          "sha256": "ff67a8a4397373c3ef660812acab3268222035010ab8680ec4215f38ba3d0eed",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/url-2.5.8/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/url-2.5.8/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "The rust-url developers"
+          ],
+          "published_repository": "https://github.com/servo/rust-url",
+          "published_homepage": null
+        },
+        {
+          "name": "utf8_iter",
+          "version": "1.1.0",
+          "source_url": "https://static.crates.io/crates/utf8_iter/utf8_iter-1.1.0.crate",
+          "sha256": "af3bd9d3e571c26fcce9d033b87ea5ab061b8d2ffe9b7a5675d810d68f03edf0",
+          "declared_license": "Apache-2.0 OR MIT",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/utf8_iter-1.1.0/COPYRIGHT",
+            "required-notices/Rollup-Rust-crates/utf8_iter-1.1.0/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/utf8_iter-1.1.0/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "Henri Sivonen <hsivonen@hsivonen.fi>"
+          ],
+          "published_repository": "https://github.com/hsivonen/utf8_iter",
+          "published_homepage": "https://docs.rs/utf8_iter/"
+        },
+        {
+          "name": "utf_types",
+          "version": "1.0.0",
+          "source_url": "https://static.crates.io/crates/utf_types/utf_types-1.0.0.crate",
+          "sha256": "3a3b425286980a367278453f3b6d28cdcb134b574e5a35824a6ff5eebad50bb6",
+          "declared_license": "Apache-2.0 OR MIT",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/utf_types-1.0.0/COPYRIGHT",
+            "required-notices/Rollup-Rust-crates/utf_types-1.0.0/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/utf_types-1.0.0/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "Henri Sivonen <hsivonen@hsivonen.fi>"
+          ],
+          "published_repository": "https://github.com/hsivonen/utf_types",
+          "published_homepage": "https://docs.rs/utf_types/"
+        },
+        {
+          "name": "uuid",
+          "version": "1.29.0",
+          "source_url": "https://static.crates.io/crates/uuid/uuid-1.29.0.crate",
+          "sha256": "4a0e2d11620c50695fe12bbbfde96b3477fe606e7284c22d505c12ce51214514",
+          "declared_license": "Apache-2.0 OR MIT",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/uuid-1.29.0/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/uuid-1.29.0/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "Ashley Mannix<ashleymannix@live.com.au>",
+            "Dylan DPC<dylan.dpc@gmail.com>",
+            "Hunar Roop Kahlon<hunar.roop@gmail.com>"
+          ],
+          "published_repository": "https://github.com/uuid-rs/uuid",
+          "published_homepage": null
+        },
+        {
+          "name": "version_check",
+          "version": "0.9.5",
+          "source_url": "https://static.crates.io/crates/version_check/version_check-0.9.5.crate",
+          "sha256": "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a",
+          "declared_license": "MIT/Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/version_check-0.9.5/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/version_check-0.9.5/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "Sergio Benitez <sb@sergio.bz>"
+          ],
+          "published_repository": "https://github.com/SergioBenitez/version_check",
+          "published_homepage": null
+        },
+        {
+          "name": "vsimd",
+          "version": "0.8.0",
+          "source_url": "https://static.crates.io/crates/vsimd/vsimd-0.8.0.crate",
+          "sha256": "5c3082ca00d5a5ef149bb8b555a72ae84c9c59f7250f013ac822ac2e49b19c64",
+          "declared_license": "MIT",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/vsimd-0.8.0/PUBLISHED-LICENSE-METADATA.json",
+            "required-notices/simd-LICENSE"
+          ],
+          "supplement": {
+            "url": "https://raw.githubusercontent.com/Nugine/simd/d74c030d9dc4f3cae02146d1f497ff62726ef09a/LICENSE",
+            "sha256": "71674605ec4c087fe9eb534e3e4f9e26eb2e4aabcd76a29fd156c6a844d44b3d",
+            "path": "required-notices/simd-LICENSE"
+          },
+          "published_authors": [],
+          "published_repository": "https://github.com/Nugine/simd",
+          "published_homepage": null
+        },
+        {
+          "name": "wasm-bindgen",
+          "version": "0.2.130",
+          "source_url": "https://static.crates.io/crates/wasm-bindgen/wasm-bindgen-0.2.130.crate",
+          "sha256": "a0181c14ddd6c7b8b0b0132a5f1ea2f32be0d893cd3ea97b6e3b28886b8a3d1c",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/wasm-bindgen-0.2.130/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/wasm-bindgen-0.2.130/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "The wasm-bindgen Developers"
+          ],
+          "published_repository": "https://github.com/wasm-bindgen/wasm-bindgen",
+          "published_homepage": "https://wasm-bindgen.github.io/wasm-bindgen"
+        },
+        {
+          "name": "wasm-bindgen-macro",
+          "version": "0.2.130",
+          "source_url": "https://static.crates.io/crates/wasm-bindgen-macro/wasm-bindgen-macro-0.2.130.crate",
+          "sha256": "6e931a02a39abdbf66966fc35902b5ed58344750a70885bed4ebb3d8eaf28ed9",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/wasm-bindgen-macro-0.2.130/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/wasm-bindgen-macro-0.2.130/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "The wasm-bindgen Developers"
+          ],
+          "published_repository": "https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/macro",
+          "published_homepage": "https://wasm-bindgen.github.io/wasm-bindgen/"
+        },
+        {
+          "name": "wasm-bindgen-macro-support",
+          "version": "0.2.130",
+          "source_url": "https://static.crates.io/crates/wasm-bindgen-macro-support/wasm-bindgen-macro-support-0.2.130.crate",
+          "sha256": "2ca4b54280e455bd831e33a6b8e734baf432fe63fbc35c42ac14ce67a043a53a",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/wasm-bindgen-macro-support-0.2.130/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/wasm-bindgen-macro-support-0.2.130/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "The wasm-bindgen Developers"
+          ],
+          "published_repository": "https://github.com/wasm-bindgen/wasm-bindgen/tree/main/crates/macro-support",
+          "published_homepage": "https://wasm-bindgen.github.io/wasm-bindgen/"
+        },
+        {
+          "name": "wasm-bindgen-shared",
+          "version": "0.2.130",
+          "source_url": "https://static.crates.io/crates/wasm-bindgen-shared/wasm-bindgen-shared-0.2.130.crate",
+          "sha256": "3b1f9c3798725016c6ee5f2f57869ec0831e8bbc0ab0310a86e787e97f41389e",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/wasm-bindgen-shared-0.2.130/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/wasm-bindgen-shared-0.2.130/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "The wasm-bindgen Developers"
+          ],
+          "published_repository": "https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/shared",
+          "published_homepage": "https://wasm-bindgen.github.io/wasm-bindgen/"
+        },
+        {
+          "name": "windows-link",
+          "version": "0.2.1",
+          "source_url": "https://static.crates.io/crates/windows-link/windows-link-0.2.1.crate",
+          "sha256": "f0805222e57f7521d6a62e36fa9163bc891acd422f971defe97d64e70d0a4fe5",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/windows-link-0.2.1/license-apache-2.0",
+            "required-notices/Rollup-Rust-crates/windows-link-0.2.1/license-mit"
+          ],
+          "published_authors": [],
+          "published_repository": "https://github.com/microsoft/windows-rs",
+          "published_homepage": null
+        },
+        {
+          "name": "windows-sys",
+          "version": "0.61.2",
+          "source_url": "https://static.crates.io/crates/windows-sys/windows-sys-0.61.2.crate",
+          "sha256": "ae137229bcbd6cdf0f7b80a31df61766145077ddf49416a728b02cb3921ff3fc",
+          "declared_license": "MIT OR Apache-2.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/windows-sys-0.61.2/license-apache-2.0",
+            "required-notices/Rollup-Rust-crates/windows-sys-0.61.2/license-mit"
+          ],
+          "published_authors": [],
+          "published_repository": "https://github.com/microsoft/windows-rs",
+          "published_homepage": null
+        },
+        {
+          "name": "writeable",
+          "version": "0.6.4",
+          "source_url": "https://static.crates.io/crates/writeable/writeable-0.6.4.crate",
+          "sha256": "3ad82d2a33cdc9674dc7465672f271e096168fcdbe0f799d9e6db8c5892679dc",
+          "declared_license": "Unicode-3.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/writeable-0.6.4/LICENSE"
+          ],
+          "published_authors": [
+            "The ICU4X Project Developers"
+          ],
+          "published_repository": "https://github.com/unicode-org/icu4x",
+          "published_homepage": null
+        },
+        {
+          "name": "wyz",
+          "version": "0.5.1",
+          "source_url": "https://static.crates.io/crates/wyz/wyz-0.5.1.crate",
+          "sha256": "05f360fc0b24296329c78fda852a1e9ae82de9cf7b27dae4b7f62f118f77b9ed",
+          "declared_license": "MIT",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/wyz-0.5.1/LICENSE.txt"
+          ],
+          "published_authors": [
+            "myrrlyn <self@myrrlyn.dev>"
+          ],
+          "published_repository": "https://github.com/myrrlyn/wyz",
+          "published_homepage": "https://myrrlyn.net/crates/wyz"
+        },
+        {
+          "name": "xxhash-rust",
+          "version": "0.8.19",
+          "source_url": "https://static.crates.io/crates/xxhash-rust/xxhash-rust-0.8.19.crate",
+          "sha256": "550a2b930b62486a393c52d5c3b84bff264b28aa437ed64694d31e93b1757af7",
+          "declared_license": "BSL-1.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/xxhash-rust-0.8.19/LICENSE"
+          ],
+          "published_authors": [
+            "Douman <douman@gmx.se>"
+          ],
+          "published_repository": "https://github.com/DoumanAsh/xxhash-rust",
+          "published_homepage": null
+        },
+        {
+          "name": "yoke",
+          "version": "0.8.4",
+          "source_url": "https://static.crates.io/crates/yoke/yoke-0.8.4.crate",
+          "sha256": "417ef3fcf6c300b7dbd25c85531a746931c02ad536f3cf4786ed1e88223340b3",
+          "declared_license": "Unicode-3.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/yoke-0.8.4/LICENSE"
+          ],
+          "published_authors": [
+            "Manish Goregaokar <manishsmail@gmail.com>"
+          ],
+          "published_repository": "https://github.com/unicode-org/icu4x",
+          "published_homepage": null
+        },
+        {
+          "name": "yoke-derive",
+          "version": "0.8.4",
+          "source_url": "https://static.crates.io/crates/yoke-derive/yoke-derive-0.8.4.crate",
+          "sha256": "ec8ebde2db3681e8c9980cc27822030e68752690ddfa9473e739aeb4dbde6d71",
+          "declared_license": "Unicode-3.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/yoke-derive-0.8.4/LICENSE"
+          ],
+          "published_authors": [
+            "Manish Goregaokar <manishsmail@gmail.com>"
+          ],
+          "published_repository": "https://github.com/unicode-org/icu4x",
+          "published_homepage": null
+        },
+        {
+          "name": "zerocopy",
+          "version": "0.8.63",
+          "source_url": "https://static.crates.io/crates/zerocopy/zerocopy-0.8.63.crate",
+          "sha256": "e5fe1f8f1b06191a00962174c61aa5005e0bb391a6d80d07e24d115c01a92ed8",
+          "declared_license": "BSD-2-Clause OR Apache-2.0 OR MIT",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/zerocopy-0.8.63/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/zerocopy-0.8.63/LICENSE-BSD",
+            "required-notices/Rollup-Rust-crates/zerocopy-0.8.63/LICENSE-MIT"
+          ],
+          "published_authors": [],
+          "published_repository": "https://github.com/google/zerocopy",
+          "published_homepage": null
+        },
+        {
+          "name": "zerocopy-derive",
+          "version": "0.8.63",
+          "source_url": "https://static.crates.io/crates/zerocopy-derive/zerocopy-derive-0.8.63.crate",
+          "sha256": "863ad3ac83293fb4d740aedbfdc9240dd8d1a50c1099acd76ce80ce7c7230c7f",
+          "declared_license": "BSD-2-Clause OR Apache-2.0 OR MIT",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/zerocopy-derive-0.8.63/LICENSE-APACHE",
+            "required-notices/Rollup-Rust-crates/zerocopy-derive-0.8.63/LICENSE-BSD",
+            "required-notices/Rollup-Rust-crates/zerocopy-derive-0.8.63/LICENSE-MIT"
+          ],
+          "published_authors": [],
+          "published_repository": "https://github.com/google/zerocopy",
+          "published_homepage": null
+        },
+        {
+          "name": "zerofrom",
+          "version": "0.1.8",
+          "source_url": "https://static.crates.io/crates/zerofrom/zerofrom-0.1.8.crate",
+          "sha256": "0ec05a11813ea801ff6d75110ad09cd0824ddba17dfe17128ea0d5f68e6c5272",
+          "declared_license": "Unicode-3.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/zerofrom-0.1.8/LICENSE"
+          ],
+          "published_authors": [
+            "The ICU4X Project Developers"
+          ],
+          "published_repository": "https://github.com/unicode-org/icu4x",
+          "published_homepage": null
+        },
+        {
+          "name": "zerofrom-derive",
+          "version": "0.1.8",
+          "source_url": "https://static.crates.io/crates/zerofrom-derive/zerofrom-derive-0.1.8.crate",
+          "sha256": "f75b4683f6c7f45248d4d64056a24298c6281e0993356d7d1b4a1a962ef10d4a",
+          "declared_license": "Unicode-3.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/zerofrom-derive-0.1.8/LICENSE"
+          ],
+          "published_authors": [
+            "Manish Goregaokar <manishsmail@gmail.com>"
+          ],
+          "published_repository": "https://github.com/unicode-org/icu4x",
+          "published_homepage": null
+        },
+        {
+          "name": "zerotrie",
+          "version": "0.2.5",
+          "source_url": "https://static.crates.io/crates/zerotrie/zerotrie-0.2.5.crate",
+          "sha256": "4ea269c3bd32f0a32c321907a2ae912ba6f4649bb0fc764a15627e99a7095a3f",
+          "declared_license": "Unicode-3.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/zerotrie-0.2.5/LICENSE"
+          ],
+          "published_authors": [
+            "The ICU4X Project Developers"
+          ],
+          "published_repository": "https://github.com/unicode-org/icu4x",
+          "published_homepage": "https://icu4x.unicode.org"
+        },
+        {
+          "name": "zerovec",
+          "version": "0.11.9",
+          "source_url": "https://static.crates.io/crates/zerovec/zerovec-0.11.9.crate",
+          "sha256": "f58a2799cfe9a1670c7ea8edbd52ef8edb93cb37a7f83bf31ba9e35d9dae6a40",
+          "declared_license": "Unicode-3.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/zerovec-0.11.9/LICENSE"
+          ],
+          "published_authors": [
+            "The ICU4X Project Developers"
+          ],
+          "published_repository": "https://github.com/unicode-org/icu4x",
+          "published_homepage": null
+        },
+        {
+          "name": "zerovec-derive",
+          "version": "0.11.7",
+          "source_url": "https://static.crates.io/crates/zerovec-derive/zerovec-derive-0.11.7.crate",
+          "sha256": "c3743ddbf47738d929cd1ae2e199d40d0162979dfe31aef8ae646d2bf00bf97a",
+          "declared_license": "Unicode-3.0",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/zerovec-derive-0.11.7/LICENSE"
+          ],
+          "published_authors": [
+            "Manish Goregaokar <manishsmail@gmail.com>"
+          ],
+          "published_repository": "https://github.com/unicode-org/icu4x",
+          "published_homepage": null
+        },
+        {
+          "name": "zmij",
+          "version": "1.0.23",
+          "source_url": "https://static.crates.io/crates/zmij/zmij-1.0.23.crate",
+          "sha256": "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b",
+          "declared_license": "MIT",
+          "notices": [
+            "required-notices/Rollup-Rust-crates/zmij-1.0.23/LICENSE-MIT"
+          ],
+          "published_authors": [
+            "David Tolnay <dtolnay@gmail.com>"
+          ],
+          "published_repository": "https://github.com/dtolnay/zmij",
+          "published_homepage": null
+        }
+      ]
+    }
+  },
+  "rust_std": {
+    "toolchain": "nightly-2025-07-25",
+    "version": "1.90.0-nightly (b56aaec52 2025-07-24)",
+    "commit": "b56aaec52bc0fa35591a872fb4aac81f606e265c",
+    "manifest_url": "https://static.rust-lang.org/dist/2025-07-25/channel-rust-nightly.toml",
+    "std_archive": {
+      "available": true,
+      "url": "https://static.rust-lang.org/dist/2025-07-25/rust-std-nightly-wasm32-unknown-unknown.tar.gz",
+      "hash": "20d28cf2136d799679781509f15c883a80af2d018eee36fdd1070fdea6931367",
+      "xz_url": "https://static.rust-lang.org/dist/2025-07-25/rust-std-nightly-wasm32-unknown-unknown.tar.xz",
+      "xz_hash": "f12b455f43255d2545cddf18234ae9fbdd0452fc9a7810ce9cf22d694df68e66"
+    },
+    "copyright_library_archive": {
+      "available": true,
+      "url": "https://static.rust-lang.org/dist/2025-07-25/rustc-nightly-x86_64-unknown-linux-gnu.tar.gz",
+      "hash": "a402574d77ede8057d4fbecde9e98115e35f093d4a3f81a3fc340984d823699d",
+      "xz_url": "https://static.rust-lang.org/dist/2025-07-25/rustc-nightly-x86_64-unknown-linux-gnu.tar.xz",
+      "xz_hash": "ea0157efeacae238bd8cbab0a9465e90c5240b3f6d607c98b1118668b3033295"
+    }
+  },
+  "esbuild": {
+    "version": "0.25.12",
+    "commit": "208f539945b145e7c9d6d844290f81c3fe5af320",
+    "go_version": "go1.23.12",
+    "x_sys": "c0bba94af5f8",
+    "cgo_enabled": false,
+    "build_info": "build-android-agent-runtime/frontend-license-research/esbuild-binary: go1.23.12\n\tpath\tgithub.com/evanw/esbuild/cmd/esbuild\n\tmod\tgithub.com/evanw/esbuild\t(devel)\t\n\tdep\tgolang.org/x/sys\tv0.0.0-20220715151400-c0bba94af5f8\th1:0A+M6Uqn+Eje4kHMK80dtF3JCXC4ykBgQG4Fe06QRhQ=\n\tbuild\t-buildmode=exe\n\tbuild\t-compiler=gc\n\tbuild\t-trimpath=true\n\tbuild\tDefaultGODEBUG=asynctimerchan=1,gotypesalias=0,httplaxcontentlength=1,httpmuxgo121=1,httpservecontentkeepheaders=1,netedns0=0,panicnil=1,tls10server=1,tls3des=1,tlskyber=0,tlsrsakex=1,tlsunsafeekm=1,winreadlinkvolume=0,winsymlink=0,x509keypairleaf=0,x509negativeserial=1\n\tbuild\tCGO_ENABLED=0\n\tbuild\tGOARCH=arm64\n\tbuild\tGOOS=android\n\tbuild\tGOARM64=v8.0\n\tbuild\tvcs=git\n\tbuild\tvcs.revision=208f539945b145e7c9d6d844290f81c3fe5af320\n\tbuild\tvcs.time=2025-11-01T23:34:16Z\n\tbuild\tvcs.modified=false\n"
+  },
+  "primary_supplements": {
+    "simd": {
+      "url": "https://raw.githubusercontent.com/Nugine/simd/d74c030d9dc4f3cae02146d1f497ff62726ef09a/LICENSE",
+      "sha256": "71674605ec4c087fe9eb534e3e4f9e26eb2e4aabcd76a29fd156c6a844d44b3d",
+      "path": "required-notices/simd-LICENSE"
+    },
+    "ddbase": {
+      "url": "https://raw.githubusercontent.com/dudykr/ddbase/19f6487518dbebbc198346bfb979313ef457199e/LICENSE",
+      "sha256": "58d1e17ffe5109a7ae296caafcadfdbe6a7d176f0bc4ab01e12a689b0499d8bd",
+      "path": "required-notices/ddbase-LICENSE"
+    },
+    "swc-sourcemap": {
+      "url": "https://raw.githubusercontent.com/swc-project/swc-sourcemap/64fcb47c16547d40fb37bbe4d8790b520716c741/LICENSE",
+      "sha256": "7516e1cf340213f60d96bca77bb012882dbf80e7cca5922c914174f605d9ef71",
+      "path": "required-notices/swc-sourcemap-LICENSE"
+    },
+    "swc": {
+      "url": "https://raw.githubusercontent.com/swc-project/swc/dc9d310e3c8bb63312a9a5ec6803d585034ecb14/LICENSE",
+      "sha256": "d96eba1f1881334d50ffc144276dfa98e147a415e7c591ecdfcb81680361dc91",
+      "path": "required-notices/swc-LICENSE"
+    }
+  },
+  "notice_files_sha256": {
+    "required-notices/Go-xsys-LICENSE": "2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067",
+    "required-notices/Go-xsys-PATENTS": "96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc",
+    "required-notices/Go1.23.12-LICENSE": "2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067",
+    "required-notices/Go1.23.12-PATENTS": "96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc",
+    "required-notices/Rollup-JavaScript-LICENSE.md": "fa1bd040c5bdeefe65b3821cebf474f2733ce65df13089bd151dda1778e62fe8",
+    "required-notices/Rollup-Rust-crates/ahash-0.8.12/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "required-notices/Rollup-Rust-crates/ahash-0.8.12/LICENSE-MIT": "0444c6991eead6822f7b9102e654448d51624431119546492e8b231db42c48bb",
+    "required-notices/Rollup-Rust-crates/aho-corasick-1.1.5/COPYING": "01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f",
+    "required-notices/Rollup-Rust-crates/aho-corasick-1.1.5/LICENSE-MIT": "0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f",
+    "required-notices/Rollup-Rust-crates/allocator-api2-0.2.21/LICENSE-APACHE": "20fe7b00e904ed690e3b9fd6073784d3fc428141dbd10b81c01fd143d0797f58",
+    "required-notices/Rollup-Rust-crates/allocator-api2-0.2.21/LICENSE-MIT": "36516aefdc84c5d5a1e7485425913a22dbda69eb1930c5e84d6ae4972b5194b9",
+    "required-notices/Rollup-Rust-crates/anyhow-1.0.104/LICENSE-APACHE": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+    "required-notices/Rollup-Rust-crates/anyhow-1.0.104/LICENSE-MIT": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+    "required-notices/Rollup-Rust-crates/ar_archive_writer-0.5.3/LICENSE.txt": "f72b120d1385408e9e380acc020756eb6ba1b461d66c328ea67327ba08d7dcfd",
+    "required-notices/Rollup-Rust-crates/arrayvec-0.7.8/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "required-notices/Rollup-Rust-crates/arrayvec-0.7.8/LICENSE-MIT": "4da95ec4ecb65b738d470b7d762894ad9c97da93e6cbfb18b570fc2c96f4b871",
+    "required-notices/Rollup-Rust-crates/ascii-1.1.0/LICENSE-APACHE": "fabba0cb7d00a4b3211fdc13699223ab2d22f88678ccd608494cf2b332b903e9",
+    "required-notices/Rollup-Rust-crates/ascii-1.1.0/LICENSE-MIT": "7e4b8a17b118d3d7fd7a362a4b6563e0bd98b098a24c4c7f07dd22042091a847",
+    "required-notices/Rollup-Rust-crates/ast_node-7.0.0/PUBLISHED-LICENSE-METADATA.json": "3d3acd024806a92e52f037f5e94b395c445268252b07725a60af338d139b2e4d",
+    "required-notices/Rollup-Rust-crates/autocfg-1.5.1/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "required-notices/Rollup-Rust-crates/autocfg-1.5.1/LICENSE-MIT": "27995d58ad5c1145c1a8cd86244ce844886958a35eb2b78c6b772748669999ac",
+    "required-notices/Rollup-Rust-crates/base-encode-0.3.1/MIT-LICENSE.txt": "661da44edf3be4863b8cd72a50229a4c09ef2689c3f83bac4eb52158d549bb65",
+    "required-notices/Rollup-Rust-crates/base-encode-0.3.1/PUBLISHED-LICENSE-METADATA.json": "ef5fe11a032cb6d9b9c6bd2ba1504c9b4cda8bd1cd8493f1d6b63dcdd7eb9719",
+    "required-notices/Rollup-Rust-crates/base64-0.22.1/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "required-notices/Rollup-Rust-crates/base64-0.22.1/LICENSE-MIT": "0dd882e53de11566d50f8e8e2d5a651bcf3fabee4987d70f306233cf39094ba7",
+    "required-notices/Rollup-Rust-crates/base64-simd-0.8.0/PUBLISHED-LICENSE-METADATA.json": "4dd6203af594e08f9159d07bc6337bf88f274e5b9c04e7c1153ae9ac6ed9539d",
+    "required-notices/Rollup-Rust-crates/better_scoped_tls-1.0.1/PUBLISHED-LICENSE-METADATA.json": "c019760813718ebc3f1bb9dbde8e7681de23b57a216a19aac87d9c2a22b0b239",
+    "required-notices/Rollup-Rust-crates/bitflags-2.13.2/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "required-notices/Rollup-Rust-crates/bitflags-2.13.2/LICENSE-MIT": "6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb",
+    "required-notices/Rollup-Rust-crates/bitvec-1.1.1/LICENSE.txt": "411781fd38700f2357a14126d0ab048164ab881f1dcb335c1bb932e232c9a2f5",
+    "required-notices/Rollup-Rust-crates/bstr-1.13.1/COPYING": "68653aaa727a2bfa31b7a751e31701ce33c49d695c12dd291a07d1c54da4c14b",
+    "required-notices/Rollup-Rust-crates/bstr-1.13.1/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "required-notices/Rollup-Rust-crates/bstr-1.13.1/LICENSE-MIT": "6b7374c39a57e57fc2c38eb529c4c88340152b10f51dd5ae2d819dfa67f61715",
+    "required-notices/Rollup-Rust-crates/bumpalo-3.20.3/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "required-notices/Rollup-Rust-crates/bumpalo-3.20.3/LICENSE-MIT": "65f94e99ddaf4f5d1782a6dae23f35d4293a9a01444a13135a6887017d353cee",
+    "required-notices/Rollup-Rust-crates/bytes-1.12.1/LICENSE": "45f522cacecb1023856e46df79ca625dfc550c94910078bd8aec6e02880b3d42",
+    "required-notices/Rollup-Rust-crates/bytes-str-0.2.9/PUBLISHED-LICENSE-METADATA.json": "cfdb6d9e205b8a7ef1aeea028576645ea678493a778c578a5ace4599f1fb3f6f",
+    "required-notices/Rollup-Rust-crates/castaway-0.2.4/LICENSE": "f98e09091d5ae02b2f2ec1ead4f7f28c4c44d1cb98b078739ba67091637e170c",
+    "required-notices/Rollup-Rust-crates/cc-1.4.6/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "required-notices/Rollup-Rust-crates/cc-1.4.6/LICENSE-MIT": "378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397",
+    "required-notices/Rollup-Rust-crates/cfg-if-1.0.5/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "required-notices/Rollup-Rust-crates/cfg-if-1.0.5/LICENSE-MIT": "378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397",
+    "required-notices/Rollup-Rust-crates/compact_str-0.7.1/LICENSE": "0d52feec79589df30138dad3800323fe5686b764b73347330a2dfef8ac83efe8",
+    "required-notices/Rollup-Rust-crates/console_error_panic_hook-0.1.7/LICENSE-APACHE": "353b508bbc50274d47a23729f568bab2618e3d0eaa10208616f5fd475255b896",
+    "required-notices/Rollup-Rust-crates/console_error_panic_hook-0.1.7/LICENSE-MIT": "77674336af8ded214dc3ae07da631c7dd35cc8205f39298474ba98a889e57272",
+    "required-notices/Rollup-Rust-crates/crossbeam-utils-0.8.23/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "required-notices/Rollup-Rust-crates/crossbeam-utils-0.8.23/LICENSE-MIT": "5734ed989dfca1f625b40281ee9f4530f91b2411ec01cb748223e7eb87e201ab",
+    "required-notices/Rollup-Rust-crates/dashmap-6.2.1/LICENSE": "16692e8cee4aa06e3913787497eba2d47c42002014136f5da67be6ee640e28a3",
+    "required-notices/Rollup-Rust-crates/data-encoding-2.11.1/LICENSE": "b68ad1a3367b825447089e1f8d6829b97f47a89eb78d2f4ebaef4672f5606186",
+    "required-notices/Rollup-Rust-crates/debugid-0.8.0/LICENSE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "required-notices/Rollup-Rust-crates/displaydoc-0.2.7/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "required-notices/Rollup-Rust-crates/displaydoc-0.2.7/LICENSE-MIT": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+    "required-notices/Rollup-Rust-crates/dragonbox_ecma-0.1.12/LICENSE-Apache2-LLVM": "624d724f544656ff2f965b3b41e3050133fa042d80292a05330c786a12808cb9",
+    "required-notices/Rollup-Rust-crates/dragonbox_ecma-0.1.12/LICENSE-Boost": "c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566",
+    "required-notices/Rollup-Rust-crates/either-1.19.0/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "required-notices/Rollup-Rust-crates/either-1.19.0/LICENSE-MIT": "7576269ea71f767b99297934c0b2367532690f8c4badc695edf8e04ab6a1e545",
+    "required-notices/Rollup-Rust-crates/equivalent-1.0.3/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "required-notices/Rollup-Rust-crates/equivalent-1.0.3/LICENSE-MIT": "7365cc8878a1d7ce155a58c4ca09c3d7a6be413efa5334a80ea842912b669349",
+    "required-notices/Rollup-Rust-crates/find-msvc-tools-0.1.12/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "required-notices/Rollup-Rust-crates/find-msvc-tools-0.1.12/LICENSE-MIT": "378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397",
+    "required-notices/Rollup-Rust-crates/fixedbitset-0.5.7/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "required-notices/Rollup-Rust-crates/fixedbitset-0.5.7/LICENSE-MIT": "ce592787ff2321feab698a4c612237f4378cc658ebb1d472913e5802cc47afb4",
+    "required-notices/Rollup-Rust-crates/foldhash-0.2.0/LICENSE": "b1181a40b2a7b25cf66fd01481713bc1005df082c53ef73e851e55071b102744",
+    "required-notices/Rollup-Rust-crates/form_urlencoded-1.2.2/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "required-notices/Rollup-Rust-crates/form_urlencoded-1.2.2/LICENSE-MIT": "20c7855c364d57ea4c97889a5e8d98470a9952dade37bd9248b9a54431670e5e",
+    "required-notices/Rollup-Rust-crates/from_variant-3.0.0/PUBLISHED-LICENSE-METADATA.json": "feb0b3000b0ee6245eda888d44eac868e6cfb2fd7abe0388542d2fd13d69db73",
+    "required-notices/Rollup-Rust-crates/funty-2.0.0/LICENSE.txt": "f790cc576999f5998c766d3d26d7d64dc368e805a98461484f65e8d961ec6d9f",
+    "required-notices/Rollup-Rust-crates/futures-channel-0.3.34/LICENSE-APACHE": "275c491d6d1160553c32fd6127061d7f9606c3ea25abfad6ca3f6ed088785427",
+    "required-notices/Rollup-Rust-crates/futures-channel-0.3.34/LICENSE-MIT": "6652c868f35dfe5e8ef636810a4e576b9d663f3a17fb0f5613ad73583e1b88fd",
+    "required-notices/Rollup-Rust-crates/futures-core-0.3.34/LICENSE-APACHE": "275c491d6d1160553c32fd6127061d7f9606c3ea25abfad6ca3f6ed088785427",
+    "required-notices/Rollup-Rust-crates/futures-core-0.3.34/LICENSE-MIT": "6652c868f35dfe5e8ef636810a4e576b9d663f3a17fb0f5613ad73583e1b88fd",
+    "required-notices/Rollup-Rust-crates/futures-io-0.3.34/LICENSE-APACHE": "275c491d6d1160553c32fd6127061d7f9606c3ea25abfad6ca3f6ed088785427",
+    "required-notices/Rollup-Rust-crates/futures-io-0.3.34/LICENSE-MIT": "6652c868f35dfe5e8ef636810a4e576b9d663f3a17fb0f5613ad73583e1b88fd",
+    "required-notices/Rollup-Rust-crates/futures-macro-0.3.34/LICENSE-APACHE": "275c491d6d1160553c32fd6127061d7f9606c3ea25abfad6ca3f6ed088785427",
+    "required-notices/Rollup-Rust-crates/futures-macro-0.3.34/LICENSE-MIT": "6652c868f35dfe5e8ef636810a4e576b9d663f3a17fb0f5613ad73583e1b88fd",
+    "required-notices/Rollup-Rust-crates/futures-sink-0.3.34/LICENSE-APACHE": "275c491d6d1160553c32fd6127061d7f9606c3ea25abfad6ca3f6ed088785427",
+    "required-notices/Rollup-Rust-crates/futures-sink-0.3.34/LICENSE-MIT": "6652c868f35dfe5e8ef636810a4e576b9d663f3a17fb0f5613ad73583e1b88fd",
+    "required-notices/Rollup-Rust-crates/futures-task-0.3.34/LICENSE-APACHE": "275c491d6d1160553c32fd6127061d7f9606c3ea25abfad6ca3f6ed088785427",
+    "required-notices/Rollup-Rust-crates/futures-task-0.3.34/LICENSE-MIT": "6652c868f35dfe5e8ef636810a4e576b9d663f3a17fb0f5613ad73583e1b88fd",
+    "required-notices/Rollup-Rust-crates/futures-util-0.3.34/LICENSE-APACHE": "275c491d6d1160553c32fd6127061d7f9606c3ea25abfad6ca3f6ed088785427",
+    "required-notices/Rollup-Rust-crates/futures-util-0.3.34/LICENSE-MIT": "6652c868f35dfe5e8ef636810a4e576b9d663f3a17fb0f5613ad73583e1b88fd",
+    "required-notices/Rollup-Rust-crates/globset-0.4.21/COPYING": "01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f",
+    "required-notices/Rollup-Rust-crates/globset-0.4.21/LICENSE-MIT": "0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f",
+    "required-notices/Rollup-Rust-crates/hashbrown-0.14.5/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "required-notices/Rollup-Rust-crates/hashbrown-0.14.5/LICENSE-MIT": "ff8f68cb076caf8cefe7a6430d4ac086ce6af2ca8ce2c4e5a2004d4552ef52a2",
+    "required-notices/Rollup-Rust-crates/hashbrown-0.16.1/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "required-notices/Rollup-Rust-crates/hashbrown-0.16.1/LICENSE-MIT": "ff8f68cb076caf8cefe7a6430d4ac086ce6af2ca8ce2c4e5a2004d4552ef52a2",
+    "required-notices/Rollup-Rust-crates/hashbrown-0.17.1/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "required-notices/Rollup-Rust-crates/hashbrown-0.17.1/LICENSE-MIT": "ff8f68cb076caf8cefe7a6430d4ac086ce6af2ca8ce2c4e5a2004d4552ef52a2",
+    "required-notices/Rollup-Rust-crates/heck-0.5.0/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "required-notices/Rollup-Rust-crates/heck-0.5.0/LICENSE-MIT": "7b63ecd5f1902af1b63729947373683c32745c16a10e8e6292e2e2dcd7e90ae0",
+    "required-notices/Rollup-Rust-crates/hermit-abi-0.5.3/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "required-notices/Rollup-Rust-crates/hermit-abi-0.5.3/LICENSE-MIT": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+    "required-notices/Rollup-Rust-crates/hstr-4.0.3/LICENSE": "58d1e17ffe5109a7ae296caafcadfdbe6a7d176f0bc4ab01e12a689b0499d8bd",
+    "required-notices/Rollup-Rust-crates/icu_collections-2.4.0/LICENSE": "f367c1b8e1aa262435251e442901da4607b4650e0e63a026f5044473ecfb90f2",
+    "required-notices/Rollup-Rust-crates/icu_locale_core-2.4.0/LICENSE": "f367c1b8e1aa262435251e442901da4607b4650e0e63a026f5044473ecfb90f2",
+    "required-notices/Rollup-Rust-crates/icu_normalizer-2.4.0/LICENSE": "f367c1b8e1aa262435251e442901da4607b4650e0e63a026f5044473ecfb90f2",
+    "required-notices/Rollup-Rust-crates/icu_normalizer_data-2.4.0/LICENSE": "f367c1b8e1aa262435251e442901da4607b4650e0e63a026f5044473ecfb90f2",
+    "required-notices/Rollup-Rust-crates/icu_properties-2.4.0/LICENSE": "f367c1b8e1aa262435251e442901da4607b4650e0e63a026f5044473ecfb90f2",
+    "required-notices/Rollup-Rust-crates/icu_properties_data-2.4.0/LICENSE": "f367c1b8e1aa262435251e442901da4607b4650e0e63a026f5044473ecfb90f2",
+    "required-notices/Rollup-Rust-crates/icu_provider-2.4.0/LICENSE": "f367c1b8e1aa262435251e442901da4607b4650e0e63a026f5044473ecfb90f2",
+    "required-notices/Rollup-Rust-crates/idna-1.1.0/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "required-notices/Rollup-Rust-crates/idna-1.1.0/LICENSE-MIT": "b38f11f6096706e6de553dabe2a7ed142d59b6fa8c97e290c67496154745cdd5",
+    "required-notices/Rollup-Rust-crates/idna_adapter-1.2.2/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "required-notices/Rollup-Rust-crates/idna_adapter-1.2.2/LICENSE-MIT": "8b43ce8accd61e9d370b5ca9e9c4f953279b5c239926c62315b40e24df51b726",
+    "required-notices/Rollup-Rust-crates/if_chain-1.0.3/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "required-notices/Rollup-Rust-crates/if_chain-1.0.3/LICENSE-MIT": "5de1878b4dbad85dc60131e58e6bca4503f7b141c2f7b2b295151568859c964a",
+    "required-notices/Rollup-Rust-crates/indexmap-2.14.2/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "required-notices/Rollup-Rust-crates/indexmap-2.14.2/LICENSE-MIT": "ecc269ef87fd38a1d98e30bfac9ba964a9dbd9315c3770fed98d4d7cb5882055",
+    "required-notices/Rollup-Rust-crates/is-macro-0.3.8/LICENSE": "58d1e17ffe5109a7ae296caafcadfdbe6a7d176f0bc4ab01e12a689b0499d8bd",
+    "required-notices/Rollup-Rust-crates/itoa-1.0.18/LICENSE-APACHE": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+    "required-notices/Rollup-Rust-crates/itoa-1.0.18/LICENSE-MIT": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+    "required-notices/Rollup-Rust-crates/js-sys-0.3.107/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "required-notices/Rollup-Rust-crates/js-sys-0.3.107/LICENSE-MIT": "378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397",
+    "required-notices/Rollup-Rust-crates/libc-0.2.191/LICENSE-APACHE": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+    "required-notices/Rollup-Rust-crates/libc-0.2.191/LICENSE-MIT": "123a331b5dbf04c30097fa43b8f858bc85df671fe776de498d01f3d6b7c1f69e",
+    "required-notices/Rollup-Rust-crates/litemap-0.8.3/LICENSE": "f367c1b8e1aa262435251e442901da4607b4650e0e63a026f5044473ecfb90f2",
+    "required-notices/Rollup-Rust-crates/lock_api-0.4.14/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "required-notices/Rollup-Rust-crates/lock_api-0.4.14/LICENSE-MIT": "c9a75f18b9ab2927829a208fc6aa2cf4e63b8420887ba29cdb265d6619ae82d5",
+    "required-notices/Rollup-Rust-crates/memchr-2.8.3/COPYING": "01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f",
+    "required-notices/Rollup-Rust-crates/memchr-2.8.3/LICENSE-MIT": "0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f",
+    "required-notices/Rollup-Rust-crates/new_debug_unreachable-1.0.6/LICENSE-MIT": "f7715d38a3fa1b4ac97c5729740752505a39cb92ee83ab5b102aeb5eaa7cdea4",
+    "required-notices/Rollup-Rust-crates/num-bigint-0.4.8/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "required-notices/Rollup-Rust-crates/num-bigint-0.4.8/LICENSE-MIT": "6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb",
+    "required-notices/Rollup-Rust-crates/num-integer-0.1.47/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "required-notices/Rollup-Rust-crates/num-integer-0.1.47/LICENSE-MIT": "6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb",
+    "required-notices/Rollup-Rust-crates/num-traits-0.2.19/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "required-notices/Rollup-Rust-crates/num-traits-0.2.19/LICENSE-MIT": "6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb",
+    "required-notices/Rollup-Rust-crates/num_cpus-1.17.0/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "required-notices/Rollup-Rust-crates/num_cpus-1.17.0/LICENSE-MIT": "391a5396cec6230bfabd4ef4eb2350eb895bc5efce377a2218f5702ed020d3e3",
+    "required-notices/Rollup-Rust-crates/object-0.39.1/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "required-notices/Rollup-Rust-crates/object-0.39.1/LICENSE-MIT": "0b74dfa0bcee5c420c6b7f67b4b2658f9ab8388c97b8e733975f2cecbdd668a6",
+    "required-notices/Rollup-Rust-crates/once_cell-1.21.4/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "required-notices/Rollup-Rust-crates/once_cell-1.21.4/LICENSE-MIT": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+    "required-notices/Rollup-Rust-crates/outref-0.5.2/LICENSE": "a00511478c83ebb464ef19d840f061c7444adc4636bb561900e75c5808cfc6cc",
+    "required-notices/Rollup-Rust-crates/par-core-2.0.0/PUBLISHED-LICENSE-METADATA.json": "34048533404657058c542f4dc65481a4e2039244ad0277f1cd59779e5eca7079",
+    "required-notices/Rollup-Rust-crates/par-iter-2.0.0/LICENSE": "58d1e17ffe5109a7ae296caafcadfdbe6a7d176f0bc4ab01e12a689b0499d8bd",
+    "required-notices/Rollup-Rust-crates/parking_lot-0.12.5/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "required-notices/Rollup-Rust-crates/parking_lot-0.12.5/LICENSE-MIT": "c9a75f18b9ab2927829a208fc6aa2cf4e63b8420887ba29cdb265d6619ae82d5",
+    "required-notices/Rollup-Rust-crates/parking_lot_core-0.9.12/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "required-notices/Rollup-Rust-crates/parking_lot_core-0.9.12/LICENSE-MIT": "c9a75f18b9ab2927829a208fc6aa2cf4e63b8420887ba29cdb265d6619ae82d5",
+    "required-notices/Rollup-Rust-crates/pathdiff-0.2.3/LICENSE-APACHE": "dd7818e575815db1fc6ba5ae894cd1674dfbff78562407b1f9f44da0fb857fe4",
+    "required-notices/Rollup-Rust-crates/pathdiff-0.2.3/LICENSE-MIT": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+    "required-notices/Rollup-Rust-crates/percent-encoding-2.3.2/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "required-notices/Rollup-Rust-crates/percent-encoding-2.3.2/LICENSE-MIT": "b38f11f6096706e6de553dabe2a7ed142d59b6fa8c97e290c67496154745cdd5",
+    "required-notices/Rollup-Rust-crates/petgraph-0.7.1/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "required-notices/Rollup-Rust-crates/petgraph-0.7.1/LICENSE-MIT": "7576269ea71f767b99297934c0b2367532690f8c4badc695edf8e04ab6a1e545",
+    "required-notices/Rollup-Rust-crates/petgraph-0.7.1/assets_LICENSE.md": "608fdcbb7daea2541c57228f21fc97deec310b19dafde70b2f4b84a96bf779f8",
+    "required-notices/Rollup-Rust-crates/phf-0.11.3/LICENSE": "0ab4d106b6faac07fb6a051815fd1b4d862d730895e2d7d7358c2f13565e7a38",
+    "required-notices/Rollup-Rust-crates/phf_generator-0.11.3/LICENSE": "0ab4d106b6faac07fb6a051815fd1b4d862d730895e2d7d7358c2f13565e7a38",
+    "required-notices/Rollup-Rust-crates/phf_macros-0.11.3/LICENSE": "0ab4d106b6faac07fb6a051815fd1b4d862d730895e2d7d7358c2f13565e7a38",
+    "required-notices/Rollup-Rust-crates/phf_shared-0.11.3/LICENSE": "0ab4d106b6faac07fb6a051815fd1b4d862d730895e2d7d7358c2f13565e7a38",
+    "required-notices/Rollup-Rust-crates/pin-project-lite-0.2.17/LICENSE-APACHE": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+    "required-notices/Rollup-Rust-crates/pin-project-lite-0.2.17/LICENSE-MIT": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+    "required-notices/Rollup-Rust-crates/potential_utf-0.1.6/LICENSE": "f367c1b8e1aa262435251e442901da4607b4650e0e63a026f5044473ecfb90f2",
+    "required-notices/Rollup-Rust-crates/proc-macro2-1.0.107/LICENSE-APACHE": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+    "required-notices/Rollup-Rust-crates/proc-macro2-1.0.107/LICENSE-MIT": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+    "required-notices/Rollup-Rust-crates/psm-0.1.32/LICENSE-APACHE": "965a63a81d9a2fbeb5f9096954dabb49690f9dffcdac9825f675b25c807252a2",
+    "required-notices/Rollup-Rust-crates/psm-0.1.32/LICENSE-MIT": "3e3714aa69bd874601741fd7d7ad5298740cece37778e279fc1ab4451c5a11af",
+    "required-notices/Rollup-Rust-crates/quote-1.0.47/LICENSE-APACHE": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+    "required-notices/Rollup-Rust-crates/quote-1.0.47/LICENSE-MIT": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+    "required-notices/Rollup-Rust-crates/radium-0.7.0/LICENSE.txt": "13f4cc9fbc8d4a447b28aa84019c10ad4abf4b5f6919db061bf6690ccc23bc02",
+    "required-notices/Rollup-Rust-crates/radix_fmt-1.0.0/LICENSE": "430dfad25bf0492d2ac16e6a0c17897afdab04e45bf5e06626ec998d78e8af3e",
+    "required-notices/Rollup-Rust-crates/rand-0.8.8/COPYRIGHT": "90eb64f0279b0d9432accfa6023ff803bc4965212383697eee27a0f426d5f8d5",
+    "required-notices/Rollup-Rust-crates/rand-0.8.8/LICENSE-APACHE": "35242e7a83f69875e6edeff02291e688c97caafe2f8902e4e19b49d3e78b4cab",
+    "required-notices/Rollup-Rust-crates/rand-0.8.8/LICENSE-MIT": "209fbbe0ad52d9235e37badf9cadfe4dbdc87203179c0899e738b39ade42177b",
+    "required-notices/Rollup-Rust-crates/rand_core-0.6.4/COPYRIGHT": "90eb64f0279b0d9432accfa6023ff803bc4965212383697eee27a0f426d5f8d5",
+    "required-notices/Rollup-Rust-crates/rand_core-0.6.4/LICENSE-APACHE": "6df43f6f4b5d4587f3d8d71e45532c688fd168afa5fe89d571cb32fa09c4ef51",
+    "required-notices/Rollup-Rust-crates/rand_core-0.6.4/LICENSE-MIT": "209fbbe0ad52d9235e37badf9cadfe4dbdc87203179c0899e738b39ade42177b",
+    "required-notices/Rollup-Rust-crates/redox_syscall-0.5.18/LICENSE": "efcfee7981ff72431fffb06925cad00a23dce079ed4354f61030ad5abdb78829",
+    "required-notices/Rollup-Rust-crates/regex-1.13.1/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "required-notices/Rollup-Rust-crates/regex-1.13.1/LICENSE-MIT": "6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb",
+    "required-notices/Rollup-Rust-crates/regex-automata-0.4.18/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "required-notices/Rollup-Rust-crates/regex-automata-0.4.18/LICENSE-MIT": "6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb",
+    "required-notices/Rollup-Rust-crates/regex-syntax-0.8.11/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "required-notices/Rollup-Rust-crates/regex-syntax-0.8.11/LICENSE-MIT": "6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb",
+    "required-notices/Rollup-Rust-crates/regex-syntax-0.8.11/src_unicode_tables_LICENSE-UNICODE": "74db5baf44a41b1000312c673544b3374e4198af5605c7f9080a402cec42cfa3",
+    "required-notices/Rollup-Rust-crates/regress-0.11.1/LICENSE-APACHE": "e36d55837170195cdf934aa6a48c0ad6efba1bde3f5b4a1b9259c171d5aeb647",
+    "required-notices/Rollup-Rust-crates/regress-0.11.1/LICENSE-MIT": "3f8a05fc8617c5ce569fa5a4f2301cd847fe00fa011bdaa8f353fd55a2691a54",
+    "required-notices/Rollup-Rust-crates/rustc-hash-2.1.3/LICENSE-APACHE": "95bd3988beee069fa2848f648dab43cc6e0b2add2ad6bcb17360caf749802bcc",
+    "required-notices/Rollup-Rust-crates/rustc-hash-2.1.3/LICENSE-MIT": "30fefc3a7d6a0041541858293bcbea2dde4caa4c0a5802f996a7f7e8c0085652",
+    "required-notices/Rollup-Rust-crates/rustversion-1.0.23/LICENSE-APACHE": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+    "required-notices/Rollup-Rust-crates/rustversion-1.0.23/LICENSE-MIT": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+    "required-notices/Rollup-Rust-crates/ryu-1.0.23/LICENSE-APACHE": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+    "required-notices/Rollup-Rust-crates/ryu-1.0.23/LICENSE-BOOST": "c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566",
+    "required-notices/Rollup-Rust-crates/ryu-js-1.0.3/LICENSE-APACHE": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+    "required-notices/Rollup-Rust-crates/ryu-js-1.0.3/LICENSE-BOOST": "c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566",
+    "required-notices/Rollup-Rust-crates/scoped-tls-1.0.1/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "required-notices/Rollup-Rust-crates/scoped-tls-1.0.1/LICENSE-MIT": "378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397",
+    "required-notices/Rollup-Rust-crates/scopeguard-1.2.0/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "required-notices/Rollup-Rust-crates/scopeguard-1.2.0/LICENSE-MIT": "fb77f0a9c53e473abe5103c8632ef9f0f2874d4fb3f17cb2d8c661aab9cee9d7",
+    "required-notices/Rollup-Rust-crates/seq-macro-0.3.6/LICENSE-APACHE": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+    "required-notices/Rollup-Rust-crates/seq-macro-0.3.6/LICENSE-MIT": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+    "required-notices/Rollup-Rust-crates/serde-1.0.229/LICENSE-APACHE": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+    "required-notices/Rollup-Rust-crates/serde-1.0.229/LICENSE-MIT": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+    "required-notices/Rollup-Rust-crates/serde_core-1.0.229/LICENSE-APACHE": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+    "required-notices/Rollup-Rust-crates/serde_core-1.0.229/LICENSE-MIT": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+    "required-notices/Rollup-Rust-crates/serde_derive-1.0.229/LICENSE-APACHE": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+    "required-notices/Rollup-Rust-crates/serde_derive-1.0.229/LICENSE-MIT": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+    "required-notices/Rollup-Rust-crates/serde_json-1.0.154/LICENSE-APACHE": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+    "required-notices/Rollup-Rust-crates/serde_json-1.0.154/LICENSE-MIT": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+    "required-notices/Rollup-Rust-crates/shlex-2.0.1/LICENSE-APACHE": "553fffcd9b1cb158bc3e9edc35da85ca5c3b3d7d2e61c883ebcfa8a65814b583",
+    "required-notices/Rollup-Rust-crates/shlex-2.0.1/LICENSE-MIT": "4455bf75a91154108304cb283e0fea9948c14f13e20d60887cf2552449dea3b1",
+    "required-notices/Rollup-Rust-crates/siphasher-1.0.4/COPYING": "c962ee4d1d05ddc138b202b2540219ebc57893fcf97b364852094a9a94ce1365",
+    "required-notices/Rollup-Rust-crates/siphasher-1.0.4/LICENSE-APACHE": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+    "required-notices/Rollup-Rust-crates/siphasher-1.0.4/LICENSE-MIT": "f9c4c77baa3828004ee54b8a4f2db2e88ed44a6237a493965bf551fac0fcb62d",
+    "required-notices/Rollup-Rust-crates/slab-0.4.12/LICENSE": "8ce0830173fdac609dfb4ea603fdc002c2f4af0dc9b1a005653f5da9cf534b18",
+    "required-notices/Rollup-Rust-crates/smallvec-1.16.4/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "required-notices/Rollup-Rust-crates/smallvec-1.16.4/LICENSE-MIT": "0b28172679e0009b655da42797c03fd163a3379d5cfa67ba1f1655e974a2a1a9",
+    "required-notices/Rollup-Rust-crates/stable_deref_trait-1.2.1/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "required-notices/Rollup-Rust-crates/stable_deref_trait-1.2.1/LICENSE-MIT": "5e05b024f653a5ce199e77cbbbd42fb5553562ec714b819421ed0c3e552a75d7",
+    "required-notices/Rollup-Rust-crates/stacker-0.1.25/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "required-notices/Rollup-Rust-crates/stacker-0.1.25/LICENSE-MIT": "378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397",
+    "required-notices/Rollup-Rust-crates/static_assertions-1.1.0/LICENSE-APACHE": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+    "required-notices/Rollup-Rust-crates/static_assertions-1.1.0/LICENSE-MIT": "ea084a2373ebc1f0902c09266e7bf25a05ab3814c1805bb017ffa7308f90c061",
+    "required-notices/Rollup-Rust-crates/string_enum-1.0.2/PUBLISHED-LICENSE-METADATA.json": "97b6226b62aa3d21ae29fc43388c913bbe3fceb71622e0f1c08af884d30bb547",
+    "required-notices/Rollup-Rust-crates/swc_allocator-5.0.1/PUBLISHED-LICENSE-METADATA.json": "89b7ce50ea92baf6a387c8ef49f1a7b7d3861c9ce75fff11446c915928c55c83",
+    "required-notices/Rollup-Rust-crates/swc_atoms-10.0.1/PUBLISHED-LICENSE-METADATA.json": "1accc188c94f044ada51df72b5f0a65598a2e89d59d100b3ea18ed2965279f3a",
+    "required-notices/Rollup-Rust-crates/swc_common-27.0.0/PUBLISHED-LICENSE-METADATA.json": "445923532669e39961b68e55e6cbe94e5380e750e4d49c4a515aec9b95e3f55a",
+    "required-notices/Rollup-Rust-crates/swc_compiler_base-67.0.0/PUBLISHED-LICENSE-METADATA.json": "9a7a920a007f29665f2dbc6888a6031378887f72dbba58c105b10e0b63140e4d",
+    "required-notices/Rollup-Rust-crates/swc_config-6.0.1/PUBLISHED-LICENSE-METADATA.json": "8c37eefd4b99e38feed39f26ac57dea77f90d3c685c3ff2a63c601248264e192",
+    "required-notices/Rollup-Rust-crates/swc_config_macro-1.0.1/PUBLISHED-LICENSE-METADATA.json": "b4c1e61fd18fb0838aec8faa08e9349951e47a377b2990049cd9cb057de79996",
+    "required-notices/Rollup-Rust-crates/swc_ecma_ast-30.0.2/PUBLISHED-LICENSE-METADATA.json": "9452a7e9cf217c99ce1bf74f7b05706eb50e2cc47731238c5e39d4919c47e325",
+    "required-notices/Rollup-Rust-crates/swc_ecma_codegen-33.0.0/PUBLISHED-LICENSE-METADATA.json": "8a896a0a7173ea7ece2500fb0ac83ed07670ea77d69423df71c01b56e5cf1a03",
+    "required-notices/Rollup-Rust-crates/swc_ecma_codegen_macros-2.0.2/PUBLISHED-LICENSE-METADATA.json": "53ecc8567a46ad9b0144e3123f4365f8f22a7c2c8e91caf82a6762bcdd05da62",
+    "required-notices/Rollup-Rust-crates/swc_ecma_hooks-2.0.0/PUBLISHED-LICENSE-METADATA.json": "7e6f045d2cf76c34c027464487e8b69ebc8386e3f21f5848e36595e2bd45bcfa",
+    "required-notices/Rollup-Rust-crates/swc_ecma_minifier-64.0.3/PUBLISHED-LICENSE-METADATA.json": "25d46f036d11c5c1e16114dbef9478fbb824bc3a96ed6b9da5102ef309660cbc",
+    "required-notices/Rollup-Rust-crates/swc_ecma_parser-47.0.0/PUBLISHED-LICENSE-METADATA.json": "f4f9fb6456f4ef079f89a57a922d211107ae7e69abebc9e8e943b02a9ea4444b",
+    "required-notices/Rollup-Rust-crates/swc_ecma_transforms_base-51.0.1/PUBLISHED-LICENSE-METADATA.json": "dfcf2e0c413907fb385126d4d96692914458ec83227bec9b76faad3206e81159",
+    "required-notices/Rollup-Rust-crates/swc_ecma_transforms_optimization-54.0.1/PUBLISHED-LICENSE-METADATA.json": "45a0fa537006308d743d52ec36a8ec14165de0db55c1b4c41cf3f752762a8830",
+    "required-notices/Rollup-Rust-crates/swc_ecma_utils-36.1.0/PUBLISHED-LICENSE-METADATA.json": "05144d8c12460edd778f78058a8a9eca9ca80d657d25d6fc0c807b269148e856",
+    "required-notices/Rollup-Rust-crates/swc_ecma_visit-30.0.0/PUBLISHED-LICENSE-METADATA.json": "24519bcee2eb9ad8d09cf6cdc681c7ca48e1a828e2828ba7c05548ee124c9fb1",
+    "required-notices/Rollup-Rust-crates/swc_eq_ignore_macros-1.0.1/PUBLISHED-LICENSE-METADATA.json": "4295358c62ccd33f9cb3c0616ee5bde528a9739bdb5859ac21aa085d8a5e3eb2",
+    "required-notices/Rollup-Rust-crates/swc_macros_common-1.0.1/PUBLISHED-LICENSE-METADATA.json": "8ecc50a9eca6ad7774b9e2a920202096784fef63193d4c07f3bf4c06fbedfa0b",
+    "required-notices/Rollup-Rust-crates/swc_sourcemap-10.0.3/PUBLISHED-LICENSE-METADATA.json": "0800733369a562aa98a855ce41ae7fcc3020fee5c2acf25b6c1efb21ce5c8ba3",
+    "required-notices/Rollup-Rust-crates/swc_visit-2.0.2/PUBLISHED-LICENSE-METADATA.json": "bff3878233e8628a4fe2cac705883a2b7f9e47cf41f73918993de2c68ca7bee1",
+    "required-notices/Rollup-Rust-crates/syn-2.0.119/LICENSE-APACHE": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+    "required-notices/Rollup-Rust-crates/syn-2.0.119/LICENSE-MIT": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+    "required-notices/Rollup-Rust-crates/syn-3.0.9/LICENSE-APACHE": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+    "required-notices/Rollup-Rust-crates/syn-3.0.9/LICENSE-MIT": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+    "required-notices/Rollup-Rust-crates/synstructure-0.14.0/LICENSE": "219920e865eee70b7dcfc948a86b099e7f4fe2de01bcca2ca9a20c0a033f2b59",
+    "required-notices/Rollup-Rust-crates/tap-1.0.1/LICENSE.txt": "8b4e95f5cf0dc40269c99f7b787203ffe04ded245ca2427422c196efa2b2f42a",
+    "required-notices/Rollup-Rust-crates/tinystr-0.8.5/LICENSE": "f367c1b8e1aa262435251e442901da4607b4650e0e63a026f5044473ecfb90f2",
+    "required-notices/Rollup-Rust-crates/tracing-0.1.44/LICENSE": "898b1ae9821e98daf8964c8d6c7f61641f5f5aa78ad500020771c0939ee0dea1",
+    "required-notices/Rollup-Rust-crates/tracing-attributes-0.1.31/LICENSE": "898b1ae9821e98daf8964c8d6c7f61641f5f5aa78ad500020771c0939ee0dea1",
+    "required-notices/Rollup-Rust-crates/tracing-core-0.1.36/LICENSE": "898b1ae9821e98daf8964c8d6c7f61641f5f5aa78ad500020771c0939ee0dea1",
+    "required-notices/Rollup-Rust-crates/tracing-core-0.1.36/src_spin_LICENSE": "58545fed1565e42d687aecec6897d35c6d37ccb71479a137c0deb2203e125c79",
+    "required-notices/Rollup-Rust-crates/triomphe-0.1.17/LICENSE-APACHE": "a6b7260485462860838b76ad1846d21f1605e6d239141c3aa949a601d992676c",
+    "required-notices/Rollup-Rust-crates/triomphe-0.1.17/LICENSE-MIT": "15656cc11a8331f28c0986b8ab97220d3e76f98e60ed388b5ffad37dfac4710c",
+    "required-notices/Rollup-Rust-crates/unicode-id-start-1.5.0/LICENSE-APACHE": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+    "required-notices/Rollup-Rust-crates/unicode-id-start-1.5.0/LICENSE-MIT": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+    "required-notices/Rollup-Rust-crates/unicode-id-start-1.5.0/LICENSE-UNICODE": "f7db81051789b729fea528a63ec4c938fdcb93d9d61d97dc8cc2e9df6d47f2a1",
+    "required-notices/Rollup-Rust-crates/unicode-ident-1.0.27/LICENSE-APACHE": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+    "required-notices/Rollup-Rust-crates/unicode-ident-1.0.27/LICENSE-MIT": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+    "required-notices/Rollup-Rust-crates/unicode-ident-1.0.27/LICENSE-UNICODE": "f7db81051789b729fea528a63ec4c938fdcb93d9d61d97dc8cc2e9df6d47f2a1",
+    "required-notices/Rollup-Rust-crates/unicode-width-0.2.3/COPYRIGHT": "23860c2a7b5d96b21569afedf033469bab9fe14a1b24a35068b8641c578ce24d",
+    "required-notices/Rollup-Rust-crates/unicode-width-0.2.3/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "required-notices/Rollup-Rust-crates/unicode-width-0.2.3/LICENSE-MIT": "7b63ecd5f1902af1b63729947373683c32745c16a10e8e6292e2e2dcd7e90ae0",
+    "required-notices/Rollup-Rust-crates/url-2.5.8/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "required-notices/Rollup-Rust-crates/url-2.5.8/LICENSE-MIT": "b38f11f6096706e6de553dabe2a7ed142d59b6fa8c97e290c67496154745cdd5",
+    "required-notices/Rollup-Rust-crates/utf8_iter-1.1.0/COPYRIGHT": "c30152c94a6d75e021adbc52b3a52470366a46edb917e17deae3259251af244c",
+    "required-notices/Rollup-Rust-crates/utf8_iter-1.1.0/LICENSE-APACHE": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+    "required-notices/Rollup-Rust-crates/utf8_iter-1.1.0/LICENSE-MIT": "3fa4ca83dcc9237839b1bdeb2e6d16bdfb5ec0c5ce42b24694d8bbf0dcbef72c",
+    "required-notices/Rollup-Rust-crates/utf_types-1.0.0/COPYRIGHT": "3210be7332b5bdf48eb24a945258b9f38616a2cceb0dfc06e3c3c7e9740475a0",
+    "required-notices/Rollup-Rust-crates/utf_types-1.0.0/LICENSE-APACHE": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+    "required-notices/Rollup-Rust-crates/utf_types-1.0.0/LICENSE-MIT": "3fa4ca83dcc9237839b1bdeb2e6d16bdfb5ec0c5ce42b24694d8bbf0dcbef72c",
+    "required-notices/Rollup-Rust-crates/uuid-1.29.0/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "required-notices/Rollup-Rust-crates/uuid-1.29.0/LICENSE-MIT": "436bc5a105d8e57dcd8778730f3754f7bf39c14d2f530e4cde4bd2d17a83ec3d",
+    "required-notices/Rollup-Rust-crates/version_check-0.9.5/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "required-notices/Rollup-Rust-crates/version_check-0.9.5/LICENSE-MIT": "b7e650f3fce5c53249d1cdc608b54df156a97edd636cf9d23498d0cfe7aec63e",
+    "required-notices/Rollup-Rust-crates/vsimd-0.8.0/PUBLISHED-LICENSE-METADATA.json": "23ed87704f0fdb5e98603426a31668348c5427b190c028ffd1795a4cab4547d6",
+    "required-notices/Rollup-Rust-crates/wasm-bindgen-0.2.130/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "required-notices/Rollup-Rust-crates/wasm-bindgen-0.2.130/LICENSE-MIT": "378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397",
+    "required-notices/Rollup-Rust-crates/wasm-bindgen-macro-0.2.130/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "required-notices/Rollup-Rust-crates/wasm-bindgen-macro-0.2.130/LICENSE-MIT": "378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397",
+    "required-notices/Rollup-Rust-crates/wasm-bindgen-macro-support-0.2.130/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "required-notices/Rollup-Rust-crates/wasm-bindgen-macro-support-0.2.130/LICENSE-MIT": "378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397",
+    "required-notices/Rollup-Rust-crates/wasm-bindgen-shared-0.2.130/LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+    "required-notices/Rollup-Rust-crates/wasm-bindgen-shared-0.2.130/LICENSE-MIT": "378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397",
+    "required-notices/Rollup-Rust-crates/windows-link-0.2.1/license-apache-2.0": "c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b",
+    "required-notices/Rollup-Rust-crates/windows-link-0.2.1/license-mit": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
+    "required-notices/Rollup-Rust-crates/windows-sys-0.61.2/license-apache-2.0": "c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b",
+    "required-notices/Rollup-Rust-crates/windows-sys-0.61.2/license-mit": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
+    "required-notices/Rollup-Rust-crates/writeable-0.6.4/LICENSE": "f367c1b8e1aa262435251e442901da4607b4650e0e63a026f5044473ecfb90f2",
+    "required-notices/Rollup-Rust-crates/wyz-0.5.1/LICENSE.txt": "411781fd38700f2357a14126d0ab048164ab881f1dcb335c1bb932e232c9a2f5",
+    "required-notices/Rollup-Rust-crates/xxhash-rust-0.8.19/LICENSE": "c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566",
+    "required-notices/Rollup-Rust-crates/yoke-0.8.4/LICENSE": "f367c1b8e1aa262435251e442901da4607b4650e0e63a026f5044473ecfb90f2",
+    "required-notices/Rollup-Rust-crates/yoke-derive-0.8.4/LICENSE": "f367c1b8e1aa262435251e442901da4607b4650e0e63a026f5044473ecfb90f2",
+    "required-notices/Rollup-Rust-crates/zerocopy-0.8.63/LICENSE-APACHE": "9d185ac6703c4b0453974c0d85e9eee43e6941009296bb1f5eb0b54e2329e9f3",
+    "required-notices/Rollup-Rust-crates/zerocopy-0.8.63/LICENSE-BSD": "83c1763356e822adde0a2cae748d938a73fdc263849ccff6b27776dff213bd32",
+    "required-notices/Rollup-Rust-crates/zerocopy-0.8.63/LICENSE-MIT": "1a2f5c12ddc934d58956aa5dbdd3255fe55fd957633ab7d0d39e4f0daa73f7df",
+    "required-notices/Rollup-Rust-crates/zerocopy-derive-0.8.63/LICENSE-APACHE": "9d185ac6703c4b0453974c0d85e9eee43e6941009296bb1f5eb0b54e2329e9f3",
+    "required-notices/Rollup-Rust-crates/zerocopy-derive-0.8.63/LICENSE-BSD": "83c1763356e822adde0a2cae748d938a73fdc263849ccff6b27776dff213bd32",
+    "required-notices/Rollup-Rust-crates/zerocopy-derive-0.8.63/LICENSE-MIT": "1a2f5c12ddc934d58956aa5dbdd3255fe55fd957633ab7d0d39e4f0daa73f7df",
+    "required-notices/Rollup-Rust-crates/zerofrom-0.1.8/LICENSE": "f367c1b8e1aa262435251e442901da4607b4650e0e63a026f5044473ecfb90f2",
+    "required-notices/Rollup-Rust-crates/zerofrom-derive-0.1.8/LICENSE": "f367c1b8e1aa262435251e442901da4607b4650e0e63a026f5044473ecfb90f2",
+    "required-notices/Rollup-Rust-crates/zerotrie-0.2.5/LICENSE": "f367c1b8e1aa262435251e442901da4607b4650e0e63a026f5044473ecfb90f2",
+    "required-notices/Rollup-Rust-crates/zerovec-0.11.9/LICENSE": "f367c1b8e1aa262435251e442901da4607b4650e0e63a026f5044473ecfb90f2",
+    "required-notices/Rollup-Rust-crates/zerovec-derive-0.11.7/LICENSE": "f367c1b8e1aa262435251e442901da4607b4650e0e63a026f5044473ecfb90f2",
+    "required-notices/Rollup-Rust-crates/zmij-1.0.23/LICENSE-MIT": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+    "required-notices/Rust-standard-library/COPYRIGHT": "172020dbfd5b53a226dfde77616190a48dcff519b0bc0e6deb91a8450782c4af",
+    "required-notices/Rust-standard-library/COPYRIGHT-library.html": "f40b72a29cc14bfba001fd32450ddb84a946ec0eadd8cd7e4890257a2a452d74",
+    "required-notices/Rust-standard-library/LICENSE-APACHE": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+    "required-notices/Rust-standard-library/LICENSE-MIT": "b71bd43a069ca0641a9ecfe585ca7b3c53b5cc1608f8b68321168698e28b5ea1",
+    "required-notices/ddbase-LICENSE": "58d1e17ffe5109a7ae296caafcadfdbe6a7d176f0bc4ab01e12a689b0499d8bd",
+    "required-notices/esbuild-LICENSE.md": "b40ec5baec7bb34fa5b1c09521fa3cd52d5fad7adafed74932a2010d3612a681",
+    "required-notices/simd-LICENSE": "71674605ec4c087fe9eb534e3e4f9e26eb2e4aabcd76a29fd156c6a844d44b3d",
+    "required-notices/swc-LICENSE": "d96eba1f1881334d50ffc144276dfa98e147a415e7c591ecdfcb81680361dc91",
+    "required-notices/swc-sourcemap-LICENSE": "7516e1cf340213f60d96bca77bb012882dbf80e7cca5922c914174f605d9ef71"
+  },
+  "source_omission_handling": "29 published crate archives omit license files. Exact checksum-verified SPDX grants/authors are retained, with pinned official project texts or canonical SPDX MIT terms (base-encode has no upstream LICENSE at its published revision). No copyright year is inferred. Some published SWC vcs hashes are publicly unavailable; their crates exact metadata is authoritative and a separate pinned official project LICENSE is explicitly supplemental."
+}

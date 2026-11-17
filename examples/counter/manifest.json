@@ -1,0 +1,16 @@
+{
+  "id": "org.example.counter",
+  "name": "Counter",
+  "description": "Keep a count with a configurable increment.",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "page": "Page.qml",
+  "settings": [
+    {
+      "id": "general",
+      "name": "General",
+      "entry": "Settings.qml"
+    }
+  ],
+  "lifecycle": "Lifecycle.qml"
+}

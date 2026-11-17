@@ -1,0 +1,21 @@
+Pilon's native PP-OCRv5 worker adapts inference and geometry from:
+
+RapidAI/RapidOcrAndroidOnnx, commit 5e675ed23b2e5f87acd264b4aa0948f324d05ec8
+https://github.com/RapidAI/RapidOcrAndroidOnnx
+Copyright Benjamin Wan and RapidAI contributors. Apache License 2.0.
+DbNet.cpp, OcrUtils.cpp and clipper.cpp are compiled from the verified upstream archive.
+
+RapidAI/RapidOCR 3.9.2, ch_ppocr_rec and cal_rec_boxes
+https://github.com/RapidAI/RapidOCR
+Copyright SWHL, Joker1212 and contributors. Apache License 2.0.
+Character bounds retain CTC positions, crop geometry and UTF-16 text offsets.
+
+PaddlePaddle/PaddleOCR
+https://github.com/PaddlePaddle/PaddleOCR
+Copyright 2020 PaddlePaddle Authors. Apache License 2.0.
+The worker retains the PP-OCRv5 detector and English handwriting recognizer.
+
+Clipper 6.4.2, Copyright Angus Johnson, Boost Software License 1.0.
+The original license notice remains in the upstream clipper.cpp and clipper.hpp.
+
+The build copies these notices and upstream licenses beside the packaged runtime.

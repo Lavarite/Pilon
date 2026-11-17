@@ -1,0 +1,8 @@
+{
+  "description": "Verify requested work using actual commands and results before claiming success.",
+  "toolset": "remote-devices",
+  "source": "https://github.com/obra/superpowers/tree/b36e0829c6d0140e93cfef2ca599b1b07d4a7797/skills/verification-before-completion",
+  "files": [
+    "SKILL.md"
+  ]
+}

@@ -1,0 +1,82 @@
+--- a/misc.c
++++ b/misc.c
+@@ -559,7 +559,13 @@
+ #ifdef HAVE_STRUCT_PASSWD_PW_CLASS
+ 	copy->pw_class = xstrdup(pw->pw_class == NULL ? "" : pw->pw_class);
+ #endif
++	/* Android passwd entries do not describe this app's private home. */
++#ifdef __ANDROID__
++	const char *home = getenv("HOME");
++	copy->pw_dir = xstrdup(home != NULL && *home == '/' ? home : (pw->pw_dir == NULL ? "" : pw->pw_dir));
++#else
+ 	copy->pw_dir = xstrdup(pw->pw_dir == NULL ? "" : pw->pw_dir);
++#endif
+ 	copy->pw_shell = xstrdup(pw->pw_shell == NULL ? "" : pw->pw_shell);
+ 	return copy;
+ }
+@@ -1276,7 +1282,7 @@
+ tilde_expand(const char *filename, uid_t uid, char **retp)
+ {
+ 	char *ocopy = NULL, *copy, *s = NULL;
+-	const char *path = NULL, *user = NULL;
++	const char *path = NULL, *user = NULL, *home;
+ 	struct passwd *pw;
+ 	size_t len;
+ 	int ret = -1, r, slash;
+@@ -1318,10 +1324,15 @@
+ 		goto out;
+ 	}
+ 
++	home = pw->pw_dir;
++#ifdef __ANDROID__
++	if (user == NULL && uid == getuid() && getenv("HOME") != NULL && *getenv("HOME") == '/')
++		home = getenv("HOME");
++#endif
+ 	/* Make sure directory has a trailing '/' */
+-	slash = (len = strlen(pw->pw_dir)) == 0 || pw->pw_dir[len - 1] != '/';
+-
+-	if ((r = xasprintf(&s, "%s%s%s", pw->pw_dir,
++	slash = (len = strlen(home)) == 0 || home[len - 1] != '/';
++
++	if ((r = xasprintf(&s, "%s%s%s", home,
+ 	    slash ? "/" : "", path != NULL ? path : "")) <= 0) {
+ 		error_f("xasprintf failed");
+ 		goto out;
+--- a/hostfile.c
++++ b/hostfile.c
+@@ -729,7 +729,11 @@
+ 			r = SSH_ERR_SYSTEM_ERROR;
+ 			goto fail;
+ 		}
++#ifdef __ANDROID__
++		if (rename(filename, back) == -1) {
++#else
+ 		if (link(filename, back) == -1) {
++#endif
+ 			oerrno = errno;
+ 			error_f("link %.100s to %.100s: %s", filename,
+ 			    back, strerror(errno));
+--- a/openbsd-compat/explicit_bzero.c
++++ b/openbsd-compat/explicit_bzero.c
+@@ -36,10 +36,10 @@
+ #else /* HAVE_MEMSET_S */
+ 
+ /*
+- * Indirect bzero through a volatile pointer to hopefully avoid
++ * Indirect memset through a volatile pointer to hopefully avoid
+  * dead-store optimisation eliminating the call.
+  */
+-static void (* volatile ssh_bzero)(void *, size_t) = bzero;
++static void *(* volatile ssh_memset)(void *, int, size_t) = memset;
+ 
+ void
+ explicit_bzero(void *p, size_t n)
+@@ -57,7 +57,7 @@
+ # endif
+ #endif
+ 
+-	ssh_bzero(p, n);
++	ssh_memset(p, 0, n);
+ }
+ 
+ #endif /* HAVE_MEMSET_S */

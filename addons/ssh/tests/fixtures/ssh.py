@@ -1,0 +1,31 @@
+#!/usr/bin/env python3
+import os, sys, termios
+mode = os.environ.get('PILON_TEST_SSH_MODE') or next((arg.split('.')[0] for arg in sys.argv[1:] if arg.endswith('.fixture.invalid')), 'failure')
+if mode == 'long-error':
+    print('Additional SSH diagnostic output.\n' * 80 + 'Permission denied (publickey).', flush=True)
+    sys.exit(255)
+if mode == 'failure':
+    print('ssh: Could not resolve hostname unavailable.fixture.invalid: Name or service not known', flush=True)
+    sys.exit(255)
+if mode == 'logout':
+    sys.stdout.write('\x1ePILON_AUTHENTICATED\x1f')
+    sys.stdout.flush()
+    sys.exit(0)
+if mode == 'host':
+    sys.stdout.write("The authenticity of host 'host.fixture.invalid (192.0.2.1)' can't be established.\nED25519 key fingerprint is SHA256:fixtureFingerprint.\nAre you sure you want to continue connecting (yes/no/[fingerprint])? ")
+    sys.stdout.flush()
+    sys.stdin.readline()
+elif mode == 'approval':
+    print('To authenticate, visit:\nhttps://login.fixture.invalid/approve', flush=True)
+    sys.stdin.readline()
+elif mode == 'password':
+    attributes = termios.tcgetattr(0)
+    attributes[3] &= ~termios.ECHO
+    termios.tcsetattr(0, termios.TCSANOW, attributes)
+    sys.stdout.write('tester@host.fixture.invalid password: ')
+    sys.stdout.flush()
+    if sys.stdin.readline().strip() != 'test-password':
+        sys.exit(255)
+sys.stdout.write('\x1ePILON_AUTHENTICATED\x1fConnected\n')
+sys.stdout.flush()
+sys.stdin.readline()

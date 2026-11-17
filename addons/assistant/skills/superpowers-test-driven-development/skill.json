@@ -1,0 +1,9 @@
+{
+  "description": "Implement changes on a selected device with failing tests first.",
+  "toolset": "remote-devices",
+  "source": "https://github.com/obra/superpowers/tree/b36e0829c6d0140e93cfef2ca599b1b07d4a7797/skills/test-driven-development",
+  "files": [
+    "SKILL.md",
+    "writing-good-tests.md"
+  ]
+}

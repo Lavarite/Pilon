@@ -1,0 +1,14 @@
+{
+  "repository": "https://github.com/anthropics/skills",
+  "commit": "41bbe19d1a1a7eaab5e7bb9050a417e5c6cffc8f",
+  "files": {
+    "upstream.md": {
+      "source": "skills/web-artifacts-builder/SKILL.md",
+      "sha256": "81c5002c6643b0de7b8710b00e7a9038daa6fb9b68d59870ee6adb12da8d10f8"
+    },
+    "LICENSE.txt": {
+      "source": "skills/web-artifacts-builder/LICENSE.txt",
+      "sha256": "bc6b3af2f331cbc7fb0da1344efb2cbe5877a31498b4d70dbc7000f3405a1362"
+    }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "description": "Address GitHub PR review comments in the selected repository.",
+  "source": "https://github.com/openai/skills/tree/49f948faa9258a0c61caceaf225e179651397431/skills/.curated/gh-address-comments",
+  "files": [
+    "SKILL.md",
+    "upstream.md",
+    "source.json",
+    "LICENSE.txt"
+  ]
+}

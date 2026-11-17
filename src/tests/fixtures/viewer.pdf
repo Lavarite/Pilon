@@ -1,0 +1,91 @@
+%PDF-1.4
+%µ¶
+% Written by MuPDF 1.28.2
+
+1 0 obj
+<</Type/Catalog/Pages 2 0 R/Outlines 11 0 R>>
+endobj
+
+2 0 obj
+<</Type/Pages/Kids[3 0 R 5 0 R]/Count 2>>
+endobj
+
+3 0 obj
+<</Type/Page/Parent 2 0 R/MediaBox[0 0 400 600]/Resources<</Font<</F1 7 0 R>>>>/Contents 4 0 R/Annots[10 0 R]>>
+endobj
+
+4 0 obj
+<</Length 97>>
+stream
+BT /F1 18 Tf 40 550 Td (First section selectable text) Tj 0 -30 Td (Jump to second section) Tj ET
+endstream
+endobj
+
+5 0 obj
+<</Type/Page/Parent 2 0 R/MediaBox[0 0 600 400]/Resources<</Font<</F1 7 0 R>>>>/Contents 6 0 R>>
+endobj
+
+6 0 obj
+<</Length 61>>
+stream
+BT /F1 18 Tf 40 350 Td (Second section selectable text) Tj ET
+endstream
+endobj
+
+7 0 obj
+<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>
+endobj
+
+10 0 obj
+<</Type/Annot/Subtype/Link/Rect[40 515 240 540]/Border[0 0 0]/Dest[5 0 R/XYZ 0 400 0]>>
+endobj
+
+11 0 obj
+<</Type/Outlines/Count 2/First 12 0 R/Last 15 0 R>>
+endobj
+
+12 0 obj
+<</Count -1/A<</S/GoTo/D[3 0 R/XYZ 72 564 0]>>/First 13 0 R/Last 13 0 R/Next 15 0 R/Parent 11 0 R/Title(First section)>>
+endobj
+
+13 0 obj
+<</Count -1/A<</S/GoTo/D[3 0 R/XYZ 72 564 0]>>/First 14 0 R/Last 14 0 R/Parent 12 0 R/Title(First subsection)>>
+endobj
+
+14 0 obj
+<</A<</S/GoTo/D[3 0 R/XYZ 72 564 0]>>/Parent 13 0 R/Title(Nested subsection)>>
+endobj
+
+15 0 obj
+<</Count -1/A<</S/GoTo/D[5 0 R/XYZ 72 364 0]>>/First 16 0 R/Last 16 0 R/Parent 11 0 R/Prev 12 0 R/Title(Second section)>>
+endobj
+
+16 0 obj
+<</A<</S/GoTo/D[5 0 R/XYZ 72 364 0]>>/Parent 15 0 R/Title(Second subsection)>>
+endobj
+
+xref
+0 17
+0000000008 65535 f 
+0000000042 00000 n 
+0000000104 00000 n 
+0000000162 00000 n 
+0000000290 00000 n 
+0000000436 00000 n 
+0000000549 00000 n 
+0000000659 00000 n 
+0000000009 00002 f 
+0000000000 00002 f 
+0000000723 00000 n 
+0000000828 00000 n 
+0000000897 00000 n 
+0000001035 00000 n 
+0000001164 00000 n 
+0000001260 00000 n 
+0000001399 00000 n 
+
+trailer
+<</Size 17/Root 1 0 R/ID[<C3AAC3831BC297C295C29D02C29D47C2><2023F9BB3604E20CE7F01BCB5744D3FD>]>>
+startxref
+1495
+%%EOF

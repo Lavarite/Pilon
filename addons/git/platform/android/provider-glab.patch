@@ -1,0 +1,60 @@
+--- a/internal/commands/auth/login/login.go
++++ b/internal/commands/auth/login/login.go
+@@ -8,6 +8,7 @@
+ 	"net"
+ 	"net/url"
+ 	"os"
++	"runtime"
+ 	"slices"
+ 	"strings"
+ 	"time"
+@@ -304,6 +305,10 @@
+ 		}
+ 	}
+ 
++	if runtime.GOOS == "android" && keyringPref != "true" {
++		return errors.New("Android secure credential storage is unavailable")
++	}
++
+ 	if opts.Token != "" {
+ 		if opts.Hostname == "" {
+ 			return errors.New("empty hostname would leak `oauth_token`")
+--- a/internal/config/config.go
++++ b/internal/config/config.go
+@@ -7,6 +7,7 @@
+ 	"net/url"
+ 	"os"
+ 	"path/filepath"
++	"runtime"
+ 	"slices"
+ 	"sort"
+ 	"strconv"
+@@ -592,6 +593,7 @@
+ // The keyring cleanup is skipped in CI, where the keyring is left untouched.
+ func (c *fileConfig) syncKeyring(hostname, key, value string) (string, error) {
+ 	useKeyring, _ := c.Get(hostname, "use_keyring")
++	if runtime.GOOS == "android" { useKeyring = "true" }
+ 	switch {
+ 	case useKeyring == "true" && value != "":
+ 		// Keyring mode: store in the keyring and drop the plaintext copy from the
+--- a/internal/oauth2/oauth2.go
++++ b/internal/oauth2/oauth2.go
+@@ -2,6 +2,7 @@
+ 
+ import (
+ 	"context"
++	"runtime"
+ 	"net/http"
+ 
+ 	"golang.org/x/oauth2"
+@@ -30,6 +31,10 @@
+ 	}
+ 
+ 	token, err := gitlaboauth2.AuthorizationFlow(ctx, baseURL, clientID, redirectURL, scopes, callbackServerListenAddr, func(url string) error {
++		if runtime.GOOS == "android" {
++			io.LogErrorf("PILON_OPEN_URL=%s\n", url)
++			return nil
++		}
+ 		browser, _ := cfg.Get(hostname, "browser")
+ 		if err := utils.OpenInBrowser(url, browser); err != nil {
+ 			io.LogErrorf("Failed opening a browser at %s\n", url)

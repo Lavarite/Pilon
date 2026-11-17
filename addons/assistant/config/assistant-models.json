@@ -1,0 +1,163 @@
+{
+  "files": [
+    {
+      "path": "whisper-large-v3-turbo/ggml-large-v3-turbo-q8_0.bin",
+      "repository": "ggerganov/whisper.cpp",
+      "revision": "5359861c739e955e79d9a303bcbc70fb988958b1",
+      "filename": "ggml-large-v3-turbo-q8_0.bin",
+      "bytes": 874188075,
+      "sha256": "317eb69c11673c9de1e1f0d459b253999804ec71ac4c23c17ecf5fbe24e259a1"
+    },
+    {
+      "path": "breeze-tts-2/LICENSE",
+      "repository": "BreezeBlue/Breeze-TTS-2",
+      "revision": "799624c0b4a1daa8db6d28bbd9850043c0270734",
+      "filename": "LICENSE",
+      "bytes": 18719,
+      "sha256": "f158b88cd51473925e1ce8c39f4c7c9e419304ad71371896c4ff18fa1351dca2"
+    },
+    {
+      "path": "breeze-tts-2/readme.md",
+      "repository": "BreezeBlue/Breeze-TTS-2",
+      "revision": "799624c0b4a1daa8db6d28bbd9850043c0270734",
+      "filename": "readme.md",
+      "bytes": 9822,
+      "sha256": "0674759a9cbed4733676bad93bfa7c70048f0ea4fcf68ce2313a9140b9307589"
+    },
+    {
+      "path": "breeze-tts-2/breeze-tts-2-q8_0.gguf",
+      "repository": "audio-cpp/audio.cpp-gguf",
+      "revision": "57de533382ad47d5527e7562d1f80c41f769553b",
+      "filename": "Breeze-TTS-2-GGUF/breeze-tts-2-q8_0.gguf",
+      "bytes": 5079670336,
+      "sha256": "b17b89b1c21107c44e8d556ab0a856d7acd06bdd0c914e68e0e57f6e33f555a3",
+      "platform": "android"
+    },
+    {
+      "path": "breeze-tts-2/audio_tokenizer/config.json",
+      "repository": "BreezeBlue/Breeze-TTS-2",
+      "revision": "799624c0b4a1daa8db6d28bbd9850043c0270734",
+      "filename": "audio_tokenizer/config.json",
+      "bytes": 2336,
+      "sha256": "ee65bb901c876664ab8707c487157aa1a6ee57c65969b28fb5ec9dc211e68167",
+      "platform": "desktop"
+    },
+    {
+      "path": "breeze-tts-2/audio_tokenizer/configuration.json",
+      "repository": "BreezeBlue/Breeze-TTS-2",
+      "revision": "799624c0b4a1daa8db6d28bbd9850043c0270734",
+      "filename": "audio_tokenizer/configuration.json",
+      "bytes": 76,
+      "sha256": "6bc26d64eb5024b4d1dab5a52371958b429256d6c9d59787f1f5294a54e0cebd",
+      "platform": "desktop"
+    },
+    {
+      "path": "breeze-tts-2/audio_tokenizer/model.safetensors",
+      "repository": "BreezeBlue/Breeze-TTS-2",
+      "revision": "799624c0b4a1daa8db6d28bbd9850043c0270734",
+      "filename": "audio_tokenizer/model.safetensors",
+      "bytes": 682293092,
+      "sha256": "836b7b357f5ea43e889936a3709af68dfe3751881acefe4ecf0dbd30ba571258",
+      "platform": "desktop"
+    },
+    {
+      "path": "breeze-tts-2/audio_tokenizer/preprocessor_config.json",
+      "repository": "BreezeBlue/Breeze-TTS-2",
+      "revision": "799624c0b4a1daa8db6d28bbd9850043c0270734",
+      "filename": "audio_tokenizer/preprocessor_config.json",
+      "bytes": 234,
+      "sha256": "fcb3805e597e786d4067706e602f6688524640f8d3396790e2e09b5942fcbdfb",
+      "platform": "desktop"
+    },
+    {
+      "path": "breeze-tts-2/config.json",
+      "repository": "BreezeBlue/Breeze-TTS-2",
+      "revision": "799624c0b4a1daa8db6d28bbd9850043c0270734",
+      "filename": "config.json",
+      "bytes": 10161,
+      "sha256": "57849eb756ca1602efe89afcc5c70379dd127f8deeb9f655204d4340190ea929",
+      "platform": "desktop"
+    },
+    {
+      "path": "breeze-tts-2/generation_config.json",
+      "repository": "BreezeBlue/Breeze-TTS-2",
+      "revision": "799624c0b4a1daa8db6d28bbd9850043c0270734",
+      "filename": "generation_config.json",
+      "bytes": 251,
+      "sha256": "2ef3f2c0ab8d9ad241059138a795433c5410fd9954efb9625674ecd2a9529434",
+      "platform": "desktop"
+    },
+    {
+      "path": "breeze-tts-2/model-00001-of-00002.safetensors",
+      "repository": "BreezeBlue/Breeze-TTS-2",
+      "revision": "799624c0b4a1daa8db6d28bbd9850043c0270734",
+      "filename": "model-00001-of-00002.safetensors",
+      "bytes": 4961989890,
+      "sha256": "abf813781256e10cbe81f2dbb415f897556225d4dfa0282d67aa8ea164e114a9",
+      "platform": "desktop"
+    },
+    {
+      "path": "breeze-tts-2/model-00002-of-00002.safetensors",
+      "repository": "BreezeBlue/Breeze-TTS-2",
+      "revision": "799624c0b4a1daa8db6d28bbd9850043c0270734",
+      "filename": "model-00002-of-00002.safetensors",
+      "bytes": 2004567152,
+      "sha256": "36aa73b1a11361e1774db90d9c63c63303b294c022de112aa51904d940edcef1",
+      "platform": "desktop"
+    },
+    {
+      "path": "breeze-tts-2/model.safetensors.index.json",
+      "repository": "BreezeBlue/Breeze-TTS-2",
+      "revision": "799624c0b4a1daa8db6d28bbd9850043c0270734",
+      "filename": "model.safetensors.index.json",
+      "bytes": 109004,
+      "sha256": "19977e3d96bb502ed3165b48adff094f6bd71ec3d349940d1a3ba6a0060bd5e3",
+      "platform": "desktop"
+    },
+    {
+      "path": "breeze-tts-2/special_tokens_map.json",
+      "repository": "BreezeBlue/Breeze-TTS-2",
+      "revision": "799624c0b4a1daa8db6d28bbd9850043c0270734",
+      "filename": "special_tokens_map.json",
+      "bytes": 886,
+      "sha256": "194f265bb588d142a16f27d9576104eb3dab3d7ba9961541d2d6e3d5e77e6470",
+      "platform": "desktop"
+    },
+    {
+      "path": "breeze-tts-2/tokenizer.json",
+      "repository": "BreezeBlue/Breeze-TTS-2",
+      "revision": "799624c0b4a1daa8db6d28bbd9850043c0270734",
+      "filename": "tokenizer.json",
+      "bytes": 33386945,
+      "sha256": "d3ec9ac3eb2392389b9f5112e85d8b43316494addb587ba7b7a9d61eac23af96",
+      "platform": "desktop"
+    },
+    {
+      "path": "breeze-tts-2/tokenizer_config.json",
+      "repository": "BreezeBlue/Breeze-TTS-2",
+      "revision": "799624c0b4a1daa8db6d28bbd9850043c0270734",
+      "filename": "tokenizer_config.json",
+      "bytes": 1157960,
+      "sha256": "2c084fd6725c2284e8aa6da095a8d036d48fe79665595bfcd50371821b620e44",
+      "platform": "desktop"
+    },
+    {
+      "path": "ppocrv5/ch_PP-OCRv5_det_server.onnx",
+      "url": "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/onnx/PP-OCRv5/det/ch_PP-OCRv5_det_server.onnx",
+      "bytes": 88118768,
+      "sha256": "0f8846b1d4bba223a2a2f9d9b44022fbc22cc019051a602b41a7fda9667e4cad"
+    },
+    {
+      "path": "ppocrv5/en_PP-OCRv5_rec_mobile.onnx",
+      "url": "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/onnx/PP-OCRv5/rec/en_PP-OCRv5_rec_mobile.onnx",
+      "bytes": 7872351,
+      "sha256": "c3461add59bb4323ecba96a492ab75e06dda42467c9e3d0c18db5d1d21924be8"
+    },
+    {
+      "path": "ppocrv5/ch_ppocr_mobile_v2.0_cls_mobile.onnx",
+      "url": "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/onnx/PP-OCRv4/cls/ch_ppocr_mobile_v2.0_cls_mobile.onnx",
+      "bytes": 585532,
+      "sha256": "e47acedf663230f8863ff1ab0e64dd2d82b838fceb5957146dab185a89d6215c"
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+<resources>
+    <color name="pilon_icon_accent">#ffffb878</color>
+    <color name="pilon_icon_foreground">#ffd6c3b5</color>
+    <color name="pilon_icon_background">#ff1e1916</color>
+</resources>

@@ -1,0 +1,11 @@
+{
+  "id": "org.example.checklist",
+  "name": "Checklist",
+  "description": "Add, complete and remove items in a saved checklist.",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "page": "Page.qml",
+  "settings": [
+    { "id": "general", "name": "General", "entry": "Settings.qml" }
+  ]
+}

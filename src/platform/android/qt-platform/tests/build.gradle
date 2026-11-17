@@ -1,0 +1,42 @@
+buildscript {
+    repositories { google(); mavenCentral() }
+    dependencies { classpath 'com.android.tools.build:gradle:9.2.1' }
+}
+repositories { google(); mavenCentral() }
+apply plugin: qtGradlePluginType
+dependencies {
+    implementation 'androidx.core:core:1.17.0'
+    implementation fileTree(dir: 'libs', include: ['*.jar', '*.aar'], exclude: ['Qt6Android.jar'])
+}
+android {
+    namespace = androidPackageName
+    compileSdkVersion androidCompileSdkVersion
+    buildToolsVersion androidBuildToolsVersion
+    ndkVersion = androidNdkVersion
+    sourceSets {
+        main {
+            manifest.srcFile 'AndroidManifest.xml'
+            java.srcDirs = [qtAndroidDir + '/src', 'src', 'java']
+            res.srcDirs = [qtAndroidDir + '/res', 'res']
+            assets.srcDirs = ['assets']
+            jniLibs.srcDirs = ['libs']
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    aaptOptions { noCompress 'rcc' }
+    packagingOptions { jniLibs { useLegacyPackaging = legacyPackaging.toBoolean() } }
+    defaultConfig {
+        minSdkVersion qtMinSdkVersion
+        targetSdkVersion qtTargetSdkVersion
+        ndk.abiFilters = qtTargetAbiList.split(',')
+    }
+}
+
+def pilonQtPlatform = tasks.register('stagePilonQtPlatform', Copy) {
+    from 'qt-platform-native'
+    into 'libs/arm64-v8a'
+}
+tasks.named('preBuild').configure { dependsOn pilonQtPlatform }

@@ -1,0 +1,70 @@
+From 4708e204c2875a6b7427d521862816ade71e0dec Mon Sep 17 00:00:00 2001
+From: Jan Moeller <Jan.Moeller@governikus.de>
+Date: Fri, 18 Sep 2026 12:06:37 +0200
+Subject: [PATCH] a11y Android: Call QtNativeAccessibility.setActive() from the
+ main thread
+
+This makes sure that all subsequent objects are created in the
+correct (parent) thread.
+
+Fixes: QTBUG-144911
+Pick-to: 6.12 6.8
+Change-Id: I257c4f7e9d46320c40f3f40ad1b72ae1fa823f0b
+Reviewed-by: Assam Boudjelthia <assam.boudjelthia@qt.io>
+---
+ .../android/androidjniaccessibility.cpp       | 25 +++++++++++++------
+ 1 file changed, 18 insertions(+), 7 deletions(-)
+
+diff --git a/src/plugins/platforms/android/androidjniaccessibility.cpp b/src/plugins/platforms/android/androidjniaccessibility.cpp
+index 3c0635284d3..38e6e832824 100644
+--- a/src/plugins/platforms/android/androidjniaccessibility.cpp
++++ b/src/plugins/platforms/android/androidjniaccessibility.cpp
+@@ -23,6 +23,8 @@
+ #include <QtCore/qscopeguard.h>
+ #include <QtCore/qvarlengtharray.h>
+ 
++#include <atomic>
++
+ static const char m_qtTag[] = "Qt A11Y";
+ 
+ QT_BEGIN_NAMESPACE
+@@ -70,7 +72,7 @@ namespace QtAndroidAccessibility
+     static int ACTION_COLLAPSE = 0;
+     static int ACTION_EXPAND = 0;
+ 
+-    static bool m_accessibilityActivated = false;
++    static std::atomic<bool> m_accessibilityActivated = false;
+ 
+     // This object is needed to schedule the execution of the code that
+     // deals with accessibility instances to the Qt main thread.
+@@ -122,15 +124,24 @@ namespace QtAndroidAccessibility
+ 
+     static void setActive(JNIEnv */*env*/, jobject /*thiz*/, jboolean active)
+     {
+-        QMutexLocker lock(QtAndroid::platformInterfaceMutex());
+-        QAndroidPlatformIntegration *platformIntegration = QtAndroid::androidPlatformIntegration();
+         m_accessibilityActivated = active;
+-        if (platformIntegration) {
+-            platformIntegration->accessibility()->setActive(active);
+-        } else {
++
++        if (!m_accessibilityContext) {
+             __android_log_print(ANDROID_LOG_DEBUG, m_qtTag,
+-                "Android platform integration is not ready, accessibility activation deferred.");
++                "Accessibility context is not ready, activation deferred.");
++            return;
+         }
++
++        QMetaObject::invokeMethod(m_accessibilityContext, [active]() {
++            QMutexLocker lock(QtAndroid::platformInterfaceMutex());
++            auto *platformIntegration = QtAndroid::androidPlatformIntegration();
++            if (!platformIntegration) {
++                __android_log_print(ANDROID_LOG_DEBUG, m_qtTag,
++                    "Android platform integration is not ready, accessibility activation deferred.");
++                return;
++            }
++            platformIntegration->accessibility()->setActive(active);
++        }, Qt::QueuedConnection);
+     }
+ 
+     QAccessibleInterface *interfaceFromId(jint objectId)

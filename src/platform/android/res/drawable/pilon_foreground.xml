@@ -1,0 +1,11 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <group android:translateX="15.6" android:translateY="15.6" android:scaleX="1.2" android:scaleY="1.2">
+        <path android:fillColor="@color/pilon_icon_foreground"
+            android:pathData="M8,8 H56 Q57,8 57,9 V12 Q57,13 56,13 H8 Q7,13 7,12 V9 Q7,8 8,8 Z M22,36 H42 Q43,36 43,37 V39 Q43,40 42,40 H22 Q21,40 21,39 V37 Q21,36 22,36 Z" />
+        <path android:fillColor="@android:color/transparent" android:strokeColor="@color/pilon_icon_foreground"
+            android:strokeWidth="3.5" android:strokeLineCap="round" android:strokeLineJoin="round"
+            android:pathData="M21,19 H43 M22,29 L25,33 H39 L42,29 M23,42 V56 M29,42 V56 M35,42 V56 M41,42 V56 M23,21 C19,16 9,17 8,25 C7,33 17,36 22,30 C26,25 22,20 17,21 C12,21 11,28 16,29 C19,30 21,26 18,25 M41,21 C45,16 55,17 56,25 C57,33 47,36 42,30 C38,25 42,20 47,21 C52,21 53,28 48,29 C45,30 43,26 46,25" />
+    </group>
+</vector>

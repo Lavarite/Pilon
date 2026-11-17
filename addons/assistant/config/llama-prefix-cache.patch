@@ -1,0 +1,17 @@
+--- a/tools/server/server-context.cpp
++++ b/tools/server/server-context.cpp
+@@ -3330,7 +3330,13 @@
+                                     SLT_WRN(slot, "%s\n", st1.str().c_str());
+                                 }
+ 
+-                                if (pos_min >= pos_min_thold) {
++                                // A restored SWA state retains the last attention
++                                // window but has no server-side checkpoints. When
++                                // the entire saved prompt matches and we append new
++                                // tokens, that state already suffices: no rewind is
++                                // needed. Keep the checkpoint checks for edits.
++                                const bool append_to_saved = has_new_tokens && n_past == slot.prompt.n_tokens();
++                                if (pos_min >= pos_min_thold && !append_to_saved) {
+                                     // search for a context checkpoint
+                                     const auto it = std::find_if(
+                                         slot.prompt.checkpoints.rbegin(),

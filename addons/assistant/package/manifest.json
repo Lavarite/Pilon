@@ -1,0 +1,24 @@
+{
+  "id": "assistant",
+  "name": "Assistant",
+  "description": "Chat with AI models and manage models, providers and voice.",
+  "version": "1.1.0",
+  "apiVersion": 1,
+  "page": "Page.qml",
+  "icon": "icon.svg",
+  "settings": [
+    {
+      "id": "models",
+      "name": "Models and providers",
+      "entry": "Models.qml"
+    },
+    {
+      "id": "voice",
+      "name": "Voice",
+      "entry": "Voice.qml"
+    }
+  ],
+  "lifecycle": "Lifecycle.qml",
+  "runtime": "Runtime.qml",
+  "startOnEnable": true
+}

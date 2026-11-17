@@ -1,0 +1,10 @@
+{
+  "id": "org.example.widget-provider",
+  "name": "Widget test provider",
+  "description": "Verify compiled widget publication and owned action delivery.",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "runtime": "Runtime.qml",
+  "startOnEnable": false,
+  "widgets": [{"id": "agenda", "name": "Test agenda"}]
+}

@@ -1,0 +1,95 @@
+{
+  "description": "Create and present file outputs, revise an artifact, or present an existing local file.",
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "create_artifact",
+        "description": "Create and present a file artifact. A .pdf filename renders Markdown content into a Unicode PDF with automatic pagination; other filenames save UTF-8 text. Saved in a unique workspace folder; never overwrites user files.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "filename": {
+              "type": "string",
+              "description": "Descriptive filename with extension, without directories."
+            },
+            "content": {
+              "type": "string",
+              "description": "Complete UTF-8 text, or Markdown to render when filename ends in .pdf. No PDF library, script, font setup or base64 encoding is needed."
+            }
+          },
+          "required": [
+            "filename",
+            "content"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "update_artifact",
+        "description": "Replace an artifact and update its card. PDF artifacts render the supplied Markdown into a new PDF; other files save UTF-8 text. Inspect existing content before replacing it.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "Artifact id returned by create_artifact or publish_artifact."
+            },
+            "content": {
+              "type": "string",
+              "description": "Complete replacement text, or Markdown for a PDF artifact."
+            }
+          },
+          "required": [
+            "id",
+            "content"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "publish_artifact",
+        "description": "Present an existing readable local file as a clickable chat output. Clicking reveals it in Files; it is not copied or executed.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Absolute path to an existing local file."
+            }
+          },
+          "required": [
+            "path"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "save_artifact_project",
+        "description": "Register a generated artifact directory as a Pilon project when the user asks to save it as a project. Files stay in place and runtimes remain shared.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Absolute directory inside this chat artifact workspace."
+            }
+          },
+          "required": [
+            "path"
+          ],
+          "additionalProperties": false
+        }
+      }
+    }
+  ]
+}

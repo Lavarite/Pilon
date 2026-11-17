@@ -1,0 +1,18 @@
+cmake_minimum_required(VERSION 3.22)
+project(PilonOcrWorker LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+find_package(Qt6 6.10 REQUIRED COMPONENTS Core)
+set(OpenCV_STATIC ON)
+find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs)
+add_library(onnxruntime SHARED IMPORTED)
+set_target_properties(onnxruntime PROPERTIES IMPORTED_LOCATION "${PILON_ORT}/jni/arm64-v8a/libonnxruntime.so")
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/ort/onnxruntime/core/session")
+file(COPY "${PILON_ORT}/headers/" DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/ort/onnxruntime/core/session")
+set(pilon_rapid "${PILON_RAPID}/OcrLibrary/src/main/cpp")
+add_executable(pilon_ocr main.cpp "${pilon_rapid}/src/DbNet.cpp"
+    "${pilon_rapid}/src/OcrUtils.cpp" "${pilon_rapid}/src/clipper.cpp")
+set_target_properties(pilon_ocr PROPERTIES OUTPUT_NAME "libpilon_ocr.so")
+target_include_directories(pilon_ocr PRIVATE "${pilon_rapid}/include" "${PILON_ORT}/headers"
+    "${CMAKE_CURRENT_BINARY_DIR}/ort" ${OpenCV_INCLUDE_DIRS})
+target_link_libraries(pilon_ocr PRIVATE Qt6::Core onnxruntime ${OpenCV_LIBS} android log z)

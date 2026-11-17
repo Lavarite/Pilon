@@ -1,0 +1,50 @@
+# Generated executables, downloaded models and bundled runtimes
+/builds/
+/models/
+/runtime/
+/AgentFiles/
+
+# CMake and Qt build output
+build/
+build-*/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+Testing/
+compile_commands.json
+.qt/
+.qtc/
+*.user
+
+# Python bytecode and local environments
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Credentials and personal content
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+auth.json
+credentials.json
+secrets.json
+*.pin
+*.log
+/notes/
+/chats/
+/assistant/
+/artifacts/
+/downloads/
+/backups/
+release.env
+*.jks
+*.keystore
+*.p8

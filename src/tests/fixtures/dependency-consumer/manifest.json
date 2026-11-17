@@ -1,0 +1,12 @@
+{
+  "id": "org.example.dependency-consumer",
+  "name": "Dependency consumer",
+  "description": "Read the declared provider's runtime exports.",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "runtime": "Runtime.qml",
+  "startOnEnable": true,
+  "dependencies": [
+    { "id": "org.example.dependency-provider", "minVersion": "1.0.0" }
+  ]
+}

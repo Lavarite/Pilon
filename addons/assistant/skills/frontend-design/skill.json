@@ -1,0 +1,10 @@
+{
+  "description": "Design and implement frontend UI within the user’s brief.",
+  "source": "https://github.com/anthropics/skills/tree/34040c9c568585f6929bedeaad110ad08f079624/skills/frontend-design",
+  "files": [
+    "SKILL.md",
+    "upstream.md",
+    "source.json",
+    "LICENSE.txt"
+  ]
+}

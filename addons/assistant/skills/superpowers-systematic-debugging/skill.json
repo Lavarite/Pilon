@@ -1,0 +1,13 @@
+{
+  "description": "Investigate root causes of failures on a selected device before proposing fixes.",
+  "toolset": "remote-devices",
+  "source": "https://github.com/obra/superpowers/tree/b36e0829c6d0140e93cfef2ca599b1b07d4a7797/skills/systematic-debugging",
+  "files": [
+    "SKILL.md",
+    "root-cause-tracing.md",
+    "defense-in-depth.md",
+    "condition-based-waiting.md",
+    "condition-based-waiting-example.ts",
+    "find-polluter.sh"
+  ]
+}

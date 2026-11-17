@@ -1,0 +1,28 @@
+--- a/tools/v8_gypfiles/v8.gyp
++++ b/tools/v8_gypfiles/v8.gyp
+@@ -1111,6 +1111,13 @@
+         ['v8_enable_sparkplug==1', {
+           'sources': [
+             '<!@pymod_do_main(GN-scraper "<(V8_ROOT)/BUILD.gn"  "\\"v8_base_without_compiler.*?v8_enable_sparkplug.*?sources \\+= ")',
++          ],
++        }],
++        ['OS=="android" and _toolset=="host" and host_arch=="x64" and v8_target_arch=="arm64" and v8_enable_webassembly==1', {
++          'sources': [
++            '<(V8_ROOT)/src/trap-handler/handler-inside-posix.cc',
++            '<(V8_ROOT)/src/trap-handler/handler-outside-posix.cc',
++            '<(V8_ROOT)/src/trap-handler/handler-outside-simulator.cc',
+           ],
+         }],
+         ['v8_enable_maglev==1', {
+--- a/deps/zlib/zlib.gyp
++++ b/deps/zlib/zlib.gyp
+@@ -186,6 +186,9 @@
+             'include_dirs': [ '<(ZLIB_ROOT)' ],
+           },
+           'conditions': [
++            ['OS=="android" and _toolset=="target"', {
++              'sources': [ '<(ZLIB_ROOT)/cpu-features-android.c' ],
++            }],
+             ['OS!="win"', {
+               'cflags!': [ '-ansi' ],
+               'cflags': [ '-Wno-implicit-fallthrough' ],

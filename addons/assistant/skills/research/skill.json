@@ -1,0 +1,231 @@
+{
+  "description": "Research current information with browser web search and rendered pages, plus scholarly, GitHub and Wikipedia sources. Verify primary evidence, dates and citations.",
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "browser_search",
+        "description": "Search Google in Chromium for current information. Returns titles, source links and concise snippets, summarizing long text and key figures without saving originals. Open sources to verify evidence; paginate when needed.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string"
+            },
+            "recency": {
+              "type": "string",
+              "enum": [
+                "any",
+                "day",
+                "week",
+                "month",
+                "year"
+              ],
+              "description": "Default any."
+            },
+            "page": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Result page; default 1."
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Results to show from this Google page; default 10. Use page for further results."
+            },
+            "snippet_chars": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Snippet summary size, up to 400 characters; default 400. Open the source for further evidence.",
+              "maximum": 400
+            }
+          },
+          "required": [
+            "query"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "browser_open",
+        "description": "Read a source, summarizing large content into main points and key figures with units, dates and context. Originals are discarded. Use focus to retrieve missing details. Runs JavaScript in Chromium.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string"
+            },
+            "wait_for": {
+              "type": "string",
+              "description": "Optional CSS selector to await dynamic content."
+            },
+            "max_chars": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Summary size in characters, up to 8000; default 8000. Large originals are not returned or saved.",
+              "maximum": 8000
+            },
+            "link_offset": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Link offset; default 0. Use next_link_offset for more links."
+            },
+            "max_links": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Links to return; default 10. Set 0 to omit links."
+            },
+            "focus": {
+              "type": "string",
+              "description": "Optional question or topic to prioritize when summarizing the entire source."
+            }
+          },
+          "required": [
+            "url"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "search_wikipedia",
+        "description": "Search English Wikipedia for orientation. Follow references to primary sources before making detailed claims.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "Focused search terms."
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Requested results per source page; default 10. Source service limits apply."
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Source offset for pagination; default 0."
+            }
+          },
+          "required": [
+            "query"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "search_papers",
+        "description": "Search Crossref publication metadata, DOI links and available abstracts. This does not fetch full papers.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "Topic, title, author or DOI."
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Requested results per source page; default 10. Source service limits apply."
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Source offset for pagination; default 0."
+            }
+          },
+          "required": [
+            "query"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "search_github",
+        "description": "Search public GitHub repositories or issues (including pull requests), without an account. Supports GitHub query qualifiers.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "Search terms; e.g. repo:owner/repo is:issue keywords."
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "repositories",
+                "issues"
+              ]
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Requested results per source page; default 10. Source service limits apply."
+            },
+            "page": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Source page number; default 1."
+            }
+          },
+          "required": [
+            "query"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "read_webpage",
+        "description": "Read a source, summarizing large content into main points and key figures with units, dates and context. Originals are discarded. Use focus to retrieve missing details. Use browser_open for JavaScript-rendered pages.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "description": "Exact source URL from results, references or the user."
+            },
+            "max_chars": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Summary size in characters, up to 8000; default 8000. Large originals are not returned or saved.",
+              "maximum": 8000
+            },
+            "link_offset": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Link offset; default 0. Use next_link_offset for more links."
+            },
+            "max_links": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Links to return; default 10. Set 0 to omit links."
+            },
+            "focus": {
+              "type": "string",
+              "description": "Optional question or topic to prioritize when summarizing the entire source."
+            }
+          },
+          "required": [
+            "url"
+          ],
+          "additionalProperties": false
+        }
+      }
+    }
+  ]
+}

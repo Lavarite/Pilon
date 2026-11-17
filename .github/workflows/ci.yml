@@ -1,0 +1,205 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+    tags: ['**']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  commits:
+    name: Scoped commits
+    if: ${{ !github.event.deleted }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      release: ${{ steps.lint.outputs.release }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Test commit lint and local hooks
+        run: python3 .github/scripts/commit_lint_tests.py
+      - name: Lint new commits
+        id: lint
+        env:
+          BEFORE: ${{ github.event.before }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          lint=.github/scripts/commit_lint.py
+          if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
+            python3 "$lint" history "$PR_HEAD" "$PR_BASE"
+          elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            python3 "$lint" tag "$GITHUB_SHA"
+            if [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              printf 'release=true\n' >> "$GITHUB_OUTPUT"
+            fi
+          elif [[ "$BEFORE" != 0000000000000000000000000000000000000000 ]]; then
+            # On a force push, the previous tip can be outside the checked-out history.
+            git cat-file -e "$BEFORE^{commit}" 2>/dev/null || git fetch --no-tags origin "$BEFORE"
+            python3 "$lint" history "$GITHUB_SHA" "$BEFORE"
+          elif [[ "$GITHUB_REF" == "refs/heads/$DEFAULT_BRANCH" ]]; then
+            python3 "$lint" history "$GITHUB_SHA"
+          else
+            python3 "$lint" history "$GITHUB_SHA" "refs/remotes/origin/$DEFAULT_BRANCH"
+          fi
+
+  linux:
+    name: Linux
+    if: ${{ !github.event.deleted }}
+    needs: commits
+    runs-on: ubuntu-24.04
+    container: archlinux:base-devel
+    timeout-minutes: 45
+    env:
+      PILON_GOOGLE_CLIENT_ID: ${{ vars.PILON_GOOGLE_CLIENT_ID }}
+      PILON_MICROSOFT_CLIENT_ID: ${{ vars.PILON_MICROSOFT_CLIENT_ID }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Install the Arch Linux build and test dependencies
+        run: |
+          pacman -Syu --noconfirm --needed archlinux-keyring git cmake ninja pkgconf \
+            qt6-base qt6-declarative qt6-multimedia qt6-svg libssh2 dbus openssh \
+            ffmpeg libreoffice-fresh poppler python uv
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Build and run all CTest suites
+        run: |
+          useradd -m -p '*' pilon-ci
+          mkdir -p /run/sshd
+          chown -R pilon-ci:pilon-ci "$GITHUB_WORKSPACE"
+          runuser -u pilon-ci -- env \
+            "PILON_GOOGLE_CLIENT_ID=$PILON_GOOGLE_CLIENT_ID" \
+            "PILON_MICROSOFT_CLIENT_ID=$PILON_MICROSOFT_CLIENT_ID" \
+            bash -euo pipefail -c '
+            bash src/scripts/setup_documents.sh
+            bash addons/assistant/scripts/setup_litert.sh
+            cmake -S src -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPILON_BUILD_TESTS=ON
+            cmake --build build --parallel 2
+            ctest --test-dir build --no-tests=error --output-on-failure
+          '
+      - name: Verify and package Linux and source archives
+        if: needs.commits.outputs.release == 'true'
+        run: runuser -u pilon-ci -- bash .github/scripts/package-linux.sh "$GITHUB_REF_NAME"
+      - name: Upload tested release packages
+        if: needs.commits.outputs.release == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: release-assets
+          path: release-assets/
+          if-no-files-found: error
+          retention-days: 7
+      - name: Upload test log
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: ctest-log
+          path: build/Testing/Temporary/LastTest.log
+          if-no-files-found: ignore
+
+  calendar:
+    name: Calendar server
+    if: ${{ !github.event.deleted }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: addons/calendar/server/frontend/package-lock.json
+      - name: Test and build the frontend
+        working-directory: addons/calendar/server/frontend
+        run: |
+          npm ci
+          npm test
+          npm run build
+          npm audit --omit=dev --audit-level=high
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - name: Test the backend
+        working-directory: addons/calendar/server/backend
+        run: |
+          python -m pip install -r requirements.txt
+          python -m unittest discover -s tests
+
+  android:
+    name: Android host checks
+    if: ${{ !github.event.deleted }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Install Android SDK platform 37.0
+        run: |
+          if [[ ! -f "$ANDROID_HOME/platforms/android-37.0/android.jar" ]]; then
+            "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37.0"
+          fi
+      - name: Run Android packaging, Java, resolver and runtime checks
+        run: bash .github/scripts/android-host-checks.sh
+
+  passed:
+    name: CI passed
+    if: ${{ always() && !github.event.deleted }}
+    needs: [commits, linux, calendar, android]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require all checks
+        env:
+          CHECK_RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: test "$CHECK_RESULTS" = "success success success success"
+
+  draft:
+    name: Draft release
+    if: needs.commits.outputs.release == 'true'
+    needs: [passed, commits]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require a version tag on the default branch
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: git merge-base --is-ancestor "$GITHUB_SHA" "refs/remotes/origin/$DEFAULT_BRANCH"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: release-assets
+          path: release-assets/
+      - name: Prepare GitHub draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          if draft=$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft); then
+            test "$draft" = true
+            gh release upload "$GITHUB_REF_NAME" release-assets/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" release-assets/* --verify-tag --draft \
+              --title "Pilon $version" \
+              --notes 'Linux x86_64 and source archives are validated in CI. Attach the verified Android preview before publishing.'
+          fi

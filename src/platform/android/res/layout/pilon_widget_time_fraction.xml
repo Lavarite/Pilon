@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android" android:id="@+id/widget_timeline_position"
+    android:layout_width="match_parent" android:layout_height="match_parent">
+    <LinearLayout android:id="@+id/widget_timeline_fraction_outer" android:layout_width="match_parent" android:layout_height="match_parent"
+        android:orientation="horizontal" android:gravity="right">
+        <LinearLayout android:id="@+id/widget_timeline_fraction_tail" android:layout_width="0dp" android:layout_weight="1" android:layout_height="match_parent"
+            android:orientation="horizontal" android:gravity="left">
+            <FrameLayout android:id="@+id/widget_timeline_card_slot" android:layout_width="0dp" android:layout_weight="1"
+                android:layout_height="match_parent" android:paddingRight="2dp" />
+        </LinearLayout>
+    </LinearLayout>
+</FrameLayout>

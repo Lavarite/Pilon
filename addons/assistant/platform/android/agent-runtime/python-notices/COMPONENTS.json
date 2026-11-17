@@ -1,0 +1,117 @@
+[
+  {
+    "name": "CPython",
+    "version": "3.14.10",
+    "source_commit": "b703b2c5e704341d61e367b9b940b77ed11dded0",
+    "notice": "CPython-LICENSE.txt",
+    "license_url": "https://raw.githubusercontent.com/python/cpython/b703b2c5e704341d61e367b9b940b77ed11dded0/LICENSE",
+    "notice_sha256": "b0e25a78cffb43f4d92de8b61ccfa1f1f98ecbc22330b54b5251e7b6ba010231"
+  },
+  {
+    "name": "CPython additional incorporated code",
+    "version": "3.14.10",
+    "notice": "CPython-additional-licenses.rst",
+    "license_url": "https://raw.githubusercontent.com/python/cpython/b703b2c5e704341d61e367b9b940b77ed11dded0/Doc/license.rst",
+    "note": "Includes mimalloc2.5.2, dtoa, Unicode and other incorporated-code notices; WITH_MIMALLOC=1 in shipped sysconfig.",
+    "notice_sha256": "8a7329b25131f64b2bea284155f0824876b1af9f4a2f970e6335751d97dfa6dd"
+  },
+  {
+    "name": "bzip2",
+    "version": "1.0.8",
+    "android_release": "bzip2-1.0.8-3",
+    "notice": "bzip2-LICENSE",
+    "source_url": "https://sourceware.org/pub/bzip2/bzip2-1.0.8.tar.gz",
+    "source_sha256": "ab5a03176ee106d3f0fa90e381da478ddae405918153cca248e682cd0c4a2269",
+    "notice_sha256": "c6dbbf828498be844a89eaa3b84adbab3199e342eb5cb2ed2f0d4ba7ec0f38a3"
+  },
+  {
+    "name": "libffi",
+    "version": "3.4.4",
+    "android_release": "libffi-3.4.4-3",
+    "notice": "libffi-LICENSE",
+    "license_url": "https://raw.githubusercontent.com/libffi/libffi/v3.4.4/LICENSE",
+    "notice_sha256": "2c9c2acb9743e6b007b91350475308aee44691d96aa20eacef8e199988c8c388"
+  },
+  {
+    "name": "OpenSSL",
+    "version": "3.5.9",
+    "android_release": "openssl-3.5.9-0",
+    "notice": "OpenSSL-LICENSE.txt",
+    "license_url": "https://raw.githubusercontent.com/openssl/openssl/openssl-3.5.9/LICENSE.txt",
+    "note": "No upstream root NOTICE file; root entries verified.",
+    "notice_sha256": "7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a"
+  },
+  {
+    "name": "SQLite",
+    "version": "3.53.4",
+    "android_release": "sqlite-3.53.4-0",
+    "notice": "SQLite-PUBLIC-DOMAIN.txt",
+    "source_url": "https://www.sqlite.org/2026/sqlite-autoconf-3530400.tar.gz",
+    "note": "Public-domain declaration copied from exact packaged sqlite3.h header.",
+    "notice_sha256": "d18a5a730e4776a0487cdec51ab38139573711c6387d96745898be4c779bb16e"
+  },
+  {
+    "name": "XZ liblzma",
+    "version": "5.4.6",
+    "android_release": "xz-5.4.6-1",
+    "notice": "XZ-liblzma-COPYING",
+    "license_url": "https://raw.githubusercontent.com/tukaani-project/xz/v5.4.6/COPYING",
+    "note": "liblzma is public domain; GPL/LGPL tools/buildsystem files are not the linked library.",
+    "notice_sha256": "29a1e305b2e34eefe5d4602d00cde1d528b71c5d9f2eec5106972cf6ddb6f73f"
+  },
+  {
+    "name": "Zstandard",
+    "version": "1.5.7",
+    "android_release": "zstd-1.5.7-2",
+    "notice": "Zstandard-LICENSE",
+    "license_url": "https://raw.githubusercontent.com/facebook/zstd/v1.5.7/LICENSE",
+    "note": "BSD option selected; bundled xxhash header explicitly uses the same root license.",
+    "notice_sha256": "7055266497633c9025b777c78eb7235af13922117480ed5c674677adc381c9d8"
+  },
+  {
+    "name": "BeeWare source-deps patches",
+    "version": "tagged per component",
+    "source_commit": "5521f2c16ee87dd7f9d081421351f675fac2ee45",
+    "notice": "BeeWare-source-deps-LICENSE",
+    "license_url": "https://raw.githubusercontent.com/beeware/cpython-android-source-deps/5521f2c16ee87dd7f9d081421351f675fac2ee45/LICENSE",
+    "note": "Identical license verified at all4 distinct dependency tag commits.",
+    "notice_sha256": "5ed9f6b90e2e69eb71741252a152b64c816da9fa461add29e73daeae83731e2e"
+  },
+  {
+    "name": "Expat",
+    "version": "2.9.0",
+    "notice": "Expat-COPYING",
+    "license_url": "https://raw.githubusercontent.com/python/cpython/b703b2c5e704341d61e367b9b940b77ed11dded0/Modules/expat/COPYING",
+    "notice_sha256": "31b15de82aa19a845156169a17a5488bf597e561b2c318d159ed583139b25e87"
+  },
+  {
+    "name": "HACL* / Karamel",
+    "version": "8ba599b2f6c9701b3dc961db895b0856a2210f76",
+    "notice": "HACL-Karamel-NOTICES.txt",
+    "source_url": "https://github.com/python/cpython/tree/b703b2c5e704341d61e367b9b940b77ed11dded0/Modules/_hacl",
+    "note": "All47 vendored source/header notices checked;3 distinct copyright/license blocks retained, plus full Apache2 text.",
+    "notice_sha256": "f6b6371d0cfbb380733c5517d2154e22cd17f98dc8e111a9b89353f5b4e39deb"
+  },
+  {
+    "name": "mpdecimal",
+    "version": "2.5.1",
+    "notice": "mpdecimal-LICENSE.txt",
+    "source_url": "https://www.bytereef.org/software/mpdecimal/releases/mpdecimal-2.5.1.tar.gz",
+    "source_sha256": "9f9cd4c041f99b5c49ffb7b59d9f12d95b683d88585608aa56a6307667b2b21f",
+    "notice_sha256": "b07528d8b1dbf1e2d2741052996f0876e23342ce2d30d0effa39c5457716c25a"
+  },
+  {
+    "name": "macholib",
+    "version": "1.0",
+    "notice": "macholib-README.ctypes",
+    "license_url": "https://raw.githubusercontent.com/python/cpython/b703b2c5e704341d61e367b9b940b77ed11dded0/Lib/ctypes/macholib/README.ctypes",
+    "note": "Pure stdlib files; PSF license alternative retained.",
+    "notice_sha256": "dc29d1da83b6a0a09a41647e4111eee878ed079c2d6b54a98fd6d8b88dd581f2"
+  },
+  {
+    "name": "zlib",
+    "version": "Android system library",
+    "redistributed": false,
+    "note": "Actual zlib module DT_NEEDED=libz.so; MODULE_ZLIB_LDFLAGS=-lz. No bundled zlib artifact/license is invented."
+  }
+]

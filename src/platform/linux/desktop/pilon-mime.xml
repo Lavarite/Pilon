@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-pilon-note">
+    <comment>Pilon note</comment>
+    <glob pattern="*.pin"/>
+    <icon name="application-x-pilon-note"/>
+  </mime-type>
+  <mime-type type="application/x-pilon-calendar">
+    <comment>Pilon calendar</comment>
+    <glob pattern="*.pical"/>
+    <icon name="application-x-pilon-calendar"/>
+  </mime-type>
+  <mime-type type="application/x-pilon-extension">
+    <comment>Pilon add-on</comment>
+    <glob pattern="*.piext"/>
+    <icon name="application-x-pilon-extension"/>
+  </mime-type>
+</mime-info>

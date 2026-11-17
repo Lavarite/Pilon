@@ -1,0 +1,8 @@
+Pilon is licensed under the GNU General Public License, version 3 only.
+SPDX-License-Identifier: GPL-3.0-only
+
+See COPYING for the full license text, obtained from:
+https://www.gnu.org/licenses/gpl-3.0.txt
+
+Third-party components retain their own licenses and notices in their source
+directories. Pilon's license does not replace those notices.

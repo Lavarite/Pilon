@@ -1,0 +1,695 @@
+--- a/codex-rs/shell-command/src/shell_detect.rs
++++ b/codex-rs/shell-command/src/shell_detect.rs
+@@ -250,7 +250,7 @@
+     })
+ }
+ 
+-const SH_FALLBACK_PATHS: &[&str] = &["/bin/sh"];
++const SH_FALLBACK_PATHS: &[&str] = &["/system/bin/sh"];
+ 
+ fn get_sh_shell() -> Option<DetectedShell> {
+     let shell_path = get_shell_path(ShellType::Sh, "sh", SH_FALLBACK_PATHS);
+@@ -334,7 +334,7 @@
+     } else {
+         DetectedShell {
+             shell_type: ShellType::Sh,
+-            shell_path: PathBuf::from("/bin/sh"),
++            shell_path: PathBuf::from("/system/bin/sh"),
+         }
+     }
+ }
+--- a/codex-rs/http-client/Cargo.toml
++++ b/codex-rs/http-client/Cargo.toml
+@@ -22,7 +22,7 @@
+ serde_urlencoded = "0.7"
+ sha2 = { workspace = true }
+ thiserror = { workspace = true }
+-tokio = { workspace = true, features = ["macros", "rt", "time", "sync"] }
++tokio = { workspace = true, features = ["macros", "rt", "time", "sync", "net", "process", "io-util"] }
+ tracing = { workspace = true }
+ tracing-opentelemetry = { workspace = true }
+ url = { workspace = true }
+@@ -54,6 +54,7 @@
+ tempfile = { workspace = true }
+ tokio = { workspace = true, features = ["test-util"] }
+ tracing-subscriber = { workspace = true }
++tokio-rustls = { workspace = true }
+ 
+ [lib]
+ doctest = false
+--- a/codex-rs/http-client/src/lib.rs
++++ b/codex-rs/http-client/src/lib.rs
+@@ -10,6 +10,7 @@
+ mod custom_ca;
+ mod error;
+ mod native_roots;
++mod platform_dns;
+ mod network_policy;
+ mod openai_endpoints;
+ mod openai_headers;
+@@ -31,6 +32,9 @@
+ pub use crate::client::HttpError;
+ pub use crate::client_builder::HttpClientBuilder;
+ pub use crate::client_tls::HttpClientTlsConfig;
++pub use crate::platform_dns::configure as configure_platform_dns;
++pub use crate::platform_dns::configured as platform_dns_configured;
++pub use crate::platform_dns::lookup_host as lookup_host_with_platform_dns;
+ pub use crate::custom_ca::BuildCustomCaTransportError;
+ /// Test-only subprocess hook for custom CA coverage.
+ ///
+--- /dev/null
++++ b/codex-rs/http-client/src/platform_dns.rs
+@@ -0,0 +1,384 @@
++//! Android's packaged musl executable delegates DNS to the public Bionic resolver.
++use std::collections::HashSet;
++use std::io;
++use std::net::{IpAddr, SocketAddr, SocketAddrV6};
++use std::path::{Path, PathBuf};
++use std::process::Stdio;
++use std::sync::Arc;
++use std::time::Duration;
++
++use reqwest::dns::{Addrs, Name, Resolve, Resolving};
++use tokio::io::AsyncReadExt;
++
++const HELPER_ENV: &str = "PILON_DNS_HELPER";
++const MAX_OUTPUT: usize = 8192;
++const MAX_ADDRESSES: usize = 64;
++const TIMEOUT: Duration = Duration::from_secs(15);
++
++pub fn configured() -> bool {
++    helper_path().is_some()
++}
++
++fn helper_path() -> Option<PathBuf> {
++    std::env::var_os(HELPER_ENV)
++        .filter(|value| !value.is_empty())
++        .map(PathBuf::from)
++}
++
++pub fn configure(builder: reqwest::ClientBuilder) -> reqwest::ClientBuilder {
++    match helper_path() {
++        Some(helper) => builder.dns_resolver(Arc::new(PlatformResolver { helper })),
++        None => builder,
++    }
++}
++
++// Both HTTP and WebSocket lookups must use Android's per-network resolver.
++pub async fn lookup_host(address: String) -> io::Result<Vec<SocketAddr>> {
++    match helper_path() {
++        Some(helper) => lookup_with_helper(&helper, &address).await,
++        None => tokio::net::lookup_host(address)
++            .await
++            .map(Iterator::collect),
++    }
++}
++
++async fn lookup_with_helper(helper: &Path, address: &str) -> io::Result<Vec<SocketAddr>> {
++    if let Ok(address) = address.parse::<SocketAddr>() {
++        return Ok(vec![address]);
++    }
++    let (host, port) = address.rsplit_once(':').ok_or_else(invalid_response)?;
++    let port = port.parse::<u16>().map_err(|_| invalid_response())?;
++    resolve(helper, host, port, TIMEOUT).await
++}
++
++struct PlatformResolver {
++    helper: PathBuf,
++}
++
++impl Resolve for PlatformResolver {
++    fn resolve(&self, name: Name) -> Resolving {
++        let helper = self.helper.clone();
++        let host = name.as_str().to_owned();
++        Box::pin(async move {
++            resolve(&helper, &host, 0, TIMEOUT)
++                .await
++                .map(|addresses| Box::new(addresses.into_iter()) as Addrs)
++                .map_err(|error| Box::new(error) as Box<dyn std::error::Error + Send + Sync>)
++        })
++    }
++}
++
++async fn resolve(
++    helper: &Path,
++    host: &str,
++    port: u16,
++    timeout: Duration,
++) -> io::Result<Vec<SocketAddr>> {
++    if let Ok(address) = host.parse::<IpAddr>() {
++        return Ok(vec![SocketAddr::new(address, port)]);
++    }
++    if !helper.is_absolute()
++        || host.is_empty()
++        || host.len() > 253
++        || !host
++            .bytes()
++            .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'-'))
++    {
++        return Err(io::Error::new(
++            io::ErrorKind::InvalidInput,
++            "Invalid Android DNS lookup",
++        ));
++    }
++    let mut child = tokio::process::Command::new(helper)
++        .arg(host)
++        .stdin(Stdio::null())
++        .stdout(Stdio::piped())
++        .stderr(Stdio::null())
++        .kill_on_drop(true)
++        .spawn()?;
++    let result = tokio::time::timeout(timeout, async {
++        let mut bytes = Vec::new();
++        child
++            .stdout
++            .take()
++            .ok_or_else(invalid_response)?
++            .take((MAX_OUTPUT + 1) as u64)
++            .read_to_end(&mut bytes)
++            .await?;
++        if bytes.len() > MAX_OUTPUT {
++            return Err(invalid_response());
++        }
++        if !child.wait().await?.success() {
++            return Err(io::Error::other("Android hostname resolution failed"));
++        }
++        parse_addresses(&bytes, port)
++    })
++    .await;
++    match result {
++        Ok(result) => result,
++        Err(_) => Err(io::Error::new(
++            io::ErrorKind::TimedOut,
++            "Android hostname resolution timed out",
++        )),
++    }
++}
++
++fn invalid_response() -> io::Error {
++    io::Error::new(io::ErrorKind::InvalidData, "Invalid Android DNS response")
++}
++
++fn parse_addresses(bytes: &[u8], port: u16) -> io::Result<Vec<SocketAddr>> {
++    if bytes.len() > MAX_OUTPUT || !bytes.ends_with(b"\n") {
++        return Err(invalid_response());
++    }
++    let text = std::str::from_utf8(bytes).map_err(|_| invalid_response())?;
++    let mut lines = text.split_terminator('\n');
++    if lines.next() != Some("PILON_DNS_V1") {
++        return Err(invalid_response());
++    }
++    let mut addresses = Vec::new();
++    let mut seen = HashSet::new();
++    for line in lines {
++        let parts = line.split(' ').collect::<Vec<_>>();
++        let address = match parts.as_slice() {
++            ["4", ip] => SocketAddr::new(
++                IpAddr::V4(ip.parse().map_err(|_| invalid_response())?),
++                port,
++            ),
++            ["6", ip, scope] => {
++                let scope_id = scope.parse::<u32>().map_err(|_| invalid_response())?;
++                if scope_id.to_string() != *scope {
++                    return Err(invalid_response());
++                }
++                SocketAddr::V6(SocketAddrV6::new(
++                    ip.parse().map_err(|_| invalid_response())?,
++                    port,
++                    0,
++                    scope_id,
++                ))
++            }
++            _ => return Err(invalid_response()),
++        };
++        if addresses.len() == MAX_ADDRESSES || !seen.insert(address) {
++            return Err(invalid_response());
++        }
++        addresses.push(address);
++    }
++    if addresses.is_empty() {
++        return Err(invalid_response());
++    }
++    Ok(addresses)
++}
++
++#[cfg(all(test, unix))]
++mod tests {
++    use super::*;
++    use std::os::unix::fs::PermissionsExt;
++    use tokio::io::AsyncWriteExt;
++
++    fn fake_helper(body: &str) -> (tempfile::TempDir, PathBuf) {
++        let directory = tempfile::tempdir().unwrap();
++        let path = directory.path().join("resolver");
++        std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
++        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
++        (directory, path)
++    }
++
++    #[test]
++    fn platform_dns_parses_order_port_and_ipv6_scope() {
++        let actual = parse_addresses(b"PILON_DNS_V1\n4 192.0.2.4\n6 fe80::1 3\n", 9443).unwrap();
++        assert_eq!(
++            actual,
++            vec![
++                "192.0.2.4:9443".parse().unwrap(),
++                SocketAddr::V6(SocketAddrV6::new("fe80::1".parse().unwrap(), 9443, 0, 3))
++            ]
++        );
++    }
++
++    #[test]
++    fn platform_dns_rejects_malformed_unbounded_and_duplicate_responses() {
++        for bytes in [
++            b"".as_slice(),
++            b"PILON_DNS_V1\n",
++            b"PILON_DNS_V2\n4 127.0.0.1\n",
++            b"PILON_DNS_V1\n4 127.0.0.1",
++            b"PILON_DNS_V1\n4 ::1\n",
++            b"PILON_DNS_V1\n6 ::1 -1\n",
++            b"PILON_DNS_V1\n6 ::1 4294967296\n",
++            b"PILON_DNS_V1\n6 ::1 00\n",
++            b"PILON_DNS_V1\n4 127.0.0.1 extra\n",
++            b"PILON_DNS_V1\n4 127.0.0.1\n4 127.0.0.1\n",
++            b"PILON_DNS_V1\n4 example.com\n",
++            b"PILON_DNS_V1\n4 127.0.0.1\r\n",
++            b"PILON_DNS_V1\n4 \xff\n",
++        ] {
++            assert!(parse_addresses(bytes, 80).is_err(), "accepted {bytes:?}");
++        }
++        assert!(parse_addresses(&vec![b'x'; MAX_OUTPUT + 1], 80).is_err());
++        let many = format!(
++            "PILON_DNS_V1\n{}",
++            (0..65)
++                .map(|n| format!("4 192.0.2.{n}\n"))
++                .collect::<String>()
++        );
++        assert!(parse_addresses(many.as_bytes(), 80).is_err());
++    }
++
++    #[tokio::test]
++    async fn platform_dns_uses_helper_and_keeps_numeric_websocket_addresses() {
++        let (_directory, helper) = fake_helper(
++            "test \"$1\" = pilon-dns.invalid || exit 64\nprintf 'PILON_DNS_V1\\n4 127.0.0.1\\n6 ::1 0\\n'",
++        );
++        assert_eq!(
++            lookup_with_helper(&helper, "pilon-dns.invalid:9443")
++                .await
++                .unwrap(),
++            vec![
++                "127.0.0.1:9443".parse().unwrap(),
++                "[::1]:9443".parse().unwrap()
++            ]
++        );
++        assert_eq!(
++            lookup_with_helper(Path::new("/missing"), "[::1]:42")
++                .await
++                .unwrap(),
++            vec!["[::1]:42".parse().unwrap()]
++        );
++        assert!(lookup_with_helper(&helper, "not-a-port").await.is_err());
++        assert!(resolve(&helper, "x\nargument", 80, TIMEOUT).await.is_err());
++        assert!(
++            resolve(Path::new("relative"), "example.com", 80, TIMEOUT)
++                .await
++                .is_err()
++        );
++    }
++
++    #[tokio::test]
++    async fn platform_dns_missing_failed_oversized_and_timed_out_children_fail_closed() {
++        assert!(
++            resolve(
++                Path::new("/missing-dns-helper"),
++                "pilon-dns.invalid",
++                80,
++                TIMEOUT
++            )
++            .await
++            .is_err()
++        );
++        for body in ["exit 69", "printf 'invalid'", "head -c 8193 /dev/zero"] {
++            let (_directory, helper) = fake_helper(body);
++            assert!(
++                resolve(&helper, "pilon-dns.invalid", 80, TIMEOUT)
++                    .await
++                    .is_err()
++            );
++        }
++        let (_directory, helper) = fake_helper("exec sleep 30");
++        let error = resolve(&helper, "pilon-dns.invalid", 80, Duration::from_millis(30))
++            .await
++            .unwrap_err();
++        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
++    }
++
++    #[tokio::test]
++    async fn platform_dns_http_resolves_a_name_that_system_dns_cannot_resolve() {
++        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
++        let port = listener.local_addr().unwrap().port();
++        let server = tokio::spawn(async move {
++            let (mut stream, _) = listener.accept().await.unwrap();
++            let mut request = [0; 2048];
++            stream.read(&mut request).await.unwrap();
++            stream
++                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
++                .await
++                .unwrap();
++        });
++        let (_directory, helper) = fake_helper("printf 'PILON_DNS_V1\\n4 127.0.0.1\\n'");
++        let client = reqwest::Client::builder()
++            .no_proxy()
++            .dns_resolver(Arc::new(PlatformResolver { helper }))
++            .build()
++            .unwrap();
++        assert_eq!(
++            client
++                .get(format!("http://pilon-dns.invalid:{port}/"))
++                .send()
++                .await
++                .unwrap()
++                .status(),
++            200
++        );
++        server.await.unwrap();
++    }
++
++    #[tokio::test]
++    async fn platform_dns_preserves_tls_trust_and_hostname_validation() {
++        codex_utils_rustls_provider::ensure_rustls_crypto_provider();
++        use rustls::pki_types::PrivatePkcs8KeyDer;
++        let certificate =
++            rcgen::generate_simple_self_signed(vec!["pilon-dns.invalid".to_owned()]).unwrap();
++        let der = certificate.cert.der().clone();
++        let config = rustls::ServerConfig::builder()
++            .with_no_client_auth()
++            .with_single_cert(
++                vec![der.clone()],
++                PrivatePkcs8KeyDer::from(certificate.signing_key.serialize_der()).into(),
++            )
++            .unwrap();
++        let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(config));
++        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
++        let port = listener.local_addr().unwrap().port();
++        let server = tokio::spawn(async move {
++            for _ in 0..3 {
++                let (stream, _) = listener.accept().await.unwrap();
++                if let Ok(mut stream) = acceptor.accept(stream).await {
++                    let mut request = [0; 2048];
++                    stream.read(&mut request).await.unwrap();
++                    stream
++                        .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
++                        .await
++                        .unwrap();
++                }
++            }
++        });
++        let (_directory, helper) = fake_helper("printf 'PILON_DNS_V1\\n4 127.0.0.1\\n'");
++        let make = |trusted| {
++            let mut builder =
++                reqwest::Client::builder()
++                    .no_proxy()
++                    .dns_resolver(Arc::new(PlatformResolver {
++                        helper: helper.clone(),
++                    }));
++            if trusted {
++                builder =
++                    builder.add_root_certificate(reqwest::Certificate::from_der(&der).unwrap());
++            }
++            builder.build().unwrap()
++        };
++        assert!(
++            make(false)
++                .get(format!("https://pilon-dns.invalid:{port}/"))
++                .send()
++                .await
++                .is_err()
++        );
++        assert!(
++            make(true)
++                .get(format!("https://wrong-name.invalid:{port}/"))
++                .send()
++                .await
++                .is_err()
++        );
++        assert_eq!(
++            make(true)
++                .get(format!("https://pilon-dns.invalid:{port}/"))
++                .send()
++                .await
++                .unwrap()
++                .status(),
++            200
++        );
++        server.await.unwrap();
++    }
++}
+--- a/codex-rs/http-client/src/client_builder.rs
++++ b/codex-rs/http-client/src/client_builder.rs
+@@ -381,7 +381,7 @@
+     }
+ 
+     fn base_reqwest_builder(self) -> reqwest::ClientBuilder {
+-        let mut builder = reqwest::Client::builder();
++        let mut builder = crate::platform_dns::configure(reqwest::Client::builder());
+         #[cfg(windows)]
+         if let Some(path) = self.windows_proxy_pipe_path {
+             builder = builder.windows_named_pipe(path);
+--- a/codex-rs/http-client/src/custom_ca.rs
++++ b/codex-rs/http-client/src/custom_ca.rs
+@@ -301,6 +301,7 @@
+     env_source: &dyn EnvSource,
+     mut builder: reqwest::ClientBuilder,
+ ) -> Result<reqwest::Client, BuildCustomCaTransportError> {
++    builder = crate::platform_dns::configure(builder);
+     if let Some(bundle) = env_source.configured_ca_bundle() {
+         ensure_rustls_crypto_provider();
+         info!(
+--- a/codex-rs/websocket-client/src/dialer.rs
++++ b/codex-rs/websocket-client/src/dialer.rs
+@@ -48,7 +48,13 @@
+     loopback_direct: bool,
+ ) -> Result<(ConnectionInner, Response), WebSocketError> {
+     let disable_nagle = tcp_nodelay == TcpNodelay::Enabled;
++    let mut platform_proxy = None;
+     let proxy_url = match proxy_route {
++        OutboundProxyRoute::TransportDefault if codex_http_client::platform_dns_configured() => {
++            platform_proxy = ProxyConfig::from_env(request.uri())?
++                .map(|config| ProxyEndpoint { config, tls: false });
++            None
++        }
+         OutboundProxyRoute::TransportDefault => {
+             // The workspace enables tokio-tungstenite's `proxy` feature, so its default dialer
+             // resolves HTTP_PROXY, HTTPS_PROXY, ALL_PROXY, and NO_PROXY before opening the socket.
+@@ -84,6 +90,19 @@
+         OutboundProxyRoute::Proxy {
+             url,
+             no_proxy: Some(_),
++        } if codex_http_client::platform_dns_configured() => {
++            match ProxyConfig::from_env(request.uri()) {
++                Ok(proxy) => {
++                    platform_proxy = proxy.map(|config| ProxyEndpoint { config, tls: false });
++                    None
++                }
++                Err(WebSocketError::Url(UrlError::UnsupportedProxyScheme)) => Some(url),
++                Err(error) => return Err(error),
++            }
++        }
++        OutboundProxyRoute::Proxy {
++            url,
++            no_proxy: Some(_),
+         } => {
+             // Let Tungstenite apply its complete NO_PROXY semantics. Its environment parser does
+             // not accept HTTPS proxy URLs, but that error occurs only after it decides the target
+@@ -105,7 +124,11 @@
+         }
+     };
+ 
+-    let stream: Box<dyn AsyncIo> = match proxy_url {
++    let proxy = match proxy_url.as_deref() {
++        Some(url) => Some(ProxyEndpoint::parse(url)?),
++        None => platform_proxy,
++    };
++    let stream: Box<dyn AsyncIo> = match proxy {
+         None => {
+             let host = websocket_host(&request)?;
+             let port = websocket_port(&request)?;
+@@ -118,8 +141,7 @@
+             .map_err(WebSocketError::Io)?;
+             Box::new(stream)
+         }
+-        Some(url) => {
+-            let proxy = ProxyEndpoint::parse(&url)?;
++        Some(proxy) => {
+             let host = websocket_host(&request)?;
+             let port = websocket_port(&request)?;
+             let stream = connect_tcp(proxy.config.authority(), tcp_nodelay)
+@@ -154,7 +176,7 @@
+                         .map_err(|_| WebSocketError::Url(UrlError::UnsupportedUrlScheme))?;
+                     Box::new(
+                         connect_windows_proxy(
+-                            &url,
++                            proxy_url.as_deref().ok_or_else(invalid_proxy_config)?,
+                             &target,
+                             tls_config
+                                 .clone()
+@@ -242,12 +264,12 @@
+ }
+ 
+ async fn connect_tcp(address: String, tcp_nodelay: TcpNodelay) -> io::Result<TcpStream> {
+-    let addresses = tokio::net::lookup_host(address).await?.collect::<Vec<_>>();
++    let addresses = codex_http_client::lookup_host_with_platform_dns(address).await?;
+     connect_resolved_tcp(addresses, tcp_nodelay).await
+ }
+ 
+ async fn connect_loopback_tcp(address: String, tcp_nodelay: TcpNodelay) -> io::Result<TcpStream> {
+-    let addresses = tokio::net::lookup_host(address).await?.collect::<Vec<_>>();
++    let addresses = codex_http_client::lookup_host_with_platform_dns(address).await?;
+     connect_resolved_tcp(loopback_addresses(addresses)?, tcp_nodelay).await
+ }
+ 
+--- a/codex-rs/websocket-client/src/dialer_tests.rs
++++ b/codex-rs/websocket-client/src/dialer_tests.rs
+@@ -713,3 +713,142 @@
+         .unwrap();
+     WebSocketConnection::new(inner, lease)
+ }
++
++#[cfg(unix)]
++#[tokio::test]
++async fn platform_dns_websocket_default_and_no_proxy_use_android_lookup() {
++    use std::io::Write;
++    use std::os::unix::fs::OpenOptionsExt;
++    let helper = std::env::temp_dir().join(format!(
++        "pilon-dns-test-{}-{}",
++        std::process::id(),
++        std::time::SystemTime::now()
++            .duration_since(std::time::UNIX_EPOCH)
++            .unwrap()
++            .as_nanos()
++    ));
++    let mut file = std::fs::OpenOptions::new()
++        .write(true)
++        .create_new(true)
++        .mode(0o700)
++        .open(&helper)
++        .unwrap();
++    file.write_all(b"#!/bin/sh\nprintf 'PILON_DNS_V1\\n4 127.0.0.1\\n'\n")
++        .unwrap();
++    drop(file);
++    for mode in ["direct", "bypass", "explicit-bypass", "proxy"] {
++        let (target, task) = start_echo_websocket_server(None).await;
++        let url = format!("ws://pilon-dns.invalid:{}/", target.port());
++        let (proxy_url, proxy_task) = if mode == "proxy" {
++            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
++            let address = listener.local_addr().unwrap();
++            let task = tokio::spawn(async move {
++                let (mut stream, _) = listener.accept().await.unwrap();
++                let mut request = Vec::new();
++                while !request.ends_with(b"\r\n\r\n") {
++                    request.push(stream.read_u8().await.unwrap());
++                    assert!(request.len() <= 8192);
++                }
++                assert!(
++                    String::from_utf8(request)
++                        .unwrap()
++                        .starts_with(&format!("CONNECT pilon-dns.invalid:{} ", target.port()))
++                );
++                let mut destination = TcpStream::connect(target).await.unwrap();
++                stream
++                    .write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")
++                    .await
++                    .unwrap();
++                let _ = tokio::io::copy_bidirectional(&mut stream, &mut destination).await;
++            });
++            (
++                format!("http://proxy-dns.invalid:{}", address.port()),
++                Some(task),
++            )
++        } else {
++            ("http://unreachable.invalid:9".to_owned(), None)
++        };
++        let executable = std::env::current_exe().unwrap();
++        let helper = helper.clone();
++        let output = tokio::task::spawn_blocking(move || {
++            let mut command = Command::new(executable);
++            command.args([
++                "--exact",
++                "dialer::tests::platform_dns_websocket_subprocess_probe",
++                "--nocapture",
++            ]);
++            for key in [
++                "HTTP_PROXY",
++                "HTTPS_PROXY",
++                "ALL_PROXY",
++                "NO_PROXY",
++                "http_proxy",
++                "https_proxy",
++                "all_proxy",
++                "no_proxy",
++                "SSL_CERT_FILE",
++                "CODEX_CA_CERTIFICATE",
++            ] {
++                command.env_remove(key);
++            }
++            command
++                .env("PILON_DNS_HELPER", helper)
++                .env("PILON_DNS_TEST_URL", url)
++                .env("PILON_DNS_TEST_MODE", mode);
++            if mode != "direct" {
++                command.env("HTTP_PROXY", proxy_url);
++            }
++            if mode.contains("bypass") {
++                command.env("NO_PROXY", "pilon-dns.invalid");
++            }
++            command.output().unwrap()
++        })
++        .await
++        .unwrap();
++        assert!(
++            output.status.success(),
++            "{}",
++            String::from_utf8_lossy(&output.stderr)
++        );
++        task.await.unwrap();
++        if let Some(task) = proxy_task {
++            task.await.unwrap();
++        }
++    }
++    std::fs::remove_file(helper).unwrap();
++}
++
++#[tokio::test]
++async fn platform_dns_websocket_subprocess_probe() {
++    let Ok(url) = std::env::var("PILON_DNS_TEST_URL") else {
++        return;
++    };
++    let factory = HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault);
++    let request = url.into_client_request().unwrap();
++    let mut websocket = if std::env::var("PILON_DNS_TEST_MODE").unwrap() == "explicit-bypass" {
++        let (inner, _) = connect(
++            request,
++            WebSocketConfig::default(),
++            Some(test_tls_configs().0),
++            OutboundProxyRoute::Proxy {
++                url: "http://unreachable.invalid:9".to_owned(),
++                no_proxy: Some("pilon-dns.invalid".to_owned()),
++            },
++            TcpNodelay::Default,
++            false,
++        )
++        .await
++        .unwrap();
++        test_connection(inner)
++    } else {
++        WebSocketConnector::new(&factory)
++            .unwrap()
++            .connect(request, WebSocketConfig::default())
++            .await
++            .unwrap()
++            .0
++    };
++    let expected = Message::Text("platform DNS".into());
++    websocket.send(expected.clone()).await.unwrap();
++    assert_eq!(websocket.next().await.unwrap().unwrap(), expected);
++}

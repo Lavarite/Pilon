@@ -1,0 +1,28 @@
+--- a/libtailscale/backend.go
++++ b/libtailscale/backend.go
+@@ -19,7 +19,6 @@
+ 
+ 	"tailscale.com/drive/driveimpl"
+ 	_ "tailscale.com/feature/condregister"
+-	"tailscale.com/feature/taildrop"
+ 	"tailscale.com/hostinfo"
+ 	"tailscale.com/ipn"
+ 	"tailscale.com/ipn/ipnauth"
+@@ -361,9 +360,6 @@
+ 		w.Start()
+ 	}
+ 	lb, err := ipnlocal.NewLocalBackend(logf, logID.Public(), sys, 0)
+-	if ext, ok := ipnlocal.GetExt[*taildrop.Extension](lb); ok {
+-		ext.SetFileOps(newAndroidFileOps(a.shareFileHelper))
+-	}
+ 
+ 	if err != nil {
+ 		engine.Close()
+--- a/libtailscale/fileops.go
++++ b/libtailscale/fileops.go
+@@ -1,3 +1,5 @@
++//go:build !ts_omit_taildrop
++
+ // Copyright (c) Tailscale Inc & AUTHORS
+ // SPDX-License-Identifier: BSD-3-Clause
+ package libtailscale

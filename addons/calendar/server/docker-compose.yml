@@ -1,0 +1,31 @@
+name: pilon-calendar
+services:
+  pilon-calendar-frontend:
+    build: ./frontend
+    ports: ["127.0.0.1:20005:80"]
+    depends_on:
+      pilon-calendar-backend: {condition: service_healthy}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+  pilon-calendar-backend:
+    build: ./backend
+    env_file: .env
+    ports: ["127.0.0.1:20006:20006"]
+    volumes: ["./data:/data"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:20006/api/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}

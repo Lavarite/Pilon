@@ -1,0 +1,149 @@
+import groovy.json.JsonOutput
+import java.security.KeyStore
+import java.security.MessageDigest
+
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+
+    dependencies {
+        //noinspection AndroidGradlePluginVersion
+        classpath 'com.android.tools.build:gradle:9.2.1'
+    }
+}
+
+repositories {
+    google()
+    mavenCentral()
+    maven { url 'https://pkgs.dev.azure.com/MicrosoftDeviceSDK/DuoSDK-Public/_packaging/Duo-SDK-Feed/maven/v1' }
+}
+
+apply plugin: qtGradlePluginType
+
+dependencies {
+    // The matching surface-lifecycle jar replaces the kit's original Qt Java classes.
+    implementation fileTree(dir: 'libs', include: ['*.jar', '*.aar'], exclude: ['Qt6Android.jar'])
+    //noinspection GradleDependency
+    implementation 'androidx.core:core:1.17.0'
+    implementation 'androidx.window:window:1.5.1'
+    implementation 'androidx.window:window-java:1.5.1'
+    implementation 'com.google.ai.edge.litertlm:litertlm-android:0.19.1'
+    implementation 'com.google.android.gms:play-services-auth:22.0.0'
+    implementation('com.microsoft.identity.client:msal:8.6.0') {
+        // This Surface Duo platform API is supplied by that device, not redistributed.
+        exclude group: 'com.microsoft.device.display', module: 'display-mask'
+    }
+}
+
+android {
+    /*******************************************************
+     * The following variables:
+     * - androidBuildToolsVersion,
+     * - androidCompileSdkVersion
+     * - qtAndroidDir - holds the path to qt android files
+     *                   needed to build any Qt application
+     *                   on Android.
+     * - qtGradlePluginType - whether to build an app or a library
+     *
+     * are defined in gradle.properties file. This file is
+     * updated by QtCreator and androiddeployqt tools.
+     * Changing them manually might break the compilation!
+     *******************************************************/
+
+    namespace = androidPackageName
+    compileSdkVersion androidCompileSdkVersion
+    buildToolsVersion androidBuildToolsVersion
+    ndkVersion = androidNdkVersion
+
+    sourceSets {
+        main {
+            manifest.srcFile 'AndroidManifest.xml'
+            java.srcDirs = [qtAndroidDir + '/src', 'src', 'java']
+            kotlin.srcDirs = [qtAndroidDir + '/src', 'src', 'kotlin']
+            aidl.srcDirs = [qtAndroidDir + '/src', 'src', 'aidl']
+            res.srcDirs = [qtAndroidDir + '/res', 'res']
+            resources.srcDirs = ['resources']
+            renderscript.srcDirs = ['src']
+            assets.srcDirs = ['assets', layout.buildDirectory.dir('generated/pilon-notices')]
+            jniLibs.srcDirs = ['libs']
+       }
+        androidTest {
+            manifest.srcFile 'tests/AndroidManifest.xml'
+            java.srcDirs = ['tests']
+            assets.srcDirs = ['tests/assets']
+        }
+    }
+
+    tasks.withType(JavaCompile) {
+        options.compilerArgs += ['-Xlint:all']
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    aaptOptions {
+        // Do not compress Qt binary resources file
+        noCompress 'rcc'
+    }
+
+    packagingOptions {
+        jniLibs {
+            useLegacyPackaging = legacyPackaging.toBoolean()
+        }
+    }
+
+    defaultConfig {
+        minSdkVersion qtMinSdkVersion
+        targetSdkVersion qtTargetSdkVersion
+        def runner = project.findProperty('pilonInstrumentationRunner') ?: 'org.pilon.CredentialProbeInstrumentation'
+        testInstrumentationRunner runner
+        manifestPlaceholders.pilonAppTarget = androidPackageName
+        def redirectPath = project.findProperty('pilonMicrosoftRedirectPath')
+        if (!redirectPath) {
+            if (gradle.startParameter.taskNames.any { it.toLowerCase().contains('release') })
+                throw new GradleException('Release builds require -PpilonMicrosoftRedirectPath=/BASE64_SHA1_OF_SIGNING_CERTIFICATE')
+            def signing = signingConfigs.debug
+            def keyStore = KeyStore.getInstance(KeyStore.getDefaultType())
+            signing.storeFile.withInputStream { keyStore.load(it, signing.storePassword.toCharArray()) }
+            redirectPath = '/' + Base64.encoder.encodeToString(MessageDigest.getInstance('SHA-1').digest(keyStore.getCertificate(signing.keyAlias).encoded))
+        }
+        if (!(redirectPath ==~ /\/[A-Za-z0-9+\/]{27}=/))
+            throw new GradleException('pilonMicrosoftRedirectPath must be / followed by the raw Base64 SHA-1 signing-certificate hash')
+        manifestPlaceholders.pilonMicrosoftRedirectPath = redirectPath
+        ndk.abiFilters = qtTargetAbiList.split(",")
+    }
+}
+
+// Audit the exact production graph, including versions selected across all SDKs.
+def pilonNotices = tasks.register('generatePilonDependencyNotices') {
+    doLast {
+        def release = gradle.startParameter.taskNames.any { it.toLowerCase().contains('release') }
+        def runtime = release ? configurations.releaseRuntimeClasspath : configurations.debugRuntimeClasspath
+        def rows = runtime.resolvedConfiguration.resolvedArtifacts.unique { it.file.absolutePath }.collect { artifact ->
+            def id = artifact.moduleVersion.id
+            def pom = configurations.detachedConfiguration(dependencies.create("${id.group}:${id.name}:${id.version}@pom")).singleFile
+            [group:id.group, name:id.name, version:id.version, artifact:artifact.file.absolutePath, pom:pom.absolutePath]
+        }
+        def metadata = layout.buildDirectory.file('pilon-dependencies.json').get().asFile
+        metadata.parentFile.mkdirs()
+        metadata.text = JsonOutput.prettyPrint(JsonOutput.toJson(rows)) + '\n'
+        def notices = providers.exec {
+            commandLine 'python3', 'build-dependency-notices.py', metadata.absolutePath,
+                layout.buildDirectory.dir('generated/pilon-notices/licenses/android-dependencies').get().asFile.absolutePath
+        }
+        println notices.standardOutput.asText.get()
+        if (notices.result.get().exitValue != 0) throw new GradleException(notices.standardError.asText.get())
+    }
+}
+tasks.named('preBuild').configure { dependsOn pilonNotices }
+
+// Run after androiddeployqt copies the kit files; its timestamp check cannot replace this plugin.
+def pilonQtPlatform = tasks.register('stagePilonQtPlatform', Copy) {
+    from 'qt-platform-native'
+    into 'libs/arm64-v8a'
+}
+tasks.named('preBuild').configure { dependsOn pilonQtPlatform }

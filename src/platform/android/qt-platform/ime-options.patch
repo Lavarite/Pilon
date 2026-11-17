@@ -1,0 +1,16 @@
+diff --git a/src/android/jar/src/org/qtproject/qt/android/QtInputConnection.java b/src/android/jar/src/org/qtproject/qt/android/QtInputConnection.java
+--- a/src/android/jar/src/org/qtproject/qt/android/QtInputConnection.java
++++ b/src/android/jar/src/org/qtproject/qt/android/QtInputConnection.java
+@@ -276,7 +276,11 @@ class QtInputConnection extends BaseInputConnection
+         finishComposingText();
+         if (event.getKeyCode() == KeyEvent.KEYCODE_ENTER && m_view != null) {
+             KeyEvent fakeEvent;
+-            switch (m_view.m_imeOptions) {
++            final int options = m_view.m_imeOptions;
++            final int action = (options & android.view.inputmethod.EditorInfo.IME_FLAG_NO_ENTER_ACTION) != 0
++                    ? android.view.inputmethod.EditorInfo.IME_FLAG_NO_ENTER_ACTION
++                    : options & android.view.inputmethod.EditorInfo.IME_MASK_ACTION;
++            switch (action) {
+                 case android.view.inputmethod.EditorInfo.IME_ACTION_NEXT:
+                     fakeEvent = new KeyEvent(event.getDownTime(),
+                                             event.getEventTime(),

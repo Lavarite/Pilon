@@ -1,0 +1,2224 @@
+{
+  "version": 1,
+  "now": "2026-11-09T12:00:00Z",
+  "cases": [
+    {
+      "name": "valid-list",
+      "schemaValid": true,
+      "snapshot": {
+        "version": 1,
+        "workspaceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "addonId": "org.example.fixture",
+        "widgetId": "list",
+        "generation": 1,
+        "updatedAt": "2026-11-09T12:00:00Z",
+        "validFrom": "2026-11-09T00:00:00Z",
+        "validThrough": "2026-11-10T00:00:00Z",
+        "palette": {
+          "background": "#241e1a",
+          "text": "#d3c4b5",
+          "accent": "#ffb86c"
+        },
+        "timeline": [
+          {
+            "at": "2026-11-09T00:00:00Z",
+            "title": "Monday",
+            "rows": [
+              {
+                "id": "row1",
+                "title": "Fixture event",
+                "detail": "12:00",
+                "actionId": "item1"
+              }
+            ]
+          }
+        ],
+        "actions": {
+          "open": {},
+          "item1": {
+            "eventId": "fixture-id",
+            "date": "2026-11-09"
+          }
+        }
+      }
+    },
+    {
+      "name": "valid-empty",
+      "schemaValid": true,
+      "snapshot": {
+        "version": 1,
+        "workspaceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "addonId": "org.example.fixture",
+        "widgetId": "list",
+        "generation": 1,
+        "updatedAt": "2026-11-09T12:00:00Z",
+        "validFrom": "2026-11-09T00:00:00Z",
+        "validThrough": "2026-11-10T00:00:00Z",
+        "palette": {
+          "background": "#241e1a",
+          "text": "#d3c4b5",
+          "accent": "#ffb86c"
+        },
+        "timeline": [
+          {
+            "at": "2026-11-09T00:00:00Z",
+            "title": "Monday",
+            "rows": []
+          }
+        ],
+        "actions": {
+          "open": {},
+          "item1": {
+            "eventId": "fixture-id",
+            "date": "2026-11-09"
+          }
+        }
+      }
+    },
+    {
+      "name": "valid-newline-detail",
+      "schemaValid": true,
+      "snapshot": {
+        "version": 1,
+        "workspaceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "addonId": "org.example.fixture",
+        "widgetId": "list",
+        "generation": 1,
+        "updatedAt": "2026-11-09T12:00:00Z",
+        "validFrom": "2026-11-09T00:00:00Z",
+        "validThrough": "2026-11-10T00:00:00Z",
+        "palette": {
+          "background": "#241e1a",
+          "text": "#d3c4b5",
+          "accent": "#ffb86c"
+        },
+        "timeline": [
+          {
+            "at": "2026-11-09T00:00:00Z",
+            "title": "Monday",
+            "rows": [
+              {
+                "id": "row1",
+                "title": "Fixture event",
+                "detail": "12:00\nRoom",
+                "actionId": "item1"
+              }
+            ]
+          }
+        ],
+        "actions": {
+          "open": {},
+          "item1": {
+            "eventId": "fixture-id",
+            "date": "2026-11-09"
+          }
+        }
+      }
+    },
+    {
+      "name": "extra-field",
+      "schemaValid": false,
+      "snapshot": {
+        "version": 1,
+        "workspaceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "addonId": "org.example.fixture",
+        "widgetId": "list",
+        "generation": 1,
+        "updatedAt": "2026-11-09T12:00:00Z",
+        "validFrom": "2026-11-09T00:00:00Z",
+        "validThrough": "2026-11-10T00:00:00Z",
+        "palette": {
+          "background": "#241e1a",
+          "text": "#d3c4b5",
+          "accent": "#ffb86c"
+        },
+        "timeline": [
+          {
+            "at": "2026-11-09T00:00:00Z",
+            "title": "Monday",
+            "rows": [
+              {
+                "id": "row1",
+                "title": "Fixture event",
+                "detail": "12:00",
+                "actionId": "item1"
+              }
+            ]
+          }
+        ],
+        "actions": {
+          "open": {},
+          "item1": {
+            "eventId": "fixture-id",
+            "date": "2026-11-09"
+          }
+        },
+        "command": "untrusted"
+      }
+    },
+    {
+      "name": "zero-generation",
+      "schemaValid": false,
+      "snapshot": {
+        "version": 1,
+        "workspaceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "addonId": "org.example.fixture",
+        "widgetId": "list",
+        "generation": 0,
+        "updatedAt": "2026-11-09T12:00:00Z",
+        "validFrom": "2026-11-09T00:00:00Z",
+        "validThrough": "2026-11-10T00:00:00Z",
+        "palette": {
+          "background": "#241e1a",
+          "text": "#d3c4b5",
+          "accent": "#ffb86c"
+        },
+        "timeline": [
+          {
+            "at": "2026-11-09T00:00:00Z",
+            "title": "Monday",
+            "rows": [
+              {
+                "id": "row1",
+                "title": "Fixture event",
+                "detail": "12:00",
+                "actionId": "item1"
+              }
+            ]
+          }
+        ],
+        "actions": {
+          "open": {},
+          "item1": {
+            "eventId": "fixture-id",
+            "date": "2026-11-09"
+          }
+        }
+      }
+    },
+    {
+      "name": "fraction-too-precise",
+      "schemaValid": false,
+      "snapshot": {
+        "version": 1,
+        "workspaceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "addonId": "org.example.fixture",
+        "widgetId": "list",
+        "generation": 1,
+        "updatedAt": "2026-11-09T12:00:00.000000001Z",
+        "validFrom": "2026-11-09T00:00:00Z",
+        "validThrough": "2026-11-10T00:00:00Z",
+        "palette": {
+          "background": "#241e1a",
+          "text": "#d3c4b5",
+          "accent": "#ffb86c"
+        },
+        "timeline": [
+          {
+            "at": "2026-11-09T00:00:00Z",
+            "title": "Monday",
+            "rows": [
+              {
+                "id": "row1",
+                "title": "Fixture event",
+                "detail": "12:00",
+                "actionId": "item1"
+              }
+            ]
+          }
+        ],
+        "actions": {
+          "open": {},
+          "item1": {
+            "eventId": "fixture-id",
+            "date": "2026-11-09"
+          }
+        }
+      }
+    },
+    {
+      "name": "unsafe-title",
+      "schemaValid": false,
+      "snapshot": {
+        "version": 1,
+        "workspaceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "addonId": "org.example.fixture",
+        "widgetId": "list",
+        "generation": 1,
+        "updatedAt": "2026-11-09T12:00:00Z",
+        "validFrom": "2026-11-09T00:00:00Z",
+        "validThrough": "2026-11-10T00:00:00Z",
+        "palette": {
+          "background": "#241e1a",
+          "text": "#d3c4b5",
+          "accent": "#ffb86c"
+        },
+        "timeline": [
+          {
+            "at": "2026-11-09T00:00:00Z",
+            "title": "Monday",
+            "rows": [
+              {
+                "id": "row1",
+                "title": "Two\nlines",
+                "detail": "12:00",
+                "actionId": "item1"
+              }
+            ]
+          }
+        ],
+        "actions": {
+          "open": {},
+          "item1": {
+            "eventId": "fixture-id",
+            "date": "2026-11-09"
+          }
+        }
+      }
+    },
+    {
+      "name": "nested-action",
+      "schemaValid": false,
+      "snapshot": {
+        "version": 1,
+        "workspaceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "addonId": "org.example.fixture",
+        "widgetId": "list",
+        "generation": 1,
+        "updatedAt": "2026-11-09T12:00:00Z",
+        "validFrom": "2026-11-09T00:00:00Z",
+        "validThrough": "2026-11-10T00:00:00Z",
+        "palette": {
+          "background": "#241e1a",
+          "text": "#d3c4b5",
+          "accent": "#ffb86c"
+        },
+        "timeline": [
+          {
+            "at": "2026-11-09T00:00:00Z",
+            "title": "Monday",
+            "rows": [
+              {
+                "id": "row1",
+                "title": "Fixture event",
+                "detail": "12:00",
+                "actionId": "item1"
+              }
+            ]
+          }
+        ],
+        "actions": {
+          "open": {},
+          "item1": {
+            "nested": {
+              "command": "untrusted"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "missing-action-reference",
+      "schemaValid": false,
+      "snapshot": {
+        "version": 1,
+        "workspaceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "addonId": "org.example.fixture",
+        "widgetId": "list",
+        "generation": 1,
+        "updatedAt": "2026-11-09T12:00:00Z",
+        "validFrom": "2026-11-09T00:00:00Z",
+        "validThrough": "2026-11-10T00:00:00Z",
+        "palette": {
+          "background": "#241e1a",
+          "text": "#d3c4b5",
+          "accent": "#ffb86c"
+        },
+        "timeline": [
+          {
+            "at": "2026-11-09T00:00:00Z",
+            "title": "Monday",
+            "rows": [
+              {
+                "id": "row1",
+                "title": "Fixture event",
+                "detail": "12:00",
+                "actionId": "item1"
+              }
+            ]
+          }
+        ],
+        "actions": {
+          "open": {}
+        }
+      }
+    },
+    {
+      "name": "duplicate-row-id",
+      "schemaValid": false,
+      "snapshot": {
+        "version": 1,
+        "workspaceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "addonId": "org.example.fixture",
+        "widgetId": "list",
+        "generation": 1,
+        "updatedAt": "2026-11-09T12:00:00Z",
+        "validFrom": "2026-11-09T00:00:00Z",
+        "validThrough": "2026-11-10T00:00:00Z",
+        "palette": {
+          "background": "#241e1a",
+          "text": "#d3c4b5",
+          "accent": "#ffb86c"
+        },
+        "timeline": [
+          {
+            "at": "2026-11-09T00:00:00Z",
+            "title": "Monday",
+            "rows": [
+              {
+                "id": "row1",
+                "title": "Fixture event",
+                "detail": "12:00",
+                "actionId": "item1"
+              },
+              {
+                "id": "row1",
+                "title": "Fixture event",
+                "detail": "12:00",
+                "actionId": "item1"
+              }
+            ]
+          }
+        ],
+        "actions": {
+          "open": {},
+          "item1": {
+            "eventId": "fixture-id",
+            "date": "2026-11-09"
+          }
+        }
+      }
+    },
+    {
+      "name": "first-frame-after-start",
+      "schemaValid": false,
+      "snapshot": {
+        "version": 1,
+        "workspaceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "addonId": "org.example.fixture",
+        "widgetId": "list",
+        "generation": 1,
+        "updatedAt": "2026-11-09T12:00:00Z",
+        "validFrom": "2026-11-09T00:00:00Z",
+        "validThrough": "2026-11-10T00:00:00Z",
+        "palette": {
+          "background": "#241e1a",
+          "text": "#d3c4b5",
+          "accent": "#ffb86c"
+        },
+        "timeline": [
+          {
+            "at": "2026-11-09T01:00:00Z",
+            "title": "Monday",
+            "rows": [
+              {
+                "id": "row1",
+                "title": "Fixture event",
+                "detail": "12:00",
+                "actionId": "item1"
+              }
+            ]
+          }
+        ],
+        "actions": {
+          "open": {},
+          "item1": {
+            "eventId": "fixture-id",
+            "date": "2026-11-09"
+          }
+        }
+      }
+    },
+    {
+      "name": "palette-extra-field",
+      "schemaValid": false,
+      "snapshot": {
+        "version": 1,
+        "workspaceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "addonId": "org.example.fixture",
+        "widgetId": "list",
+        "generation": 1,
+        "updatedAt": "2026-11-09T12:00:00Z",
+        "validFrom": "2026-11-09T00:00:00Z",
+        "validThrough": "2026-11-10T00:00:00Z",
+        "palette": {
+          "background": "#241e1a",
+          "text": "#d3c4b5",
+          "accent": "#ffb86c",
+          "image": "untrusted"
+        },
+        "timeline": [
+          {
+            "at": "2026-11-09T00:00:00Z",
+            "title": "Monday",
+            "rows": [
+              {
+                "id": "row1",
+                "title": "Fixture event",
+                "detail": "12:00",
+                "actionId": "item1"
+              }
+            ]
+          }
+        ],
+        "actions": {
+          "open": {},
+          "item1": {
+            "eventId": "fixture-id",
+            "date": "2026-11-09"
+          }
+        }
+      }
+    },
+    {
+      "name": "valid-rich-agenda",
+      "schemaValid": true,
+      "snapshot": {
+        "version": 1,
+        "workspaceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "addonId": "org.example.fixture",
+        "widgetId": "list",
+        "generation": 1,
+        "updatedAt": "2026-11-09T12:00:00Z",
+        "validFrom": "2026-11-09T00:00:00Z",
+        "validThrough": "2026-11-10T00:00:00Z",
+        "palette": {
+          "background": "#241e1a",
+          "text": "#d3c4b5",
+          "accent": "#ffb86c"
+        },
+        "timeline": [
+          {
+            "at": "2026-11-09T00:00:00Z",
+            "title": "Monday",
+            "rows": [
+              {
+                "id": "row1",
+                "title": "Fixture event",
+                "detail": "12:00",
+                "actionId": "item1",
+                "group": "Tomorrow",
+                "leading": "10:00\n11:00",
+                "accent": "#ffb86c"
+              }
+            ],
+            "heading": {
+              "label": "MONDAY",
+              "value": "9",
+              "caption": "November 2026"
+            }
+          }
+        ],
+        "actions": {
+          "open": {},
+          "item1": {
+            "eventId": "fixture-id",
+            "date": "2026-11-09"
+          }
+        }
+      }
+    },
+    {
+      "name": "invalid-heading-extra",
+      "schemaValid": false,
+      "snapshot": {
+        "version": 1,
+        "workspaceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "addonId": "org.example.fixture",
+        "widgetId": "list",
+        "generation": 1,
+        "updatedAt": "2026-11-09T12:00:00Z",
+        "validFrom": "2026-11-09T00:00:00Z",
+        "validThrough": "2026-11-10T00:00:00Z",
+        "palette": {
+          "background": "#241e1a",
+          "text": "#d3c4b5",
+          "accent": "#ffb86c"
+        },
+        "timeline": [
+          {
+            "at": "2026-11-09T00:00:00Z",
+            "title": "Monday",
+            "rows": [
+              {
+                "id": "row1",
+                "title": "Fixture event",
+                "detail": "12:00",
+                "actionId": "item1",
+                "group": "Tomorrow",
+                "leading": "10:00\n11:00",
+                "accent": "#ffb86c"
+              }
+            ],
+            "heading": {
+              "label": "MONDAY",
+              "value": "9",
+              "caption": "November 2026",
+              "extra": "x"
+            }
+          }
+        ],
+        "actions": {
+          "open": {},
+          "item1": {
+            "eventId": "fixture-id",
+            "date": "2026-11-09"
+          }
+        }
+      }
+    },
+    {
+      "name": "invalid-heading-value-limit",
+      "schemaValid": false,
+      "snapshot": {
+        "version": 1,
+        "workspaceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "addonId": "org.example.fixture",
+        "widgetId": "list",
+        "generation": 1,
+        "updatedAt": "2026-11-09T12:00:00Z",
+        "validFrom": "2026-11-09T00:00:00Z",
+        "validThrough": "2026-11-10T00:00:00Z",
+        "palette": {
+          "background": "#241e1a",
+          "text": "#d3c4b5",
+          "accent": "#ffb86c"
+        },
+        "timeline": [
+          {
+            "at": "2026-11-09T00:00:00Z",
+            "title": "Monday",
+            "rows": [
+              {
+                "id": "row1",
+                "title": "Fixture event",
+                "detail": "12:00",
+                "actionId": "item1",
+                "group": "Tomorrow",
+                "leading": "10:00\n11:00",
+                "accent": "#ffb86c"
+              }
+            ],
+            "heading": {
+              "label": "MONDAY",
+              "value": "11111111111111111",
+              "caption": "November 2026"
+            }
+          }
+        ],
+        "actions": {
+          "open": {},
+          "item1": {
+            "eventId": "fixture-id",
+            "date": "2026-11-09"
+          }
+        }
+      }
+    },
+    {
+      "name": "invalid-row-group-newline",
+      "schemaValid": false,
+      "snapshot": {
+        "version": 1,
+        "workspaceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "addonId": "org.example.fixture",
+        "widgetId": "list",
+        "generation": 1,
+        "updatedAt": "2026-11-09T12:00:00Z",
+        "validFrom": "2026-11-09T00:00:00Z",
+        "validThrough": "2026-11-10T00:00:00Z",
+        "palette": {
+          "background": "#241e1a",
+          "text": "#d3c4b5",
+          "accent": "#ffb86c"
+        },
+        "timeline": [
+          {
+            "at": "2026-11-09T00:00:00Z",
+            "title": "Monday",
+            "rows": [
+              {
+                "id": "row1",
+                "title": "Fixture event",
+                "detail": "12:00",
+                "actionId": "item1",
+                "group": "Day\nTwo",
+                "leading": "10:00\n11:00",
+                "accent": "#ffb86c"
+              }
+            ],
+            "heading": {
+              "label": "MONDAY",
+              "value": "9",
+              "caption": "November 2026"
+            }
+          }
+        ],
+        "actions": {
+          "open": {},
+          "item1": {
+            "eventId": "fixture-id",
+            "date": "2026-11-09"
+          }
+        }
+      }
+    },
+    {
+      "name": "invalid-row-leading-limit",
+      "schemaValid": false,
+      "snapshot": {
+        "version": 1,
+        "workspaceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "addonId": "org.example.fixture",
+        "widgetId": "list",
+        "generation": 1,
+        "updatedAt": "2026-11-09T12:00:00Z",
+        "validFrom": "2026-11-09T00:00:00Z",
+        "validThrough": "2026-11-10T00:00:00Z",
+        "palette": {
+          "background": "#241e1a",
+          "text": "#d3c4b5",
+          "accent": "#ffb86c"
+        },
+        "timeline": [
+          {
+            "at": "2026-11-09T00:00:00Z",
+            "title": "Monday",
+            "rows": [
+              {
+                "id": "row1",
+                "title": "Fixture event",
+                "detail": "12:00",
+                "actionId": "item1",
+                "group": "Tomorrow",
+                "leading": "111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111",
+                "accent": "#ffb86c"
+              }
+            ],
+            "heading": {
+              "label": "MONDAY",
+              "value": "9",
+              "caption": "November 2026"
+            }
+          }
+        ],
+        "actions": {
+          "open": {},
+          "item1": {
+            "eventId": "fixture-id",
+            "date": "2026-11-09"
+          }
+        }
+      }
+    },
+    {
+      "name": "invalid-row-accent",
+      "schemaValid": false,
+      "snapshot": {
+        "version": 1,
+        "workspaceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "addonId": "org.example.fixture",
+        "widgetId": "list",
+        "generation": 1,
+        "updatedAt": "2026-11-09T12:00:00Z",
+        "validFrom": "2026-11-09T00:00:00Z",
+        "validThrough": "2026-11-10T00:00:00Z",
+        "palette": {
+          "background": "#241e1a",
+          "text": "#d3c4b5",
+          "accent": "#ffb86c"
+        },
+        "timeline": [
+          {
+            "at": "2026-11-09T00:00:00Z",
+            "title": "Monday",
+            "rows": [
+              {
+                "id": "row1",
+                "title": "Fixture event",
+                "detail": "12:00",
+                "actionId": "item1",
+                "group": "Tomorrow",
+                "leading": "10:00\n11:00",
+                "accent": "orange"
+              }
+            ],
+            "heading": {
+              "label": "MONDAY",
+              "value": "9",
+              "caption": "November 2026"
+            }
+          }
+        ],
+        "actions": {
+          "open": {},
+          "item1": {
+            "eventId": "fixture-id",
+            "date": "2026-11-09"
+          }
+        }
+      }
+    },
+    {
+      "name": "valid-time-grid",
+      "schemaValid": true,
+      "snapshot": {
+        "version": 1,
+        "workspaceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "addonId": "org.example.fixture",
+        "widgetId": "list",
+        "generation": 1,
+        "updatedAt": "2026-11-09T12:00:00Z",
+        "validFrom": "2026-11-09T00:00:00Z",
+        "validThrough": "2026-11-10T00:00:00Z",
+        "palette": {
+          "background": "#241e1a",
+          "text": "#d3c4b5",
+          "accent": "#ffb86c"
+        },
+        "timeline": [
+          {
+            "at": "2026-11-09T00:00:00Z",
+            "title": "Monday",
+            "rows": [
+              {
+                "id": "row1",
+                "title": "Fixture event",
+                "detail": "12:00",
+                "actionId": "item1",
+                "timeRange": {
+                  "startMinute": 600,
+                  "endMinute": 660
+                }
+              },
+              {
+                "id": "all_day",
+                "title": "All day",
+                "allDay": true,
+                "actionId": "open"
+              }
+            ],
+            "timeGrid": {
+              "startMinute": 600,
+              "endMinute": 1440
+            },
+            "actionId": "period"
+          }
+        ],
+        "actions": {
+          "open": {},
+          "item1": {
+            "eventId": "fixture-id",
+            "date": "2026-11-09"
+          },
+          "period": {
+            "kind": "period",
+            "date": "2026-11-09",
+            "minute": 600
+          }
+        }
+      }
+    },
+    {
+      "name": "invalid-time-grid-extra",
+      "schemaValid": false,
+      "snapshot": {
+        "version": 1,
+        "workspaceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "addonId": "org.example.fixture",
+        "widgetId": "list",
+        "generation": 1,
+        "updatedAt": "2026-11-09T12:00:00Z",
+        "validFrom": "2026-11-09T00:00:00Z",
+        "validThrough": "2026-11-10T00:00:00Z",
+        "palette": {
+          "background": "#241e1a",
+          "text": "#d3c4b5",
+          "accent": "#ffb86c"
+        },
+        "timeline": [
+          {
+            "at": "2026-11-09T00:00:00Z",
+            "title": "Monday",
+            "rows": [
+              {
+                "id": "row1",
+                "title": "Fixture event",
+                "detail": "12:00",
+                "actionId": "item1",
+                "timeRange": {
+                  "startMinute": 600,
+                  "endMinute": 660
+                }
+              },
+              {
+                "id": "all_day",
+                "title": "All day",
+                "allDay": true,
+                "actionId": "open"
+              }
+            ],
+            "timeGrid": {
+              "startMinute": 600,
+              "endMinute": 1440,
+              "extra": 1
+            },
+            "actionId": "period"
+          }
+        ],
+        "actions": {
+          "open": {},
+          "item1": {
+            "eventId": "fixture-id",
+            "date": "2026-11-09"
+          },
+          "period": {
+            "kind": "period",
+            "date": "2026-11-09",
+            "minute": 600
+          }
+        }
+      }
+    },
+    {
+      "name": "invalid-time-grid-fraction",
+      "schemaValid": false,
+      "snapshot": {
+        "version": 1,
+        "workspaceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "addonId": "org.example.fixture",
+        "widgetId": "list",
+        "generation": 1,
+        "updatedAt": "2026-11-09T12:00:00Z",
+        "validFrom": "2026-11-09T00:00:00Z",
+        "validThrough": "2026-11-10T00:00:00Z",
+        "palette": {
+          "background": "#241e1a",
+          "text": "#d3c4b5",
+          "accent": "#ffb86c"
+        },
+        "timeline": [
+          {
+            "at": "2026-11-09T00:00:00Z",
+            "title": "Monday",
+            "rows": [
+              {
+                "id": "row1",
+                "title": "Fixture event",
+                "detail": "12:00",
+                "actionId": "item1",
+                "timeRange": {
+                  "startMinute": 600,
+                  "endMinute": 660
+                }
+              },
+              {
+                "id": "all_day",
+                "title": "All day",
+                "allDay": true,
+                "actionId": "open"
+              }
+            ],
+            "timeGrid": {
+              "startMinute": 600.5,
+              "endMinute": 1440
+            },
+            "actionId": "period"
+          }
+        ],
+        "actions": {
+          "open": {},
+          "item1": {
+            "eventId": "fixture-id",
+            "date": "2026-11-09"
+          },
+          "period": {
+            "kind": "period",
+            "date": "2026-11-09",
+            "minute": 600
+          }
+        }
+      }
+    },
+    {
+      "name": "invalid-time-grid-backwards",
+      "schemaValid": false,
+      "snapshot": {
+        "version": 1,
+        "workspaceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "addonId": "org.example.fixture",
+        "widgetId": "list",
+        "generation": 1,
+        "updatedAt": "2026-11-09T12:00:00Z",
+        "validFrom": "2026-11-09T00:00:00Z",
+        "validThrough": "2026-11-10T00:00:00Z",
+        "palette": {
+          "background": "#241e1a",
+          "text": "#d3c4b5",
+          "accent": "#ffb86c"
+        },
+        "timeline": [
+          {
+            "at": "2026-11-09T00:00:00Z",
+            "title": "Monday",
+            "rows": [
+              {
+                "id": "row1",
+                "title": "Fixture event",
+                "detail": "12:00",
+                "actionId": "item1",
+                "timeRange": {
+                  "startMinute": 600,
+                  "endMinute": 660
+                }
+              },
+              {
+                "id": "all_day",
+                "title": "All day",
+                "allDay": true,
+                "actionId": "open"
+              }
+            ],
+            "timeGrid": {
+              "startMinute": 600,
+              "endMinute": 500
+            },
+            "actionId": "period"
+          }
+        ],
+        "actions": {
+          "open": {},
+          "item1": {
+            "eventId": "fixture-id",
+            "date": "2026-11-09"
+          },
+          "period": {
+            "kind": "period",
+            "date": "2026-11-09",
+            "minute": 600
+          }
+        }
+      }
+    },
+    {
+      "name": "invalid-time-range-outside-day",
+      "schemaValid": false,
+      "snapshot": {
+        "version": 1,
+        "workspaceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "addonId": "org.example.fixture",
+        "widgetId": "list",
+        "generation": 1,
+        "updatedAt": "2026-11-09T12:00:00Z",
+        "validFrom": "2026-11-09T00:00:00Z",
+        "validThrough": "2026-11-10T00:00:00Z",
+        "palette": {
+          "background": "#241e1a",
+          "text": "#d3c4b5",
+          "accent": "#ffb86c"
+        },
+        "timeline": [
+          {
+            "at": "2026-11-09T00:00:00Z",
+            "title": "Monday",
+            "rows": [
+              {
+                "id": "row1",
+                "title": "Fixture event",
+                "detail": "12:00",
+                "actionId": "item1",
+                "timeRange": {
+                  "startMinute": 600,
+                  "endMinute": 1441
+                }
+              },
+              {
+                "id": "all_day",
+                "title": "All day",
+                "allDay": true,
+                "actionId": "open"
+              }
+            ],
+            "timeGrid": {
+              "startMinute": 600,
+              "endMinute": 1440
+            },
+            "actionId": "period"
+          }
+        ],
+        "actions": {
+          "open": {},
+          "item1": {
+            "eventId": "fixture-id",
+            "date": "2026-11-09"
+          },
+          "period": {
+            "kind": "period",
+            "date": "2026-11-09",
+            "minute": 600
+          }
+        }
+      }
+    },
+    {
+      "name": "invalid-all-day-type",
+      "schemaValid": false,
+      "snapshot": {
+        "version": 1,
+        "workspaceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "addonId": "org.example.fixture",
+        "widgetId": "list",
+        "generation": 1,
+        "updatedAt": "2026-11-09T12:00:00Z",
+        "validFrom": "2026-11-09T00:00:00Z",
+        "validThrough": "2026-11-10T00:00:00Z",
+        "palette": {
+          "background": "#241e1a",
+          "text": "#d3c4b5",
+          "accent": "#ffb86c"
+        },
+        "timeline": [
+          {
+            "at": "2026-11-09T00:00:00Z",
+            "title": "Monday",
+            "rows": [
+              {
+                "id": "row1",
+                "title": "Fixture event",
+                "detail": "12:00",
+                "actionId": "item1",
+                "timeRange": {
+                  "startMinute": 600,
+                  "endMinute": 660
+                }
+              },
+              {
+                "id": "all_day",
+                "title": "All day",
+                "allDay": "true",
+                "actionId": "open"
+              }
+            ],
+            "timeGrid": {
+              "startMinute": 600,
+              "endMinute": 1440
+            },
+            "actionId": "period"
+          }
+        ],
+        "actions": {
+          "open": {},
+          "item1": {
+            "eventId": "fixture-id",
+            "date": "2026-11-09"
+          },
+          "period": {
+            "kind": "period",
+            "date": "2026-11-09",
+            "minute": 600
+          }
+        }
+      }
+    },
+    {
+      "name": "invalid-all-day-timed-range",
+      "schemaValid": false,
+      "snapshot": {
+        "version": 1,
+        "workspaceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "addonId": "org.example.fixture",
+        "widgetId": "list",
+        "generation": 1,
+        "updatedAt": "2026-11-09T12:00:00Z",
+        "validFrom": "2026-11-09T00:00:00Z",
+        "validThrough": "2026-11-10T00:00:00Z",
+        "palette": {
+          "background": "#241e1a",
+          "text": "#d3c4b5",
+          "accent": "#ffb86c"
+        },
+        "timeline": [
+          {
+            "at": "2026-11-09T00:00:00Z",
+            "title": "Monday",
+            "rows": [
+              {
+                "id": "row1",
+                "title": "Fixture event",
+                "detail": "12:00",
+                "actionId": "item1",
+                "timeRange": {
+                  "startMinute": 600,
+                  "endMinute": 660
+                },
+                "allDay": true
+              },
+              {
+                "id": "all_day",
+                "title": "All day",
+                "allDay": true,
+                "actionId": "open"
+              }
+            ],
+            "timeGrid": {
+              "startMinute": 600,
+              "endMinute": 1440
+            },
+            "actionId": "period"
+          }
+        ],
+        "actions": {
+          "open": {},
+          "item1": {
+            "eventId": "fixture-id",
+            "date": "2026-11-09"
+          },
+          "period": {
+            "kind": "period",
+            "date": "2026-11-09",
+            "minute": 600
+          }
+        }
+      }
+    },
+    {
+      "name": "invalid-frame-action-reference",
+      "schemaValid": false,
+      "snapshot": {
+        "version": 1,
+        "workspaceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "addonId": "org.example.fixture",
+        "widgetId": "list",
+        "generation": 1,
+        "updatedAt": "2026-11-09T12:00:00Z",
+        "validFrom": "2026-11-09T00:00:00Z",
+        "validThrough": "2026-11-10T00:00:00Z",
+        "palette": {
+          "background": "#241e1a",
+          "text": "#d3c4b5",
+          "accent": "#ffb86c"
+        },
+        "timeline": [
+          {
+            "at": "2026-11-09T00:00:00Z",
+            "title": "Monday",
+            "rows": [
+              {
+                "id": "row1",
+                "title": "Fixture event",
+                "detail": "12:00",
+                "actionId": "item1",
+                "timeRange": {
+                  "startMinute": 600,
+                  "endMinute": 660
+                }
+              },
+              {
+                "id": "all_day",
+                "title": "All day",
+                "allDay": true,
+                "actionId": "open"
+              }
+            ],
+            "timeGrid": {
+              "startMinute": 600,
+              "endMinute": 1440
+            },
+            "actionId": "missing"
+          }
+        ],
+        "actions": {
+          "open": {},
+          "item1": {
+            "eventId": "fixture-id",
+            "date": "2026-11-09"
+          },
+          "period": {
+            "kind": "period",
+            "date": "2026-11-09",
+            "minute": 600
+          }
+        }
+      }
+    },
+    {
+      "name": "valid-range-independent-of-grid",
+      "schemaValid": true,
+      "snapshot": {
+        "version": 1,
+        "workspaceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "addonId": "org.example.fixture",
+        "widgetId": "list",
+        "generation": 1,
+        "updatedAt": "2026-11-09T12:00:00Z",
+        "validFrom": "2026-11-09T00:00:00Z",
+        "validThrough": "2026-11-10T00:00:00Z",
+        "palette": {
+          "background": "#241e1a",
+          "text": "#d3c4b5",
+          "accent": "#ffb86c"
+        },
+        "timeline": [
+          {
+            "at": "2026-11-09T00:00:00Z",
+            "title": "Monday",
+            "rows": [
+              {
+                "id": "row1",
+                "title": "Fixture event",
+                "detail": "12:00",
+                "actionId": "item1",
+                "timeRange": {
+                  "startMinute": 600,
+                  "endMinute": 660
+                }
+              },
+              {
+                "id": "all_day",
+                "title": "All day",
+                "allDay": true,
+                "actionId": "open"
+              }
+            ],
+            "actionId": "period"
+          }
+        ],
+        "actions": {
+          "open": {},
+          "item1": {
+            "eventId": "fixture-id",
+            "date": "2026-11-09"
+          },
+          "period": {
+            "kind": "period",
+            "date": "2026-11-09",
+            "minute": 600
+          }
+        }
+      }
+    },
+    {
+      "name": "invalid-time-range-boolean",
+      "schemaValid": false,
+      "snapshot": {
+        "version": 1,
+        "workspaceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "addonId": "org.example.fixture",
+        "widgetId": "list",
+        "generation": 1,
+        "updatedAt": "2026-11-09T12:00:00Z",
+        "validFrom": "2026-11-09T00:00:00Z",
+        "validThrough": "2026-11-10T00:00:00Z",
+        "palette": {
+          "background": "#241e1a",
+          "text": "#d3c4b5",
+          "accent": "#ffb86c"
+        },
+        "timeline": [
+          {
+            "at": "2026-11-09T00:00:00Z",
+            "title": "Monday",
+            "rows": [
+              {
+                "id": "row1",
+                "title": "Fixture event",
+                "detail": "12:00",
+                "actionId": "item1",
+                "timeRange": {
+                  "startMinute": true,
+                  "endMinute": 660
+                }
+              },
+              {
+                "id": "all_day",
+                "title": "All day",
+                "allDay": true,
+                "actionId": "open"
+              }
+            ],
+            "timeGrid": {
+              "startMinute": 600,
+              "endMinute": 1440
+            },
+            "actionId": "period"
+          }
+        ],
+        "actions": {
+          "open": {},
+          "item1": {
+            "eventId": "fixture-id",
+            "date": "2026-11-09"
+          },
+          "period": {
+            "kind": "period",
+            "date": "2026-11-09",
+            "minute": 600
+          }
+        }
+      }
+    },
+    {
+      "name": "valid-clock-grid",
+      "schemaValid": true,
+      "snapshot": {
+        "version": 1,
+        "workspaceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "addonId": "org.example.fixture",
+        "widgetId": "list",
+        "generation": 1,
+        "updatedAt": "2026-11-09T12:00:00Z",
+        "validFrom": "2026-11-09T00:00:00Z",
+        "validThrough": "2026-11-10T00:00:00Z",
+        "palette": {
+          "background": "#241e1a",
+          "text": "#d3c4b5",
+          "accent": "#ffb86c"
+        },
+        "timeline": [
+          {
+            "at": "2026-11-09T00:00:00Z",
+            "title": "Monday",
+            "rows": [
+              {
+                "id": "row1",
+                "title": "Fixture event",
+                "detail": "12:00",
+                "actionId": "item1",
+                "timeRange": {
+                  "startMinute": 600,
+                  "endMinute": 660
+                }
+              },
+              {
+                "id": "all_day",
+                "title": "All day",
+                "allDay": true,
+                "actionId": "open"
+              }
+            ],
+            "timeGrid": {
+              "startMinute": 600,
+              "endMinute": 1440
+            },
+            "actionId": "period",
+            "clock": {
+              "date": "2026-11-09",
+              "timeZone": "Europe/London"
+            }
+          }
+        ],
+        "actions": {
+          "open": {},
+          "item1": {
+            "eventId": "fixture-id",
+            "date": "2026-11-09"
+          },
+          "period": {
+            "kind": "period",
+            "date": "2026-11-09",
+            "minute": 600
+          }
+        }
+      }
+    },
+    {
+      "name": "valid-clock-list-unknown-zone",
+      "schemaValid": true,
+      "snapshot": {
+        "version": 1,
+        "workspaceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "addonId": "org.example.fixture",
+        "widgetId": "list",
+        "generation": 1,
+        "updatedAt": "2026-11-09T12:00:00Z",
+        "validFrom": "2026-11-09T00:00:00Z",
+        "validThrough": "2026-11-10T00:00:00Z",
+        "palette": {
+          "background": "#241e1a",
+          "text": "#d3c4b5",
+          "accent": "#ffb86c"
+        },
+        "timeline": [
+          {
+            "at": "2026-11-09T00:00:00Z",
+            "title": "Monday",
+            "rows": [
+              {
+                "id": "row1",
+                "title": "Fixture event",
+                "detail": "12:00",
+                "actionId": "item1"
+              }
+            ],
+            "clock": {
+              "date": "0001-01-01",
+              "timeZone": "Etc/Unknown_Widget_Clock"
+            }
+          }
+        ],
+        "actions": {
+          "open": {},
+          "item1": {
+            "eventId": "fixture-id",
+            "date": "2026-11-09"
+          }
+        }
+      }
+    },
+    {
+      "name": "valid-clock-leap-day",
+      "schemaValid": true,
+      "snapshot": {
+        "version": 1,
+        "workspaceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "addonId": "org.example.fixture",
+        "widgetId": "list",
+        "generation": 1,
+        "updatedAt": "2026-11-09T12:00:00Z",
+        "validFrom": "2026-11-09T00:00:00Z",
+        "validThrough": "2026-11-10T00:00:00Z",
+        "palette": {
+          "background": "#241e1a",
+          "text": "#d3c4b5",
+          "accent": "#ffb86c"
+        },
+        "timeline": [
+          {
+            "at": "2026-11-09T00:00:00Z",
+            "title": "Monday",
+            "rows": [
+              {
+                "id": "row1",
+                "title": "Fixture event",
+                "detail": "12:00",
+                "actionId": "item1"
+              }
+            ],
+            "clock": {
+              "date": "2000-02-29",
+              "timeZone": "UTC"
+            }
+          }
+        ],
+        "actions": {
+          "open": {},
+          "item1": {
+            "eventId": "fixture-id",
+            "date": "2026-11-09"
+          }
+        }
+      }
+    },
+    {
+      "name": "valid-clock-max-date-zone",
+      "schemaValid": true,
+      "snapshot": {
+        "version": 1,
+        "workspaceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "addonId": "org.example.fixture",
+        "widgetId": "list",
+        "generation": 1,
+        "updatedAt": "2026-11-09T12:00:00Z",
+        "validFrom": "2026-11-09T00:00:00Z",
+        "validThrough": "2026-11-10T00:00:00Z",
+        "palette": {
+          "background": "#241e1a",
+          "text": "#d3c4b5",
+          "accent": "#ffb86c"
+        },
+        "timeline": [
+          {
+            "at": "2026-11-09T00:00:00Z",
+            "title": "Monday",
+            "rows": [
+              {
+                "id": "row1",
+                "title": "Fixture event",
+                "detail": "12:00",
+                "actionId": "item1"
+              }
+            ],
+            "clock": {
+              "date": "9999-12-31",
+              "timeZone": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+            }
+          }
+        ],
+        "actions": {
+          "open": {},
+          "item1": {
+            "eventId": "fixture-id",
+            "date": "2026-11-09"
+          }
+        }
+      }
+    },
+    {
+      "name": "invalid-clock-extra",
+      "schemaValid": false,
+      "snapshot": {
+        "version": 1,
+        "workspaceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "addonId": "org.example.fixture",
+        "widgetId": "list",
+        "generation": 1,
+        "updatedAt": "2026-11-09T12:00:00Z",
+        "validFrom": "2026-11-09T00:00:00Z",
+        "validThrough": "2026-11-10T00:00:00Z",
+        "palette": {
+          "background": "#241e1a",
+          "text": "#d3c4b5",
+          "accent": "#ffb86c"
+        },
+        "timeline": [
+          {
+            "at": "2026-11-09T00:00:00Z",
+            "title": "Monday",
+            "rows": [
+              {
+                "id": "row1",
+                "title": "Fixture event",
+                "detail": "12:00",
+                "actionId": "item1"
+              }
+            ],
+            "clock": {
+              "date": "2026-11-09",
+              "timeZone": "UTC",
+              "extra": "unused"
+            }
+          }
+        ],
+        "actions": {
+          "open": {},
+          "item1": {
+            "eventId": "fixture-id",
+            "date": "2026-11-09"
+          }
+        }
+      }
+    },
+    {
+      "name": "invalid-clock-missing-date",
+      "schemaValid": false,
+      "snapshot": {
+        "version": 1,
+        "workspaceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "addonId": "org.example.fixture",
+        "widgetId": "list",
+        "generation": 1,
+        "updatedAt": "2026-11-09T12:00:00Z",
+        "validFrom": "2026-11-09T00:00:00Z",
+        "validThrough": "2026-11-10T00:00:00Z",
+        "palette": {
+          "background": "#241e1a",
+          "text": "#d3c4b5",
+          "accent": "#ffb86c"
+        },
+        "timeline": [
+          {
+            "at": "2026-11-09T00:00:00Z",
+            "title": "Monday",
+            "rows": [
+              {
+                "id": "row1",
+                "title": "Fixture event",
+                "detail": "12:00",
+                "actionId": "item1"
+              }
+            ],
+            "clock": {
+              "timeZone": "UTC"
+            }
+          }
+        ],
+        "actions": {
+          "open": {},
+          "item1": {
+            "eventId": "fixture-id",
+            "date": "2026-11-09"
+          }
+        }
+      }
+    },
+    {
+      "name": "invalid-clock-impossible-date",
+      "schemaValid": false,
+      "snapshot": {
+        "version": 1,
+        "workspaceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "addonId": "org.example.fixture",
+        "widgetId": "list",
+        "generation": 1,
+        "updatedAt": "2026-11-09T12:00:00Z",
+        "validFrom": "2026-11-09T00:00:00Z",
+        "validThrough": "2026-11-10T00:00:00Z",
+        "palette": {
+          "background": "#241e1a",
+          "text": "#d3c4b5",
+          "accent": "#ffb86c"
+        },
+        "timeline": [
+          {
+            "at": "2026-11-09T00:00:00Z",
+            "title": "Monday",
+            "rows": [
+              {
+                "id": "row1",
+                "title": "Fixture event",
+                "detail": "12:00",
+                "actionId": "item1"
+              }
+            ],
+            "clock": {
+              "date": "2026-02-30",
+              "timeZone": "UTC"
+            }
+          }
+        ],
+        "actions": {
+          "open": {},
+          "item1": {
+            "eventId": "fixture-id",
+            "date": "2026-11-09"
+          }
+        }
+      }
+    },
+    {
+      "name": "invalid-clock-year-zero",
+      "schemaValid": false,
+      "snapshot": {
+        "version": 1,
+        "workspaceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "addonId": "org.example.fixture",
+        "widgetId": "list",
+        "generation": 1,
+        "updatedAt": "2026-11-09T12:00:00Z",
+        "validFrom": "2026-11-09T00:00:00Z",
+        "validThrough": "2026-11-10T00:00:00Z",
+        "palette": {
+          "background": "#241e1a",
+          "text": "#d3c4b5",
+          "accent": "#ffb86c"
+        },
+        "timeline": [
+          {
+            "at": "2026-11-09T00:00:00Z",
+            "title": "Monday",
+            "rows": [
+              {
+                "id": "row1",
+                "title": "Fixture event",
+                "detail": "12:00",
+                "actionId": "item1"
+              }
+            ],
+            "clock": {
+              "date": "0000-11-09",
+              "timeZone": "UTC"
+            }
+          }
+        ],
+        "actions": {
+          "open": {},
+          "item1": {
+            "eventId": "fixture-id",
+            "date": "2026-11-09"
+          }
+        }
+      }
+    },
+    {
+      "name": "invalid-clock-date-type",
+      "schemaValid": false,
+      "snapshot": {
+        "version": 1,
+        "workspaceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "addonId": "org.example.fixture",
+        "widgetId": "list",
+        "generation": 1,
+        "updatedAt": "2026-11-09T12:00:00Z",
+        "validFrom": "2026-11-09T00:00:00Z",
+        "validThrough": "2026-11-10T00:00:00Z",
+        "palette": {
+          "background": "#241e1a",
+          "text": "#d3c4b5",
+          "accent": "#ffb86c"
+        },
+        "timeline": [
+          {
+            "at": "2026-11-09T00:00:00Z",
+            "title": "Monday",
+            "rows": [
+              {
+                "id": "row1",
+                "title": "Fixture event",
+                "detail": "12:00",
+                "actionId": "item1"
+              }
+            ],
+            "clock": {
+              "date": true,
+              "timeZone": "UTC"
+            }
+          }
+        ],
+        "actions": {
+          "open": {},
+          "item1": {
+            "eventId": "fixture-id",
+            "date": "2026-11-09"
+          }
+        }
+      }
+    },
+    {
+      "name": "invalid-clock-date-unpadded",
+      "schemaValid": false,
+      "snapshot": {
+        "version": 1,
+        "workspaceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "addonId": "org.example.fixture",
+        "widgetId": "list",
+        "generation": 1,
+        "updatedAt": "2026-11-09T12:00:00Z",
+        "validFrom": "2026-11-09T00:00:00Z",
+        "validThrough": "2026-11-10T00:00:00Z",
+        "palette": {
+          "background": "#241e1a",
+          "text": "#d3c4b5",
+          "accent": "#ffb86c"
+        },
+        "timeline": [
+          {
+            "at": "2026-11-09T00:00:00Z",
+            "title": "Monday",
+            "rows": [
+              {
+                "id": "row1",
+                "title": "Fixture event",
+                "detail": "12:00",
+                "actionId": "item1"
+              }
+            ],
+            "clock": {
+              "date": "2026-1-09",
+              "timeZone": "UTC"
+            }
+          }
+        ],
+        "actions": {
+          "open": {},
+          "item1": {
+            "eventId": "fixture-id",
+            "date": "2026-11-09"
+          }
+        }
+      }
+    },
+    {
+      "name": "invalid-clock-zone-type",
+      "schemaValid": false,
+      "snapshot": {
+        "version": 1,
+        "workspaceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "addonId": "org.example.fixture",
+        "widgetId": "list",
+        "generation": 1,
+        "updatedAt": "2026-11-09T12:00:00Z",
+        "validFrom": "2026-11-09T00:00:00Z",
+        "validThrough": "2026-11-10T00:00:00Z",
+        "palette": {
+          "background": "#241e1a",
+          "text": "#d3c4b5",
+          "accent": "#ffb86c"
+        },
+        "timeline": [
+          {
+            "at": "2026-11-09T00:00:00Z",
+            "title": "Monday",
+            "rows": [
+              {
+                "id": "row1",
+                "title": "Fixture event",
+                "detail": "12:00",
+                "actionId": "item1"
+              }
+            ],
+            "clock": {
+              "date": "2026-11-09",
+              "timeZone": true
+            }
+          }
+        ],
+        "actions": {
+          "open": {},
+          "item1": {
+            "eventId": "fixture-id",
+            "date": "2026-11-09"
+          }
+        }
+      }
+    },
+    {
+      "name": "invalid-clock-zone-empty",
+      "schemaValid": false,
+      "snapshot": {
+        "version": 1,
+        "workspaceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "addonId": "org.example.fixture",
+        "widgetId": "list",
+        "generation": 1,
+        "updatedAt": "2026-11-09T12:00:00Z",
+        "validFrom": "2026-11-09T00:00:00Z",
+        "validThrough": "2026-11-10T00:00:00Z",
+        "palette": {
+          "background": "#241e1a",
+          "text": "#d3c4b5",
+          "accent": "#ffb86c"
+        },
+        "timeline": [
+          {
+            "at": "2026-11-09T00:00:00Z",
+            "title": "Monday",
+            "rows": [
+              {
+                "id": "row1",
+                "title": "Fixture event",
+                "detail": "12:00",
+                "actionId": "item1"
+              }
+            ],
+            "clock": {
+              "date": "2026-11-09",
+              "timeZone": ""
+            }
+          }
+        ],
+        "actions": {
+          "open": {},
+          "item1": {
+            "eventId": "fixture-id",
+            "date": "2026-11-09"
+          }
+        }
+      }
+    },
+    {
+      "name": "invalid-clock-zone-too-long",
+      "schemaValid": false,
+      "snapshot": {
+        "version": 1,
+        "workspaceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "addonId": "org.example.fixture",
+        "widgetId": "list",
+        "generation": 1,
+        "updatedAt": "2026-11-09T12:00:00Z",
+        "validFrom": "2026-11-09T00:00:00Z",
+        "validThrough": "2026-11-10T00:00:00Z",
+        "palette": {
+          "background": "#241e1a",
+          "text": "#d3c4b5",
+          "accent": "#ffb86c"
+        },
+        "timeline": [
+          {
+            "at": "2026-11-09T00:00:00Z",
+            "title": "Monday",
+            "rows": [
+              {
+                "id": "row1",
+                "title": "Fixture event",
+                "detail": "12:00",
+                "actionId": "item1"
+              }
+            ],
+            "clock": {
+              "date": "2026-11-09",
+              "timeZone": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+            }
+          }
+        ],
+        "actions": {
+          "open": {},
+          "item1": {
+            "eventId": "fixture-id",
+            "date": "2026-11-09"
+          }
+        }
+      }
+    },
+    {
+      "name": "invalid-clock-zone-dot",
+      "schemaValid": false,
+      "snapshot": {
+        "version": 1,
+        "workspaceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "addonId": "org.example.fixture",
+        "widgetId": "list",
+        "generation": 1,
+        "updatedAt": "2026-11-09T12:00:00Z",
+        "validFrom": "2026-11-09T00:00:00Z",
+        "validThrough": "2026-11-10T00:00:00Z",
+        "palette": {
+          "background": "#241e1a",
+          "text": "#d3c4b5",
+          "accent": "#ffb86c"
+        },
+        "timeline": [
+          {
+            "at": "2026-11-09T00:00:00Z",
+            "title": "Monday",
+            "rows": [
+              {
+                "id": "row1",
+                "title": "Fixture event",
+                "detail": "12:00",
+                "actionId": "item1"
+              }
+            ],
+            "clock": {
+              "date": "2026-11-09",
+              "timeZone": "Etc/../UTC"
+            }
+          }
+        ],
+        "actions": {
+          "open": {},
+          "item1": {
+            "eventId": "fixture-id",
+            "date": "2026-11-09"
+          }
+        }
+      }
+    },
+    {
+      "name": "invalid-clock-zone-colon",
+      "schemaValid": false,
+      "snapshot": {
+        "version": 1,
+        "workspaceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "addonId": "org.example.fixture",
+        "widgetId": "list",
+        "generation": 1,
+        "updatedAt": "2026-11-09T12:00:00Z",
+        "validFrom": "2026-11-09T00:00:00Z",
+        "validThrough": "2026-11-10T00:00:00Z",
+        "palette": {
+          "background": "#241e1a",
+          "text": "#d3c4b5",
+          "accent": "#ffb86c"
+        },
+        "timeline": [
+          {
+            "at": "2026-11-09T00:00:00Z",
+            "title": "Monday",
+            "rows": [
+              {
+                "id": "row1",
+                "title": "Fixture event",
+                "detail": "12:00",
+                "actionId": "item1"
+              }
+            ],
+            "clock": {
+              "date": "2026-11-09",
+              "timeZone": "UTC+01:00"
+            }
+          }
+        ],
+        "actions": {
+          "open": {},
+          "item1": {
+            "eventId": "fixture-id",
+            "date": "2026-11-09"
+          }
+        }
+      }
+    },
+    {
+      "name": "invalid-clock-zone-empty-segment",
+      "schemaValid": false,
+      "snapshot": {
+        "version": 1,
+        "workspaceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "addonId": "org.example.fixture",
+        "widgetId": "list",
+        "generation": 1,
+        "updatedAt": "2026-11-09T12:00:00Z",
+        "validFrom": "2026-11-09T00:00:00Z",
+        "validThrough": "2026-11-10T00:00:00Z",
+        "palette": {
+          "background": "#241e1a",
+          "text": "#d3c4b5",
+          "accent": "#ffb86c"
+        },
+        "timeline": [
+          {
+            "at": "2026-11-09T00:00:00Z",
+            "title": "Monday",
+            "rows": [
+              {
+                "id": "row1",
+                "title": "Fixture event",
+                "detail": "12:00",
+                "actionId": "item1"
+              }
+            ],
+            "clock": {
+              "date": "2026-11-09",
+              "timeZone": "Etc//UTC"
+            }
+          }
+        ],
+        "actions": {
+          "open": {},
+          "item1": {
+            "eventId": "fixture-id",
+            "date": "2026-11-09"
+          }
+        }
+      }
+    },
+    {
+      "name": "invalid-clock-zone-non-ascii",
+      "schemaValid": false,
+      "snapshot": {
+        "version": 1,
+        "workspaceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "addonId": "org.example.fixture",
+        "widgetId": "list",
+        "generation": 1,
+        "updatedAt": "2026-11-09T12:00:00Z",
+        "validFrom": "2026-11-09T00:00:00Z",
+        "validThrough": "2026-11-10T00:00:00Z",
+        "palette": {
+          "background": "#241e1a",
+          "text": "#d3c4b5",
+          "accent": "#ffb86c"
+        },
+        "timeline": [
+          {
+            "at": "2026-11-09T00:00:00Z",
+            "title": "Monday",
+            "rows": [
+              {
+                "id": "row1",
+                "title": "Fixture event",
+                "detail": "12:00",
+                "actionId": "item1"
+              }
+            ],
+            "clock": {
+              "date": "2026-11-09",
+              "timeZone": "Etc/Éire"
+            }
+          }
+        ],
+        "actions": {
+          "open": {},
+          "item1": {
+            "eventId": "fixture-id",
+            "date": "2026-11-09"
+          }
+        }
+      }
+    },
+    {
+      "name": "invalid-clock-zone-newline",
+      "schemaValid": false,
+      "snapshot": {
+        "version": 1,
+        "workspaceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "addonId": "org.example.fixture",
+        "widgetId": "list",
+        "generation": 1,
+        "updatedAt": "2026-11-09T12:00:00Z",
+        "validFrom": "2026-11-09T00:00:00Z",
+        "validThrough": "2026-11-10T00:00:00Z",
+        "palette": {
+          "background": "#241e1a",
+          "text": "#d3c4b5",
+          "accent": "#ffb86c"
+        },
+        "timeline": [
+          {
+            "at": "2026-11-09T00:00:00Z",
+            "title": "Monday",
+            "rows": [
+              {
+                "id": "row1",
+                "title": "Fixture event",
+                "detail": "12:00",
+                "actionId": "item1"
+              }
+            ],
+            "clock": {
+              "date": "2026-11-09",
+              "timeZone": "UTC\n"
+            }
+          }
+        ],
+        "actions": {
+          "open": {},
+          "item1": {
+            "eventId": "fixture-id",
+            "date": "2026-11-09"
+          }
+        }
+      }
+    },
+    {
+      "name": "invalid-clock-null",
+      "schemaValid": false,
+      "snapshot": {
+        "version": 1,
+        "workspaceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "addonId": "org.example.fixture",
+        "widgetId": "list",
+        "generation": 1,
+        "updatedAt": "2026-11-09T12:00:00Z",
+        "validFrom": "2026-11-09T00:00:00Z",
+        "validThrough": "2026-11-10T00:00:00Z",
+        "palette": {
+          "background": "#241e1a",
+          "text": "#d3c4b5",
+          "accent": "#ffb86c"
+        },
+        "timeline": [
+          {
+            "at": "2026-11-09T00:00:00Z",
+            "title": "Monday",
+            "rows": [
+              {
+                "id": "row1",
+                "title": "Fixture event",
+                "detail": "12:00",
+                "actionId": "item1"
+              }
+            ],
+            "clock": null
+          }
+        ],
+        "actions": {
+          "open": {},
+          "item1": {
+            "eventId": "fixture-id",
+            "date": "2026-11-09"
+          }
+        }
+      }
+    }
+  ]
+}

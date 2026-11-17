@@ -1,0 +1,60 @@
+pragma ComponentBehavior: Bound
+import QtQuick
+import QtQuick.Controls
+
+Item {
+    id: content
+    required property var descriptor
+    required property var addonContext
+    property string currentId: ""
+    property bool preparing: false
+    property var sections: ({})
+    property var currentLoader: null
+    property bool componentReady: false
+    readonly property var entry: currentLoader ? currentLoader.item : null
+    readonly property var loadedEntries: Object.values(sections).map(loader => loader.item).filter(item => !!item)
+    objectName: descriptor.id + "SettingsContent"
+    anchors.fill: parent
+    visible: false
+    enabled: !preparing
+    function loadSection() {
+        if (!componentReady || preparing) return
+        const section = descriptor.settings.find(item => item.id === currentId)
+        if (!section) return
+        let loader = sections[currentId]
+        if (!loader) {
+            loader = sectionFactory.createObject(content)
+            const updated = Object.assign({}, sections); updated[currentId] = loader; sections = updated
+            loader.setSource(section.entry, {addon: addonContext})
+        }
+        for (const item of Object.values(sections)) item.visible = item === loader
+        currentLoader = loader
+    }
+    onCurrentIdChanged: loadSection()
+    Component.onCompleted: { componentReady = true; loadSection() }
+    Label {
+        objectName: "addonSettingsErrorStatus"
+        z: 1
+        anchors.fill: parent; wrapMode: Text.Wrap
+        color: content.Window.window ? content.Window.window.palette.windowText : palette.windowText
+        visible: text.length > 0
+        text: content.currentLoader && content.currentLoader.status === Loader.Error
+            ? qsTr("Unable to load these settings. Check the add-on package.")
+            : content.currentLoader ? content.currentLoader.integrationError : ""
+    }
+    Component {
+        id: sectionFactory
+        Loader {
+            id: sectionLoader
+            readonly property string integrationError: integrations.item ? integrations.item.error : ""
+            anchors.fill: parent
+            Loader {
+                id: integrations
+                active: !!sectionLoader.item
+                sourceComponent: Component {
+                    AddonIntegrationHost { addon: content.addonContext; point: "settings"; target: sectionLoader.item }
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_grid_card" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="32dp">
+    <ImageView android:id="@+id/widget_grid_card_fill" android:layout_width="match_parent" android:layout_height="match_parent"
+        android:src="@drawable/pilon_widget_time_fill" android:scaleType="fitXY" android:importantForAccessibility="no" android:contentDescription="@null" />
+    <ImageView android:id="@+id/widget_grid_card_border" android:layout_width="match_parent" android:layout_height="match_parent"
+        android:src="@drawable/pilon_widget_time_border" android:scaleType="fitXY" android:importantForAccessibility="no" android:contentDescription="@null" />
+    <TextView android:id="@+id/widget_grid_card_title" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:padding="8dp" android:textSize="14sp" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" />
+</FrameLayout>

@@ -1,0 +1,20 @@
+[
+  {
+    "file": "Microsoft-MIT.txt",
+    "source": "https://raw.githubusercontent.com/AzureAD/microsoft-authentication-library-for-android/v8.6.0/LICENSE",
+    "sha256": "830007f3a565789ddc96181c929cbac863daa4f2cad44adf13a8bb1c4910d1f6"
+  },
+  {
+    "file": "Google-Android-SDK-Terms.html",
+    "source": "https://developer.android.com/studio/terms.html",
+    "sha256": "5f9282d1d08f81d084c2590fa7074b8a5d4fc52ea77e7869cbf32ea28c66496a",
+    "upstream_sha256": "ab67452de4c5a8a021f4108c1ac3d101495ebf598767210c47ef5b61253ff741",
+    "local_transformation": "Removed active web-page scripts and signin metadata; legal article bytes and visible document text unchanged.",
+    "legal_article_sha256": "05753edacec91b6ddb38efa16ee669be5582ce7db4355c1c1be8ad1b22b451c2"
+  },
+  {
+    "file": "Apache-2.0.txt",
+    "source": "https://www.apache.org/licenses/LICENSE-2.0.txt",
+    "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+  }
+]

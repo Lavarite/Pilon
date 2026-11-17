@@ -1,0 +1,194 @@
+{
+  "description": "Query calendars and availability and propose editable events or schedules for explicit user review.",
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "calendar_list",
+        "description": "List available calendars, permissions, enabled state and display time zone.",
+        "parameters": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "calendar_events",
+        "description": "Query enabled calendar events in an ISO date or date-time range; end is exclusive.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "from": {
+              "type": "string"
+            },
+            "to": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "from",
+            "to"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "calendar_free_time",
+        "description": "Find unoccupied intervals in an ISO date-time range; apply user working-hour constraints when selecting slots.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "from": {
+              "type": "string"
+            },
+            "to": {
+              "type": "string"
+            },
+            "minutes": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "required": [
+            "from",
+            "to",
+            "minutes"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "calendar_propose",
+        "description": "Create a schedule proposal; no events are saved until the user applies it in Pilon. New events default to local Pilon with no external copies.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "summary": {
+              "type": "string"
+            },
+            "changes": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "operation": {
+                    "type": "string",
+                    "enum": [
+                      "create",
+                      "update",
+                      "delete"
+                    ]
+                  },
+                  "event": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "title": {
+                        "type": "string"
+                      },
+                      "start": {
+                        "type": "string"
+                      },
+                      "end": {
+                        "type": "string"
+                      },
+                      "timeZone": {
+                        "type": "string"
+                      },
+                      "description": {
+                        "type": "string"
+                      },
+                      "location": {
+                        "type": "string"
+                      },
+                      "url": {
+                        "type": "string"
+                      },
+                      "recurrence": {
+                        "type": "string"
+                      },
+                      "organizerCalendar": {
+                        "type": "string"
+                      },
+                      "availability": {
+                        "type": "string"
+                      },
+                      "privacy": {
+                        "type": "string"
+                      },
+                      "colour": {
+                        "type": "string"
+                      },
+                      "version": {
+                        "type": "integer"
+                      },
+                      "allDay": {
+                        "type": "boolean"
+                      },
+                      "destinations": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "reminders": {
+                        "type": "array",
+                        "items": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      },
+                      "guests": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "email": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "email"
+                          ],
+                          "additionalProperties": false
+                        }
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "operation",
+                  "event"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 1,
+              "maxItems": 200
+            }
+          },
+          "required": [
+            "summary",
+            "changes"
+          ],
+          "additionalProperties": false
+        }
+      }
+    }
+  ]
+}
