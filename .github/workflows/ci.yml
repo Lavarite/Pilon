@@ -58,6 +58,8 @@ jobs:
     container: archlinux:base-devel
     timeout-minutes: 45
     env:
+      LC_ALL: C.UTF-8
+      TZ: Etc/UTC
       PILON_GOOGLE_CLIENT_ID: ${{ vars.PILON_GOOGLE_CLIENT_ID }}
       PILON_MICROSOFT_CLIENT_ID: ${{ vars.PILON_MICROSOFT_CLIENT_ID }}
     defaults:
@@ -68,10 +70,21 @@ jobs:
         run: |
           pacman -Syu --noconfirm --needed archlinux-keyring git cmake ninja pkgconf \
             qt6-base qt6-declarative qt6-multimedia qt6-svg libssh2 dbus openssh \
-            ffmpeg libreoffice-fresh poppler python uv
+            curl ffmpeg libreoffice-fresh poppler python uv noto-fonts tzdata
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
+      - name: Install pinned Codex test runtime
+        run: |
+          mkdir -p build/ci-tools
+          cd build/ci-tools
+          curl --fail --silent --show-error --location --retry 3 \
+            'https://github.com/openai/codex/releases/download/rust-v0.167.0/codex-x86_64-unknown-linux-musl.tar.gz' \
+            --output codex.tar.gz
+          printf '%s  %s\n' '9d64836106d5b374e90ee4454c7ebcde7ca7106558bd7e41a34b9f26ebda251a' codex.tar.gz | sha256sum --check
+          tar -xzf codex.tar.gz
+          mv codex-x86_64-unknown-linux-musl codex
+          rm codex.tar.gz
       - name: Build Pilon and run CTest regression suites
         run: |
           useradd -m -p '*' pilon-ci
@@ -81,11 +94,13 @@ jobs:
             "PILON_GOOGLE_CLIENT_ID=$PILON_GOOGLE_CLIENT_ID" \
             "PILON_MICROSOFT_CLIENT_ID=$PILON_MICROSOFT_CLIENT_ID" \
             bash -euo pipefail -c '
+            export PATH="$PWD/build/ci-tools:$PATH"
+            codex --version
             bash src/scripts/setup_documents.sh
             bash addons/assistant/scripts/setup_litert.sh
             cmake -S src -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPILON_BUILD_TESTS=ON
             cmake --build build --parallel 2
-            ctest --test-dir build --no-tests=error --output-on-failure
+            ctest --test-dir build --parallel 2 --no-tests=error --output-on-failure
           '
       - name: Verify and package Linux and source archives
         if: needs.commits.outputs.release == 'true'
