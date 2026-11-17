@@ -99,12 +99,13 @@ jobs:
           if-no-files-found: error
           retention-days: 7
       - name: Upload test log
-        if: always()
+        if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: ctest-log
           path: build/Testing/Temporary/LastTest.log
           if-no-files-found: ignore
+          retention-days: 7
 
   calendar:
     name: Calendar server
