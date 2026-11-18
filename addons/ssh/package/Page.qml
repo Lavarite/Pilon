@@ -529,6 +529,7 @@ Item {
                 checked: sshTerminal.controlModifier
                 onClicked: sshTerminal.controlModifier = !sshTerminal.controlModifier
                 focusPolicy: Qt.NoFocus
+                width: Math.max(44, implicitWidth)
                 height: Math.max(44, implicitHeight)
                 Accessible.name: qsTr("Control for next key")
             }
@@ -539,6 +540,7 @@ Item {
                     required property var modelData
                     objectName: modelData.name
                     text: modelData.text
+                    width: Math.max(44, implicitWidth)
                     height: Math.max(44, implicitHeight)
                     focusPolicy: Qt.NoFocus
                     onClicked: sshTerminal.sendKey(modelData.key)
