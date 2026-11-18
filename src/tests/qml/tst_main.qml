@@ -749,7 +749,7 @@ TestCase {
         const originalScreen = tabletInput.screenGeometry()
         verify(appWindow.selectPage("assistant"))
         const assistant = findControl(appWindow, "assistantPane").assistant
-        const label = "Use the enterprise production workspace for the current customer project"
+        const label = "Use the enterprise production workspace for the current customer project and keep all generated files with the shared design documents for the next review"
         const dialog = findControl(appWindow, "assistantQuestion")
         try {
             tabletInput.setScreenGeometry(Qt.rect(0, 0, data.width + 40, 600))

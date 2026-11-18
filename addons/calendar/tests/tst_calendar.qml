@@ -853,7 +853,7 @@ TestCase {
             mouseWheel(view.contentItem, 5, 5, 0, -600)
             tryVerify(() => view.contentItem.contentY > 0)
             const guests = []
-            for (let i = 0; i < 20; ++i) guests.push({email: "guest" + i + "@example.com"})
+            for (let i = 0; i < 40; ++i) guests.push({email: "guest" + i + "@example.com"})
             connectedEditor.draft = Object.assign({}, connectedEditor.draft, {guests: guests})
             tryVerify(() => view.contentItem.contentHeight > 1200)
             view.contentItem.contentY = view.contentItem.contentHeight - view.contentItem.height
@@ -2351,8 +2351,13 @@ TestCase {
             compare(button.display, AbstractButton.IconOnly)
             verify(button.icon.source.toString().length > 0)
             compare(button.mapToItem(actions, 0, button.height / 2).y, middle)
-            const position = button.mapToItem(actions, 0, 0)
-            verify(position.x >= 0 && position.x + button.width <= actions.width)
+            window.requestActivate()
+            button.forceActiveFocus()
+            tryVerify(() => button.activeFocus)
+            tryVerify(() => {
+                const position = button.mapToItem(actions, 0, 0)
+                return position.x >= -.5 && position.x + button.width <= actions.width + .5
+            }, 5000, name + " is revealed on focus")
         }
         verify(findChild(page, "calendarSettings").icon.source.toString().endsWith("cog-6-tooth.svg"))
         capture(page, "/tmp/pilon-calendar-icon-actions.png")
