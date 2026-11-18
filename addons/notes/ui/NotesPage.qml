@@ -325,7 +325,7 @@ Control {
         viewDocumentId = id
         resetViewport()
         Qt.callLater(function() {
-            if (revision !== page.viewRestoreRevision || id !== page.notes.currentId) return
+            if (!page || !page.notes || revision !== page.viewRestoreRevision || id !== page.notes.currentId) return
             if (id && ink.documentId === id) {
                 const state = page.notes.noteViewState(id)
                 if (typeof state.zoom === "number") {
