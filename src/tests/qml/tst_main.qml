@@ -106,7 +106,8 @@ TestCase {
         backend.nextAction = {addonId:"calendar", widgetId:"agenda", actionId:"open", data:{}}
         verify(!appWindow.openWidget("pilon://widget/calendar/agenda"))
         compare(widgetActivation.count, 1)
-        verify(appWindow.setAddonEnabled("calendar", true) === true)
+        waitForWorkspaceIdle()
+        compare(appWindow.setAddonEnabled("calendar", true), true)
         verify(appWindow.addonRegistryObject.setPageVisible("calendar", true))
     }
     function test_widgetCacheWriteFailurePreventsDisablingTheOwner() {
@@ -968,7 +969,8 @@ TestCase {
             verify(appWindow.selectedPage!=="notes")
         } finally {
             verify(registry.setPageVisible("notes",true))
-            verify(appWindow.setAddonEnabled("notes",true)===true)
+            waitForWorkspaceIdle()
+            compare(appWindow.setAddonEnabled("notes",true), true)
         }
     }
     function test_setupCanBeSkippedAndReopenedWithoutResettingPreferences() {
