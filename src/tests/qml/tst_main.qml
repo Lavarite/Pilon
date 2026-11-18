@@ -243,13 +243,18 @@ TestCase {
         const host=control.Window.window
         host.update(); verify(waitForRendering(host.contentItem))
     }
-    function tap(control, resolve) {
+    function tap(control, resolve, touchInput = true) {
         revealControl(control)
         // Startup can replace navigation delegates while the reveal renders.
+        if (resolve) tryVerify(() => resolve() !== null)
         const target = resolve ? resolve() : control
         verify(target !== null)
-        const touch = touchEvent(target)
-        touch.press(0, target).commit(); touch.release(0, target).commit()
+        if (touchInput) {
+            const touch = touchEvent(target)
+            touch.press(0, target).commit(); touch.release(0, target).commit()
+        } else {
+            mouseClick(target)
+        }
         wait(30)
     }
     function renderWindow(host) {
@@ -402,19 +407,24 @@ TestCase {
             tabletInput.setScreenGeometry(Qt.rect(0,0,data.width+40,data.height+80))
             appWindow.touchMode = data.touch
             appWindow.width = data.width; appWindow.height = data.height
+            const navigation = findControl(appWindow, "appNavigation")
+            const scroll = findControl(navigation, "sidebarScroll")
+            const toggle = findControl(navigation, "sidebarToggle")
             for (const entry of [["filesNavigation", "filesPane"], ["assistantNavigation", "assistantPane"],
                                  ["notesNavigation", "notesPane"], ["calendarNavigation", "calendarPane"], ["sshNavigation", ""]]) {
-                const control = findControl(appWindow, entry[0])
-                verify(control !== null, entry[0] + " is registered in " + appWindow.pages.map(page => page.id).join(", "))
-                const scroll = findControl(appWindow, "sidebarScroll")
-                const y = control.mapToItem(scroll.contentItem, 0, 0).y
-                scroll.contentY = Math.max(0, Math.min(y, scroll.contentHeight - scroll.height))
-                tap(control, () => findControl(appWindow,entry[0]))
-                // Page startup can refresh the registry and replace navigation delegates.
-                const selected=findControl(appWindow,entry[0])
-                verify(selected.checked, entry[0])
+                waitForWorkspaceIdle()
+                tryCompare(scroll, "moving", false)
+                const navigationControl = () => {
+                    const control = findControl(navigation, entry[0])
+                    // A recreated delegate starts at y=0 until the column positions it.
+                    return control?.parent?.y >= toggle.y + toggle.height ? control : null
+                }
+                tryVerify(() => navigationControl() !== null, 5000, entry[0] + " is positioned in the sidebar")
+                tap(navigationControl(), navigationControl, data.touch)
+                tryCompare(appWindow, "selectedPage", entry[0].slice(0, -"Navigation".length))
+                tryVerify(() => navigationControl()?.checked === true, 5000, entry[0] + " is checked")
+                const selected = navigationControl()
                 compare(selected.Window.window,appWindow)
-                compare(appWindow.selectedPage,entry[0].slice(0,-"Navigation".length))
                 if (entry[1]) {
                     const page = findControl(appWindow, entry[1])
                     verify(page.visible)
