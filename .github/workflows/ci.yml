@@ -97,6 +97,7 @@ jobs:
       - name: Build Pilon and its test binaries
         run: |
           runuser -u pilon-ci -- env \
+            "PATH=$PWD/build/ci-tools:$PATH" \
             "PILON_GOOGLE_CLIENT_ID=$PILON_GOOGLE_CLIENT_ID" \
             "PILON_MICROSOFT_CLIENT_ID=$PILON_MICROSOFT_CLIENT_ID" \
             bash -euo pipefail -c '
