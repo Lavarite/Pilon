@@ -85,21 +85,28 @@ jobs:
           tar -xzf codex.tar.gz
           mv codex-x86_64-unknown-linux-musl codex
           rm codex.tar.gz
-      - name: Build Pilon and run CTest regression suites
+      - name: Prepare the Linux test user and runtimes
         run: |
           useradd -m -p '*' pilon-ci
           mkdir -p /run/sshd
           chown -R pilon-ci:pilon-ci "$GITHUB_WORKSPACE"
+          runuser -u pilon-ci -- bash -euo pipefail -c '
+            bash src/scripts/setup_documents.sh
+            bash addons/assistant/scripts/setup_litert.sh
+          '
+      - name: Build Pilon and its test binaries
+        run: |
           runuser -u pilon-ci -- env \
             "PILON_GOOGLE_CLIENT_ID=$PILON_GOOGLE_CLIENT_ID" \
             "PILON_MICROSOFT_CLIENT_ID=$PILON_MICROSOFT_CLIENT_ID" \
             bash -euo pipefail -c '
-            export PATH="$PWD/build/ci-tools:$PATH"
-            codex --version
-            bash src/scripts/setup_documents.sh
-            bash addons/assistant/scripts/setup_litert.sh
             cmake -S src -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPILON_BUILD_TESTS=ON
-            cmake --build build --parallel 2
+            cmake --build build --parallel 4
+          '
+      - name: Run the Linux regression tests
+        run: |
+          runuser -u pilon-ci -- env "PATH=$PWD/build/ci-tools:$PATH" bash -euo pipefail -c '
+            codex --version
             ctest --test-dir build --parallel 2 --no-tests=error --output-on-failure
           '
       - name: Verify and package Linux and source archives
