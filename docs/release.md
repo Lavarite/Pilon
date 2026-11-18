@@ -16,7 +16,7 @@ certificate for updates. On a prepared release workstation, from the checkout
 root:
 
 ```sh
-version=1.0.0
+version=$(sed -n 's/^project(Pilon VERSION \([0-9.]*\) .*/\1/p' src/CMakeLists.txt)
 assets="$PWD/builds/releases/$version"
 python3 src/scripts/package-release.py android --corresponding-source \
   --android-apk "builds/android/pilon-$version-android-arm64-v8a.apk" \
