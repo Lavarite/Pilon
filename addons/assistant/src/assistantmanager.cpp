@@ -1146,6 +1146,14 @@ void AssistantManager::updateStreamTool(int index)
     else notifyStreamUpdate();
 }
 
+void AssistantManager::setRemoteEnabled(bool enabled)
+{
+    if (m_remoteEnabled == enabled) return;
+    m_remoteEnabled = enabled;
+    if (!enabled && m_connection.running()) m_connection.disconnectFromHost();
+    emit devicesChanged();
+}
+
 QJsonArray AssistantManager::targets(bool includeAliases) const
 {
     auto local = QJsonObject::fromVariantMap(pilonLocalDevice());
@@ -1153,6 +1161,7 @@ QJsonArray AssistantManager::targets(bool includeAliases) const
     local.insert("path", QDir::homePath());
     local.insert("onlineKnown", true);
     QJsonArray result{local};
+    if (!m_remoteEnabled) return result;
     QHash<QString, QString> hosts;
     const auto normalizedHost = [](QString host) {
         host = host.toLower();
@@ -1835,7 +1844,7 @@ void AssistantManager::executeTool()
         return;
     }
     const QJsonObject device = m_toolDevice;
-    if (device.value("host").toString().isEmpty()) {
+    if (!m_remoteEnabled || device.value("host").toString().isEmpty()) {
         finishTool({{"error", "The target is no longer available."}});
         return;
     }

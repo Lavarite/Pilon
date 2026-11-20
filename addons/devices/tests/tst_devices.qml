@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtTest
 import "../addons/devices" as Devices
+import "../addons/ssh" as Ssh
 
 TestCase {
     id: test
@@ -31,7 +32,7 @@ TestCase {
         property bool busy: false
         property string errorMessage: ""
         property var devices: []
-        readonly property var savedDevices: devices
+        readonly property var savedDevices: devices.filter(row => row.saved)
         property var calls: []
         function record(action) { calls = calls.concat(action) }
         function refresh() { record("refresh") }
@@ -51,6 +52,7 @@ TestCase {
             errorMessage = ""; record("save"); return true
         }
         function removeDevice(id) { devices = devices.filter(row => row.id !== id); record("remove"); return true }
+        function setIncluded(id, included) { setDeviceIncluded(id, included) }
         function setDeviceIncluded(id, included) {
             devices = devices.map(row => Object.assign({}, row, row.id === id ? {included: included} : {}))
             record("include")
@@ -59,6 +61,16 @@ TestCase {
     QtObject {
         id: fakeAddon
         readonly property var tailscaleManager: manager
+        property bool deviceDiscoveryEnabled: true
+        readonly property var preferences: ({defaultSshUsername: ""})
+        readonly property var remoteFiles: ({localDevice: {username: "local"}})
+        readonly property var fileWorkspace: QtObject {
+            readonly property var deviceUsernames: ({})
+            readonly property string username: "local"
+            readonly property var deviceDiscovery: fakeAddon.deviceDiscoveryEnabled ? manager : null
+            readonly property var sshDeviceOptions: deviceDiscovery ? manager.devices : manager.savedDevices
+        }
+        readonly property var sshManager: ({errorMessage: ""})
         readonly property color selectedTextColour: "#eee8df"
         readonly property color selectedMainColour: "#24201c"
         readonly property color selectedSecondaryColour: "#37312a"
@@ -67,11 +79,13 @@ TestCase {
         readonly property color selectedWarningColour: "#ff9990"
     }
     Component { id: settingsComponent; Devices.Settings { addon: fakeAddon } }
+    Component { id: sshSettings; Ssh.Settings { addon: fakeAddon } }
     Component { id: lifecycleComponent; Devices.Lifecycle { addon: fakeAddon } }
     property var page
     function control(name) { const item = findChild(page, name); verify(item !== null, name); return item }
     function init() {
         failOnWarning(/(Binding loop|ReferenceError|TypeError|Cannot assign|Unable to assign|Error:)/)
+        fakeAddon.deviceDiscoveryEnabled = true
         manager.externalApplication = true; manager.externalAppInstalled = true
         manager.discoveryConnected = false; manager.discoverySucceeds = false; manager.discoveryDisconnects = true; manager.statusKnown = true
         manager.externalStatus = "No Android VPN active."
@@ -81,7 +95,19 @@ TestCase {
         page = createTemporaryObject(settingsComponent, surface)
         verify(page !== null); wait(30)
     }
-    function cleanup() { const editor = control("deviceEditor"); editor.close(); page.destroy(); page = null }
+    function cleanup() {
+        const editor = findChild(page, "deviceEditor")
+        if (editor) editor.close()
+        page.destroy()
+        page = null
+    }
+    function showSshSettings() {
+        page.visible = false
+        page.destroy()
+        page = createTemporaryObject(sshSettings, surface)
+        verify(page !== null)
+        wait(30)
+    }
     function cleanupTestCase() { owner.close() }
     function capture(item, name) {
         const host=item.Window.window;host.update();verify(waitForRendering(host.contentItem))
@@ -115,7 +141,10 @@ TestCase {
         manager.statusKnown = true
     }
     function test_savedDeviceFormUsesASeparateWindowAndPreservesInvalidInput() {
-        click("devicesAddSaved")
+        manager.externalApplication = false
+        fakeAddon.deviceDiscoveryEnabled = false
+        showSshSettings()
+        click("sshAddDevice")
         const editor = control("deviceEditor")
         tryCompare(editor, "opened", true)
         tryCompare(editor.dialogWindow, "visible", true)
@@ -133,11 +162,11 @@ TestCase {
         mouseClick(control("saveDevice")); tryCompare(editor, "visible", false)
         compare(manager.devices.length, 1); compare(page.prepareDisable(), true)
         capture(page,"saved-host")
-        const included = control("devicesIncluded_external:fixture")
+        const included = control("sshDeviceIncluded-external:fixture")
         verify(included.checked); mouseClick(included); verify(!manager.devices[0].included)
         page.removeSavedDevice("external:fixture", 0)
         compare(manager.devices.length, 0)
-        tryVerify(() => control("devicesAddSaved").activeFocus)
+        tryVerify(() => control("sshAddDevice").activeFocus)
     }
     function test_controlsReflowAtCoverScreenWidth() {
         owner.width = 320; wait(30)
@@ -177,7 +206,7 @@ TestCase {
             }
             manager.externalApplication = false; manager.loggedIn = true; manager.serviceRunning = true
             verify(control("devicesSignOut").visible); verify(control("devicesUseAccount").visible)
-            verify(!control("devicesAddSaved").visible); verify(!control("devicesOpenExternal").visible)
+            verify(!findChild(page, "sshAddDevice")); verify(!control("devicesOpenExternal").visible)
             capture(page, data.font ? "native-account-large-font" : "native-account")
             click("devicesSignOut")
             compare(manager.calls.length, 0, "Opening confirmation does not sign out")
@@ -243,10 +272,11 @@ TestCase {
     function test_discoveredNamesRemainLiteralAndDoNotExposeSavedHostActions() {
         manager.discoveryConnected=true
         manager.devices=[{id:"api:fixture",name:"Peer <b>literal</b>",ip:"100.64.0.2",included:false,saved:false,onlineKnown:false}]
-        const peer=control("devicesIncluded_api:fixture")
+        showSshSettings()
+        const peer=control("sshDeviceIncluded-api:fixture")
         compare(peer.contentItem.textFormat,Text.PlainText)
-        verify(!control("devicesActions_api:fixture").visible)
-        click("devicesIncluded_api:fixture")
+        verify(!control("sshDeviceActions-api:fixture").visible)
+        click("sshDeviceIncluded-api:fixture")
         verify(manager.devices[0].included)
     }
     function test_accountCleanupDisconnectsOnlyThePilonDiscoveryCredential() {

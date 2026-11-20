@@ -132,7 +132,6 @@ public:
     Q_INVOKABLE bool exportPdf(const QUrl &destination, const QVariantMap &options = {});
     Q_INVOKABLE bool exportToFolder(const QString &folder, const QString &filename, const QVariantMap &options = {});
     Q_INVOKABLE QUrl preparePdf(const QString &filename, const QVariantMap &options = {});
-    Q_INVOKABLE bool sharePdf(const QString &filename, const QVariantMap &options = {});
     Q_INVOKABLE void clearError();
     Q_INVOKABLE void prepareCanvas();
     Q_INVOKABLE void setElements(const QVariantList &elements);

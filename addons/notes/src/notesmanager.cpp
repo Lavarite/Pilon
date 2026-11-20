@@ -31,9 +31,6 @@
 #include <QUuid>
 #include <algorithm>
 #include <cmath>
-#ifdef Q_OS_ANDROID
-#include <QJniObject>
-#endif
 
 namespace {
 QString identifier() { return QUuid::createUuid().toString(QUuid::WithoutBraces); }
@@ -1265,36 +1262,11 @@ bool NotesManager::exportToFolder(const QString &folder, const QString &filename
     return exportPdf(QUrl::fromLocalFile(QDir(folder).filePath(filename)), options);
 }
 QUrl NotesManager::preparePdf(const QString &filename, const QVariantMap &options) {
-    if (!m_exportDirectory.isValid() || !exportToFolder(m_exportDirectory.path(), filename, options)) return {};
-    return QUrl::fromLocalFile(m_exportDirectory.filePath(filename.endsWith(".pdf", Qt::CaseInsensitive) ? filename : filename + ".pdf"));
-}
-
-bool NotesManager::sharePdf(const QString &filename, const QVariantMap &options) {
-#ifdef Q_OS_ANDROID
-    if (!QNativeInterface::QAndroidApplication::isActivityContext()) {
-        error(tr("Open Pilon before sharing the PDF.")); return false;
-    }
-    const auto source = preparePdf(filename, options);
-    if (source.isEmpty()) return false;
-    const auto context = QNativeInterface::QAndroidApplication::context();
-    const auto retained = QJniObject::callStaticObjectMethod("org/pilon/PilonSharing", "retainPdf",
-        "(Landroid/content/Context;Ljava/lang/String;)Ljava/lang/String;", context.object(),
-        QJniObject::fromString(source.toLocalFile()).object<jstring>());
-    if (!retained.isValid()) { error(tr("Unable to prepare the PDF for sharing.")); return false; }
-    auto request = QNativeInterface::QAndroidApplication::runOnAndroidMainThread([context, retained] {
-        return QVariant(bool(QJniObject::callStaticMethod<jboolean>("org/pilon/PilonSharing", "sharePdf",
-            "(Landroid/app/Activity;Ljava/lang/String;)Z", context.object(), retained.object<jstring>())));
-    });
-    request.waitForFinished();
-    if (request.result().toBool()) return true;
-    const QFileInfo copy(retained.toString());
-    QFile::remove(copy.filePath()); QDir().rmdir(copy.absolutePath());
-    error(tr("Unable to open the system share menu."));
-#else
-    Q_UNUSED(filename); Q_UNUSED(options);
-    error(tr("Native PDF sharing is unavailable on this platform."));
-#endif
-    return false;
+    if (!m_exportDirectory.isValid()) return {};
+    const auto folder = m_exportDirectory.filePath(identifier());
+    if (!QDir().mkpath(folder)) { error(tr("Unable to prepare a PDF file.")); return {}; }
+    if (!exportToFolder(folder, filename, options)) { QDir().rmdir(folder); return {}; }
+    return QUrl::fromLocalFile(QDir(folder).filePath(filename.endsWith(".pdf", Qt::CaseInsensitive) ? filename : filename + ".pdf"));
 }
 
 bool NotesManager::setStorageDirectory(const QString &path) {

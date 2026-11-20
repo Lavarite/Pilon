@@ -8,7 +8,7 @@ import tempfile
 
 def verify(source, jdk):
     text = source.read_text()
-    start = text.index("static File retainPdfFile(")
+    start = text.index("static File retainFile(")
     end = text.index("{", start)
     depth = 1
     while depth:
@@ -29,29 +29,38 @@ public class SharingCheck {
         Path cache=Files.createDirectory(root.resolve("cache"));
         byte[] first="%PDF-1.7\nfirst export\n%%EOF".getBytes(StandardCharsets.US_ASCII);
         Path original=source.resolve("My note.pdf"); Files.write(original,first);
-        File retained=retainPdfFile(original.toFile(),cache.toFile());
+        File retained=retainFile(original.toFile(),cache.toFile(),true);
         require(retained.toPath().startsWith(cache.resolve("pdf-shares")));
         require(retained.getName().equals("My note.pdf"));
         require(Arrays.equals(Files.readAllBytes(retained.toPath()),first));
         Files.delete(original); Files.delete(source);
         require(Arrays.equals(Files.readAllBytes(retained.toPath()),first));
         Files.createDirectory(source); Files.write(original,"%PDF-1.7\nsecond export\n%%EOF".getBytes(StandardCharsets.US_ASCII));
-        File second=retainPdfFile(original.toFile(),cache.toFile());
+        File second=retainFile(original.toFile(),cache.toFile(),true);
         require(!second.equals(retained));
         require(Arrays.equals(Files.readAllBytes(retained.toPath()),first));
         require(!Arrays.equals(Files.readAllBytes(second.toPath()),first));
         for (byte[] invalid:new byte[][] {new byte[0],"%PD".getBytes(),"hello-not-a-pdf".getBytes()}) {
             Files.write(original,invalid); boolean failed=false;
-            try { retainPdfFile(original.toFile(),cache.toFile()); } catch(IOException error) { failed=true; }
+            try { retainFile(original.toFile(),cache.toFile(),true); } catch(IOException error) { failed=true; }
             require(failed);
         }
         Files.delete(original); boolean failed=false;
-        try { retainPdfFile(original.toFile(),cache.toFile()); } catch(IOException error) { failed=true; }
+        try { retainFile(original.toFile(),cache.toFile(),true); } catch(IOException error) { failed=true; }
         require(failed);
         Files.write(original,first); Path blocked=root.resolve("blocked"); Files.write(blocked,new byte[]{1});failed=false;
-        try { retainPdfFile(original.toFile(),blocked.toFile()); } catch(IOException error) { failed=true; }
+        try { retainFile(original.toFile(),blocked.toFile(),true); } catch(IOException error) { failed=true; }
         require(failed); require(Arrays.equals(Files.readAllBytes(original),first));
-        System.out.println("PDF retention checks passed: "+checks);
+        Path generic=source.resolve("shared file.bin");
+        byte[] payload={0,1,2,42}; Files.write(generic,payload);
+        File attachment=retainFile(generic.toFile(),cache.toFile(),false);
+        require(attachment.getName().equals("shared file.bin"));
+        Files.delete(generic);
+        require(Arrays.equals(Files.readAllBytes(attachment.toPath()),payload));
+        failed=false;
+        try { retainFile(source.toFile(),cache.toFile(),false); } catch(IOException error) { failed=true; }
+        require(failed);
+        System.out.println("Share retention checks passed: "+checks);
     }
 }
 '''.replace("/* SOURCE_METHOD */", method)

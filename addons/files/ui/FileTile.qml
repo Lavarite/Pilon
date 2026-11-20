@@ -27,6 +27,13 @@ Item {
     property var entryToSelect: null
     property string searchQuery: ""
     readonly property var devices: fileWorkspace.devices
+    readonly property bool sshEnabled: fileWorkspace.sshEnabled !== false
+    onSshEnabledChanged: {
+        bookmarkPointer.dragging = false
+        bookmarkPointer.pressedIndex = -1
+        bookmarkMenu.close()
+        syncBookmarkModel()
+    }
     readonly property string username: fileWorkspace.username
     readonly property color mainColour: fileWorkspace.mainColour
     readonly property color secondaryColour: fileWorkspace.secondaryColour
@@ -98,35 +105,16 @@ Item {
         return (unit === 0 ? value.toFixed(0) : value.toFixed(1)) + " " + units[unit]
     }
 
-    function iconForFile(name, directory, path, deviceId) {
-        if (!directory && name.toLowerCase().endsWith(".pin")) return "icons/application-x-pilon-note.svg"
-        if (!directory && name.toLowerCase().endsWith(".pical")) return "icons/application-x-pilon-calendar.svg"
-        if (!directory && name.toLowerCase().endsWith(".piext")) return "icons/application-x-pilon-extension.svg"
-        if (directory && typeof fileWorkspace.folderIcon === "function") return fileWorkspace.folderIcon({path: path || "", deviceId: deviceId || "local"})
-        if (directory)
-            return "icons/folder.svg"
-        const lowerName = name.toLowerCase()
-        const dot = lowerName.lastIndexOf(".")
-        const suffix = dot >= 0 ? lowerName.slice(dot + 1) : ""
-        if (["png", "jpg", "jpeg", "gif", "bmp", "webp", "svg", "tif", "tiff"]
-                .indexOf(suffix) >= 0)
-            return "icons/photo.svg"
-        if (["mp4", "mkv", "mov", "avi", "webm", "mpeg", "mpg"]
-                .indexOf(suffix) >= 0)
-            return "icons/film.svg"
-        if (["mp3", "flac", "wav", "ogg", "m4a", "aac", "opus"]
-                .indexOf(suffix) >= 0)
-            return "icons/musical-note.svg"
-        if (["zip", "tar", "gz", "bz2", "xz", "7z", "rar", "zst", "tgz"]
-                .indexOf(suffix) >= 0)
-            return "icons/archive-box.svg"
-        if (["sh", "bash", "zsh", "fish", "py", "js", "ts", "cpp", "c", "h", "rs"]
-                .indexOf(suffix) >= 0)
-            return "icons/command-line.svg"
-        if (["txt", "md", "json", "xml", "yaml", "yml", "toml", "ini", "log", "pdf"]
-                .indexOf(suffix) >= 0)
-            return "icons/document-text.svg"
-        return "icons/document.svg"
+    function iconForFile(name, directory, path, deviceId, account) {
+        return fileWorkspace.appearance.iconForEntry({name, directory, path, deviceId, username: account})
+    }
+
+    function iconColourForEntry(entry) {
+        const item = entryWithAccount(entry)
+        const tint = fileWorkspace.appearance.tintForEntry(item)
+        if (tint) return tint
+        return fileWorkspace.appearance.iconForEntry(item).startsWith("file:")
+                ? "transparent" : entry.directory ? accentColour : textColour
     }
 
     function browseDevice(device, path) {
@@ -374,7 +362,7 @@ Item {
 
     function syncBookmarkModel() {
         if (bookmarkPointer.dragging) return
-        const entries = remoteFiles.bookmarks
+        const entries = remoteFiles.bookmarks.filter(bookmark => sshEnabled || bookmark.deviceId === "local")
         for (let i = 0; i < entries.length; ++i) {
             let found = -1
             for (let j = i; j < bookmarkModel.count; ++j) {
@@ -415,19 +403,35 @@ Item {
         id: bookmarkRow
         required property var entry
         property bool pointerHovered: false
-        contentItem: Column {
-            spacing: 1
-            Label {
-                width: parent.width
-                text: bookmarkRow.entry.name || bookmarkRow.entry.deviceName || ""
-                color: filesPage.textColour
-                elide: Text.ElideRight
+        contentItem: Row {
+            spacing: bookmarkIcon.visible ? 8 : 0
+            ControlsImpl.ColorImage {
+                id: bookmarkIcon
+                readonly property var entry: Object.assign(filesPage.entryWithAccount(bookmarkRow.entry),
+                    {name: bookmarkRow.entry.path?.split("/").pop() || bookmarkRow.entry.name})
+                readonly property var rule: filesPage.fileWorkspace.appearance.pathRule(entry)
+                width: visible ? 18 : 0
+                height: width
+                anchors.verticalCenter: parent.verticalCenter
+                visible: !!rule.tint || !!filesPage.fileWorkspace.appearance.sourceForIcon(rule.icon)
+                source: visible ? filesPage.fileWorkspace.appearance.iconForEntry(entry) : ""
+                color: visible ? filesPage.iconColourForEntry(entry) : "transparent"
             }
-            Label {
-                width: parent.width
-                text: bookmarkRow.entry.path || ""
-                color: filesPage.mutedTextColour
-                elide: Text.ElideMiddle
+            Column {
+                width: parent.width - bookmarkIcon.width - parent.spacing
+                spacing: 1
+                Label {
+                    width: parent.width
+                    text: bookmarkRow.entry.name || bookmarkRow.entry.deviceName || ""
+                    color: filesPage.textColour
+                    elide: Text.ElideRight
+                }
+                Label {
+                    width: parent.width
+                    text: bookmarkRow.entry.path || ""
+                    color: filesPage.mutedTextColour
+                    elide: Text.ElideMiddle
+                }
             }
         }
         background: Rectangle {
@@ -602,7 +606,7 @@ Item {
                     display: AbstractButton.IconOnly
                     icon.source: "icons/computer-desktop.svg"
                     icon.width: 24; icon.height: 24
-                    Accessible.name: qsTr("Devices and bookmarks")
+                    Accessible.name: filesPage.sshEnabled ? qsTr("Devices and bookmarks") : qsTr("Bookmarks")
                     ToolTip.visible: hovered
                     ToolTip.text: Accessible.name
                     fillColour: filePlacesPopup.opened ? filesPage.accentColour : filesPage.withOpacity(filesPage.textColour, 0.08)
@@ -715,6 +719,8 @@ Item {
             spacing: 6
 
             Label {
+                objectName: "fileDevicesHeading"
+                visible: filesPage.sshEnabled
                 width: parent.width
                 height: 28
                 text: qsTr("Devices")
@@ -723,6 +729,7 @@ Item {
             }
 
             ListView {
+                visible: filesPage.sshEnabled
                 width: parent.width
                 height: Math.min(contentHeight, Math.max(44, (parent.height - 74) * 0.44))
                 clip: true
@@ -874,7 +881,10 @@ Item {
                             const ordered = []
                             for (let i = 0; i < bookmarkModel.count; ++i) ordered.push(bookmarkModel.get(i).bookmark)
                             dragging = false
-                            filesPage.remoteFiles.reorderBookmarks(ordered)
+                            const bookmarks = filesPage.remoteFiles.bookmarks
+                            let shown = 0
+                            filesPage.remoteFiles.reorderBookmarks(bookmarks.map(bookmark =>
+                                filesPage.sshEnabled || bookmark.deviceId === "local" ? ordered[shown++] : bookmark))
                             filesPage.syncBookmarkModel()
                         } else if (!contextHeld && pressedIndex >= 0 && pressedIndex === indexAt(mouse.y)) {
                             if (mouse.button === Qt.LeftButton) filesPage.openBookmark(draggedBookmark)
@@ -1128,10 +1138,8 @@ Item {
                             width: 18 + filesPage.fileZoomLevel * 2
                             height: width
                             sourceSize: Qt.size(96, 96)
-                            source: filesPage.iconForFile(fileEntryDelegate.modelData.name,
-                                                         fileEntryDelegate.modelData.directory, fileEntryDelegate.modelData.path, fileEntryDelegate.modelData.deviceId)
-                            color: fileEntryDelegate.modelData.directory
-                                   ? filesPage.accentColour : filesPage.textColour
+                            source: filesPage.fileWorkspace.appearance.iconForEntry(filesPage.entryWithAccount(fileEntryDelegate.modelData))
+                            color: filesPage.iconColourForEntry(fileEntryDelegate.modelData)
                         }
 
                         Label {
@@ -1197,10 +1205,8 @@ Item {
                         width: 44 + (filesPage.fileZoomLevel - 2) * 8
                         height: width
                         sourceSize: Qt.size(128, 128)
-                        source: filesPage.iconForFile(fileEntryDelegate.modelData.name,
-                                                     fileEntryDelegate.modelData.directory, fileEntryDelegate.modelData.path, fileEntryDelegate.modelData.deviceId)
-                        color: fileEntryDelegate.modelData.directory
-                               ? filesPage.accentColour : filesPage.textColour
+                        source: filesPage.fileWorkspace.appearance.iconForEntry(filesPage.entryWithAccount(fileEntryDelegate.modelData))
+                        color: filesPage.iconColourForEntry(fileEntryDelegate.modelData)
                     }
 
                     Label {
@@ -1336,8 +1342,8 @@ Item {
                         return !filesPage.sameEntry(candidate, entry)
                     }))
                     filesPage.remoteFiles.startDrag(entries,
-                        Qt.resolvedUrl(filesPage.iconForFile(entry.name, entry.directory, entry.path, entry.deviceId)),
-                        entry.directory ? filesPage.accentColour : filesPage.textColour, filesPage.textColour,
+                        Qt.resolvedUrl(filesPage.iconForFile(entry.name, entry.directory, entry.path, entry.deviceId, filesPage.usernameForEntry(entry))),
+                        filesPage.iconColourForEntry(entry), filesPage.textColour,
                         pressedIconOffset)
                 } else {
                     rubberBandSelection.visible = true
@@ -1517,6 +1523,15 @@ Item {
                 filesPage.remoteFiles.removeBookmark(entry.deviceId, entry.username, entry.path)
             }
         }
+        StyledMenuItem {
+            width: parent.width
+            text: qsTr("Appearance…")
+            shown: filesPage.fileWorkspace.appearance.loaded && !!filesPage.fileWorkspace.appearance.pathKey(bookmarkMenu.bookmark)
+            onClicked: {
+                bookmarkMenu.close()
+                filesPage.fileWorkspace.appearance.openPath(bookmarkMenu.bookmark, filesPage.Window.window)
+            }
+        }
 
     }
 
@@ -1577,6 +1592,12 @@ Item {
         objectName: "fileContextMenu"
 
         property bool hasSelection: false
+        readonly property bool canEditAppearance: !filesPage.pickerSelectionMode && hasSelection
+            && filesPage.selectedEntry !== null && filesPage.fileWorkspace.appearance.loaded
+        delegate: PilonMenuItem {
+            objectName: subMenu === fileAppearanceMenu ? "fileAppearanceAction" : ""
+            shown: subMenu !== fileAppearanceMenu || fileContextMenu.canEditAppearance
+        }
 
         function openAt(horizontalPosition, verticalPosition) {
             hasSelection = filesPage.selectedEntries.length > 0
@@ -1608,6 +1629,37 @@ Item {
             }
         }
 
+        StyledMenuItem {
+            objectName: "shareSelectedFileAction"
+            width: parent.width
+            text: qsTr("Share…")
+            icon.source: "icons/share.svg"
+            shown: fileContextMenu.hasSelection && filesPage.selectedEntry !== null
+                && !filesPage.selectedEntry.directory && !filesPage.pickerSelectionMode
+            enabled: shown && !filesPage.remoteFiles.busy && !filesPage.fileWorkspace.shareManager.busy
+                && !filesPage.fileWorkspace.shareManager.promptText && filesPage.fileWorkspace.deviceAvailable(filesPage.selectedEntry.deviceId)
+            onClicked: {
+                const entry = filesPage.entryWithAccount(filesPage.selectedEntry)
+                if (entry.deviceId === "local") entry.username = filesPage.fileWorkspace.usernameForDevice(entry.deviceId)
+                fileContextMenu.close()
+                filesPage.fileWorkspace.shareEntry(entry, entry.username)
+            }
+        }
+
+        PilonMenu {
+            id: fileAppearanceMenu
+            objectName: "fileAppearanceMenu"
+            title: qsTr("Appearance")
+            StyledMenuItem {
+                objectName: "changeFileIconAction"
+                text: qsTr("Change icon…")
+                width: parent.width
+                onClicked: {
+                    fileContextMenu.dismiss()
+                    filesPage.fileWorkspace.appearance.openPath(filesPage.entryWithAccount(filesPage.selectedEntry), filesPage.Window.window)
+                }
+            }
+        }
         StyledMenuItem {
             objectName: "archiveDirectoryAction"
             width: parent.width; text: qsTr("Archive as ZIP")

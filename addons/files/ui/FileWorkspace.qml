@@ -25,13 +25,27 @@ Item {
     property string localHomePath: StandardPaths.writableLocation(StandardPaths.HomeLocation)
     property var deviceUsernames: ({})
     property url settingsLocation: ""
+    property var appearanceRegistry: null
+    readonly property alias appearance: fileAppearance
+    onSettingsLocationChanged: fileAppearance.reload()
     property bool canOpenFiles: true
-    property bool deviceDiscoveryEnabled: true
-    readonly property var devices: [remoteFiles.localDevice].concat(deviceDiscoveryEnabled ? tailscaleManager.includedDevices : [])
+    property var deviceDiscovery: null
+    property bool sshEnabled: true
+    readonly property var sshDeviceOptions: {
+        const saved = tailscaleManager.savedDevices || []
+        const discovered = deviceDiscovery ? deviceDiscovery.devices : []
+        return saved.concat(discovered.filter(device => !device.saved
+            && !saved.some(record => record.ip === device.ip)))
+    }
+    readonly property var sshDevices: sshEnabled ? sshDeviceOptions.filter(device => device.included) : []
+    readonly property var devices: [remoteFiles.localDevice].concat(sshDevices)
     readonly property var exportManager: fileManagerComponent.createObject(fileWorkspace)
     readonly property var uploadManager: fileManagerComponent.createObject(fileWorkspace)
     readonly property var selectionManager: fileManagerComponent.createObject(fileWorkspace)
     readonly property var destinationManager: fileManagerComponent.createObject(fileWorkspace)
+    readonly property var shareManager: fileManagerComponent.createObject(fileWorkspace)
+    property bool sharingNote: false
+    property string shareDeviceId: ""
     readonly property bool filePickerOpen: uploadDialog.opened || selectionDialog.opened
         || destinationDialog.opened || exportDialog.opened
     signal usernameCommitted(string value)
@@ -45,6 +59,12 @@ Item {
         if ((entry.deviceId === "local" && path === notesDirectory) || path.endsWith("/Pilon/Notes")) return "icons/note.svg"
         if ((entry.deviceId === "local" && path === calendarDirectory) || path.endsWith("/Pilon/Calendar")) return "icons/calendar.svg"
         return "icons/folder.svg"
+    }
+
+    FileAppearance {
+        id: fileAppearance
+        workspace: fileWorkspace
+        registry: fileWorkspace.appearanceRegistry
     }
 
     function initializeSshDefaults(preferences) {
@@ -98,7 +118,7 @@ Item {
 
     property bool propagatingBookmarks: false
     function sharedManagers() {
-        return [exportManager, uploadManager, selectionManager, destinationManager]
+        return [exportManager, uploadManager, selectionManager, destinationManager, shareManager]
     }
     function syncBookmarks(source) {
         if (propagatingBookmarks) return
@@ -269,12 +289,36 @@ const entries = destinationDialog.entries.map(entry => Object.assign({}, entry))
         }
     }
 
+    function shareEntry(entry, username) {
+        if (shareManager.busy || shareManager.promptText || entry.directory || !deviceAvailable(entry.deviceId)) return
+        sharingNote = false
+        shareDeviceId = entry.deviceId
+        shareManager.prepareSelection([entry], username)
+    }
+    Connections {
+        target: fileWorkspace.shareManager
+        function onSelectionReady(files) {
+            const deviceId = fileWorkspace.shareDeviceId
+            fileWorkspace.shareDeviceId = ""
+            if (files.length !== 1) return
+            // Selection signals before the transfer manager releases its busy state.
+            Qt.callLater(() => {
+                if (fileWorkspace.deviceAvailable(deviceId) && !fileWorkspace.shareManager.busy)
+                    fileWorkspace.shareManager.shareFile(files[0], false)
+                else fileWorkspace.shareManager.discardPreparedSelection(files[0])
+            })
+        }
+    }
+    FileAccessPopup { workspace: fileWorkspace; remoteFiles: fileWorkspace.sharingNote ? null : fileWorkspace.shareManager }
+    FileTransferPopup { workspace: fileWorkspace; remoteFiles: fileWorkspace.shareManager }
+
     function exportNote(notes) {
         if (!notes.save()) return
         exportDialog.note = notes
         exportName.text = notes.title.replace(/[\\/:*?"<>|]/g, "_") + ".pdf"
         exportDialog.overwritePending = false
         exportDialog.uploading = false
+        exportDialog.shareError = ""
         exportFirstPageHeading.checked = true
         exportPageNumbers.checked = true
         exportManager.reloadBookmarks()
@@ -305,21 +349,32 @@ const entries = destinationDialog.entries.map(entry => Object.assign({}, entry))
         property var note: null
         property bool overwritePending: false
         property bool uploading: false
+        property bool sharing: false
+        property string shareError: ""
         onClosed: {
             uploading = false
+            if (sharing) {
+                sharing = false
+                fileWorkspace.shareManager.cancel()
+            }
             if (fileWorkspace.exportManager !== null) fileWorkspace.exportManager.cancel()
         }
         readonly property var exportOptions: ({firstPageHeadingOnly: exportFirstPageHeading.checked, pageNumbers: exportPageNumbers.checked})
         readonly property string filename: exportName.text.trim().toLowerCase().endsWith(".pdf") ? exportName.text.trim() : exportName.text.trim() + ".pdf"
         readonly property bool validFilename: exportName.text.trim().length > 0 && !/[\\/]/.test(exportName.text)
         readonly property bool canSaveToFolder: validFilename && fileWorkspace.exportManager !== null
-            && fileWorkspace.exportManager.currentPath.length > 0 && !fileWorkspace.exportManager.busy
+            && fileWorkspace.exportManager.currentPath.length > 0 && !fileWorkspace.exportManager.busy && !sharing
             && (!overwritePending || fileWorkspace.exportManager.currentDeviceId === "local")
+        readonly property bool canShare: !!note && validFilename && !uploading && !sharing
+            && !fileWorkspace.shareManager.busy && !fileWorkspace.shareManager.promptText
         function sharePdf() {
-            if (!note || !validFilename) return
-            // Close the owned picker before Android opens its share sheet.
-            close()
-            if (!note.sharePdf(filename, exportOptions)) open()
+            if (!canShare) return
+            shareError = ""
+            const source = note.preparePdf(filename, exportOptions)
+            if (source.toString().length === 0) return
+            fileWorkspace.sharingNote = true
+            sharing = true
+            fileWorkspace.shareManager.shareFile(source, true)
         }
         function acceptExport() {
             if (!note || fileWorkspace.exportManager.busy) return
@@ -357,16 +412,16 @@ const entries = destinationDialog.entries.map(entry => Object.assign({}, entry))
                     color: fileWorkspace.textColour; placeholderTextColor: fileWorkspace.mutedTextColour
                     selectionColor: fileWorkspace.accentColour; selectedTextColor: fileWorkspace.accentTextColour
                     selectByMouse: true
-                    onTextEdited: exportDialog.overwritePending = false
+                    onTextEdited: { exportDialog.overwritePending = false; exportDialog.shareError = "" }
                     onAccepted: if (exportDialog.acceptEnabled) exportDialog.accepted()
                     background: Rectangle { radius: 8; color: fileWorkspace.secondaryColour; border.color: fileWorkspace.withOpacity(fileWorkspace.textColour, .22) }
                 }
                 PilonButton {
-                    objectName: "saveNotePdfToFolder"
-                    visible: Qt.platform.os === "android"
-                    text: qsTr("Save to folder")
-                    enabled: exportDialog.canSaveToFolder
-                    onClicked: exportDialog.acceptExport()
+                    objectName: "shareNotePdf"
+                    text: qsTr("Share…")
+                    icon.source: "icons/share.svg"
+                    enabled: exportDialog.canShare
+                    onClicked: exportDialog.sharePdf()
                 }
                 Item {
                     id: inlineExportOptions
@@ -403,12 +458,18 @@ const entries = destinationDialog.entries.map(entry => Object.assign({}, entry))
                 }
                 Label {
                     width: parent.width
-                    visible: exportDialog.overwritePending || (!!exportDialog.note && exportDialog.note.errorMessage.length > 0)
+                    visible: text.length > 0
                     text: exportDialog.overwritePending ? (fileWorkspace.exportManager.currentDeviceId === "local"
-                        ? (Qt.platform.os === "android" ? qsTr("A file with this name exists. Choose Save to folder again to replace it.")
-                            : qsTr("A file with this name exists. Choose Export again to replace it."))
+                        ? qsTr("A file with this name exists. Choose Save to… again to replace it.")
                         : qsTr("A file with this name exists. Choose a different file name."))
                         : exportDialog.note ? exportDialog.note.errorMessage : ""
+                    color: fileWorkspace.warningColour; wrapMode: Text.Wrap
+                }
+                Label {
+                    objectName: "notePdfShareError"
+                    width: parent.width
+                    visible: text.length > 0
+                    text: exportDialog.shareError
                     color: fileWorkspace.warningColour; wrapMode: Text.Wrap
                 }
             }
@@ -458,13 +519,21 @@ const entries = destinationDialog.entries.map(entry => Object.assign({}, entry))
             }
         }
 
-        acceptText: qsTr("Export")
-        acceptObjectName: "confirmNoteExport"
-        acceptEnabled: Qt.platform.os === "android" ? !!note && validFilename && !uploading : canSaveToFolder
-        onAccepted: {
-            if (Qt.platform.os === "android") exportDialog.sharePdf()
-            else exportDialog.acceptExport()
+        Connections {
+            target: fileWorkspace.shareManager
+            function onShareFinished(opened) {
+                if (!exportDialog.sharing) return
+                exportDialog.sharing = false
+                if (opened) exportDialog.close()
+                else if (fileWorkspace.shareManager.errorMessage)
+                    exportDialog.shareError = qsTr("%1 Use Save to… to keep a copy.").arg(fileWorkspace.shareManager.errorMessage)
+            }
         }
+
+        acceptText: qsTr("Save to…")
+        acceptObjectName: "confirmNoteExport"
+        acceptEnabled: canSaveToFolder
+        onAccepted: exportDialog.acceptExport()
     }
 
     Settings {

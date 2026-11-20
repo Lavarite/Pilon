@@ -16,12 +16,14 @@ import java.nio.file.Path;
 public final class PilonSharing {
     private PilonSharing() {}
 
-    static File retainPdfFile(File source, File cache) throws IOException {
-        if (!source.isFile()) throw new IOException("Missing PDF");
-        try (DataInputStream input = new DataInputStream(Files.newInputStream(source.toPath()))) {
-            byte[] header = new byte[5]; input.readFully(header);
-            if (!new String(header, StandardCharsets.US_ASCII).equals("%PDF-"))
-                throw new IOException("Invalid PDF");
+    static File retainFile(File source, File cache, boolean requirePdf) throws IOException {
+        if (!source.isFile()) throw new IOException("Missing file");
+        if (requirePdf) {
+            try (DataInputStream input = new DataInputStream(Files.newInputStream(source.toPath()))) {
+                byte[] header = new byte[5]; input.readFully(header);
+                if (!new String(header, StandardCharsets.US_ASCII).equals("%PDF-"))
+                    throw new IOException("Invalid PDF");
+            }
         }
         Path root = cache.toPath().resolve("pdf-shares");
         Files.createDirectories(root);
@@ -36,17 +38,17 @@ public final class PilonSharing {
         }
     }
 
-    public static String retainPdf(Context context, String source) {
-        try { return retainPdfFile(new File(source), context.getCacheDir()).getAbsolutePath(); }
+    public static String retainFile(Context context, String source, boolean requirePdf) {
+        try { return retainFile(new File(source), context.getCacheDir(), requirePdf).getAbsolutePath(); }
         catch (IOException | RuntimeException error) { return null; }
     }
 
-    public static boolean sharePdf(Activity activity, String path) {
+    public static boolean shareFile(Activity activity, String path, String mimeType) {
         if (activity == null || activity.isFinishing()) return false;
         try {
             File file = new File(path);
             Uri uri = FileProvider.getUriForFile(activity, activity.getPackageName() + ".qtprovider", file);
-            Intent send = new Intent(Intent.ACTION_SEND).setType("application/pdf")
+            Intent send = new Intent(Intent.ACTION_SEND).setType(mimeType)
                 .putExtra(Intent.EXTRA_STREAM, uri).putExtra(Intent.EXTRA_TITLE, file.getName())
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
             send.setClipData(ClipData.newRawUri(file.getName(), uri));

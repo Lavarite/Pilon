@@ -23,17 +23,6 @@ PilonScrollView {
     palette.highlight: addon.selectedAccentColour
     palette.highlightedText: addon.selectedAccentTextColour
     ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-    function prepareDisable() { return deviceEditor.visible ? qsTr("Close the device form before disabling Devices.") : true }
-
-    function removeSavedDevice(id, position) {
-        if (!manager.removeDevice(id)) return
-        Qt.callLater(function() {
-            const next = deviceRows.itemAt(Math.min(position, deviceRows.count - 1))
-            if (next) next.focusRow()
-            else addDevice.forceActiveFocus()
-        })
-    }
-
     ColumnLayout {
         width: page.availableWidth
         spacing: 12
@@ -158,54 +147,10 @@ PilonScrollView {
                 onClicked: page.manager.disconnectDiscovery()
             }
         }
-        PilonSectionHeader { objectName: "devicesIncludedSection"; Layout.fillWidth: true; text: page.external && !page.discoveryConnected ? qsTr("Saved devices") : qsTr("Included devices") }
-        PilonWrapButton {
-            id: addDevice
-            objectName: "devicesAddSaved"
-            visible: page.external
-            text: qsTr("Add device")
-            enabled: !page.manager.busy
-            onClicked: deviceEditor.edit(null)
-        }
-        Repeater {
-            id: deviceRows
-            model: page.manager.devices
-            delegate: RowLayout {
-                id: row
-                required property var modelData
-                required property int index
-                Layout.fillWidth: true
-                spacing: 8
-                function focusRow() { included.forceActiveFocus() }
-                RoundedCheckBox {
-                    id: included
-                    objectName: "devicesIncluded_" + row.modelData.id
-                    Layout.fillWidth: true
-                    Layout.minimumWidth: 0
-                    text: row.modelData.name + (row.modelData.ip ? "\n" + row.modelData.ip : "")
-                    Binding { target: included.contentItem; property: "textFormat"; value: Text.PlainText }
-                    checked: row.modelData.included
-                    enabled: !page.manager.busy && (page.external || page.manager.statusKnown)
-                    onToggled: page.manager.setDeviceIncluded(row.modelData.id, checked)
-                }
-                PilonToolButton {
-                    id: actions
-                    objectName: "devicesActions_" + row.modelData.id
-                    visible: page.external && row.modelData.saved === true
-                    enabled: !page.manager.busy
-                    icon.source: "qrc:/qt/qml/Pilon/icons/ellipsis-horizontal.svg"
-                    Accessible.name: qsTr("Actions for %1").arg(row.modelData.name)
-                    ToolTip.visible: hovered
-                    ToolTip.text: Accessible.name
-                    onClicked: deviceMenu.open()
-                    PilonMenu {
-                        id: deviceMenu
-                        y: actions.height
-                        PilonMenuItem { text: qsTr("Edit"); onTriggered: deviceEditor.edit(row.modelData) }
-                        PilonMenuItem { text: qsTr("Remove"); onTriggered: page.removeSavedDevice(row.modelData.id, row.index) }
-                    }
-                }
-            }
+        Loader {
+            Layout.fillWidth: true
+            active: typeof page.addon.integrations === "function"
+            sourceComponent: AddonIntegrationsSettings { addon: page.addon }
         }
     }
 
@@ -266,53 +211,4 @@ PilonScrollView {
         }
     }
 
-    PilonDialog {
-        id: deviceEditor
-        objectName: "deviceEditor"
-        parent: page.Overlay.overlay
-        width: Math.min(480, parent.width - 32)
-        height: Math.min(implicitHeight, parent.height - 32)
-        x: (parent.width - width) / 2
-        y: (parent.height - height) / 2
-        modal: true
-        palette: page.palette
-        property string deviceId: ""
-        function edit(device) {
-            deviceId = device ? device.id : ""
-            deviceName.text = device ? device.name : ""
-            deviceAddress.text = device ? device.ip : ""
-            open()
-            deviceName.forceActiveFocus()
-        }
-        contentItem: PilonScrollView {
-            implicitHeight: editorFields.implicitHeight
-            contentWidth: availableWidth
-            clip: true
-            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-            ColumnLayout {
-                id: editorFields
-                width: parent.width
-                spacing: 8
-                Label { text: qsTr("Name"); color: page.addon.selectedTextColour }
-                PilonTextField { id: deviceName; objectName: "deviceName"; Layout.fillWidth: true; Accessible.name: qsTr("Device name") }
-                Label { text: qsTr("Address"); color: page.addon.selectedTextColour }
-                PilonTextField { id: deviceAddress; objectName: "deviceAddress"; Layout.fillWidth: true; placeholderText: qsTr("IP address or MagicDNS name"); Accessible.name: qsTr("Device address") }
-                Label {
-                    Layout.fillWidth: true; wrapMode: Text.Wrap; textFormat: Text.PlainText
-                    visible: text.length > 0; text: page.manager.errorMessage; color: page.addon.selectedWarningColour
-                }
-                Flow {
-                    Layout.fillWidth: true
-                    spacing: 8
-                    PilonButton {
-                        objectName: "saveDevice"
-                        text: qsTr("Save")
-                        enabled: !page.manager.busy && !!deviceName.text.trim() && !!deviceAddress.text.trim()
-                        onClicked: if (page.manager.saveDevice(deviceEditor.deviceId, deviceName.text, deviceAddress.text)) deviceEditor.close()
-                    }
-                    PilonButton { text: qsTr("Cancel"); onClicked: deviceEditor.close() }
-                }
-            }
-        }
-    }
 }

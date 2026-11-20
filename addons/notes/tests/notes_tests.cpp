@@ -2051,6 +2051,11 @@ private slots:
             const auto content = text.readAllStandardOutput(); QVERIFY(content.contains("Export options"));
             QVERIFY(!content.contains("2"));
         }
+        const auto second = notes.preparePdf("remote.pdf", options);
+        QVERIFY(second.isLocalFile());
+        QVERIFY(second != prepared);
+        QCOMPARE(QFileInfo(second.toLocalFile()).fileName(), QStringLiteral("remote.pdf"));
+        QVERIFY(QFileInfo::exists(prepared.toLocalFile()));
     }
     void exportsTextInkAndTemplatesToReadablePdf() {
         QTemporaryDir directory; NotesManager notes(directory.path()); notes.createNote();
