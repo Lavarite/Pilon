@@ -513,7 +513,7 @@ TestCase {
         } finally {
             service.offline = false
             service.foldOccluding = false
-            tabletInput.setApplicationFont(originalFont)
+            if (originalFont) tabletInput.setApplicationFont(originalFont)
             tabletInput.setScreenGeometry(screen)
         }
     }
