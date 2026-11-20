@@ -255,6 +255,8 @@ TestCase {
             mousePress(preview,start.x,start.y)
             mouseMove(preview,start.x,start.y+Qt.styleHints.startDragDistance+2,20)
             tryCompare(preview,"dragging",true)
+            app.addonRegistryObject.refresh()
+            verify(preview.dragging,"Refreshing unchanged tabs keeps the drag active")
             mouseMove(preview,end.x,end.y,20)
             tryCompare(preview,"dragTargetIndex",1)
             compare(app.pages.map(page=>page.id).join(","),original.join(","),"Dragging previews the order before saving")
