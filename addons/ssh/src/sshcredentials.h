@@ -21,6 +21,7 @@ namespace SshCredentials {
 inline QMutex mutex;
 inline QHash<QString, QString> values;
 inline QSet<QProcess *> writes;
+inline quint64 resetRevision = 0;
 #ifdef Q_OS_ANDROID
 inline int nativeWrites = 0;
 #endif
@@ -66,5 +67,14 @@ inline void put(const QString &host, const QString &user, const QString &secret)
     QMutexLocker lock(&mutex);
     if (secret.isEmpty()) values.remove(key(host, user));
     else values.insert(key(host, user), secret);
+}
+inline quint64 revision() {
+    QMutexLocker lock(&mutex);
+    return resetRevision;
+}
+inline void clear() {
+    QMutexLocker lock(&mutex);
+    values.clear();
+    ++resetRevision;
 }
 }

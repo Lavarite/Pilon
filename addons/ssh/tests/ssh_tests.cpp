@@ -22,6 +22,7 @@ private slots:
         QFile ssh(m_fixture.filePath("ssh"));
         QVERIFY(QFile::copy(QFINDTESTDATA("../../../addons/ssh/tests/fixtures/ssh.py"), ssh.fileName()));
         QVERIFY(ssh.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+        QVERIFY(ssh.copy(m_fixture.filePath("scp")));
         QFile secret(m_fixture.filePath("secret-tool"));
         QVERIFY(secret.open(QIODevice::WriteOnly)); secret.write("#!/bin/sh\nexit 1\n"); secret.close();
         QVERIFY(secret.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
@@ -104,6 +105,75 @@ private slots:
         QVERIFY(!displayed.join('\n').contains("test-password"));
         manager.disconnectFromHost();
         QTRY_VERIFY_WITH_TIMEOUT(!manager.running(), 3000);
+    }
+    void savingPasswordRequiresAuthentication_data() {
+        QTest::addColumn<QString>("password");
+        QTest::addColumn<bool>("cancel");
+        QTest::addColumn<bool>("authenticated");
+        QTest::newRow("accepted") << QString("test-password") << false << true;
+        QTest::newRow("rejected") << QString("wrong-password") << false << false;
+        QTest::newRow("cancelled") << QString("test-password") << true << false;
+    }
+    void savingPasswordRequiresAuthentication() {
+        QFETCH(QString, password);
+        QFETCH(bool, cancel);
+        QFETCH(bool, authenticated);
+        const QString host = "password-save.fixture.invalid", user = "tester";
+        qputenv("PILON_TEST_SSH_MODE", "password");
+        const auto cleanup = qScopeGuard([&] { SshCredentials::put(host, user, {}); });
+        SshManager manager;
+        QVERIFY(manager.passwordSavingAvailable());
+        manager.connectToHost(user, host);
+        QTRY_VERIFY_WITH_TIMEOUT(!manager.promptText().isEmpty(), 3000);
+        QVERIFY(manager.promptPassword());
+
+        const QString previous = "previous-password";
+        SshCredentials::put(host, user, previous);
+        manager.submitPromptAndSave(password);
+        QCOMPARE(SshCredentials::get(host, user), previous);
+        if (cancel)
+            manager.disconnectFromHost();
+        if (authenticated) {
+            QTRY_VERIFY_WITH_TIMEOUT(manager.authenticated(), 3000);
+            manager.disconnectFromHost();
+        }
+        QTRY_VERIFY_WITH_TIMEOUT(!manager.running(), 3000);
+        QCOMPARE(SshCredentials::get(host, user), authenticated ? password : previous);
+        QTRY_VERIFY(!SshCredentials::hasPendingWrites());
+    }
+    void successfulTransferSavesPasswordAfterCompletion() {
+        const QString host = "transfer-save.fixture.invalid", user = "tester";
+        qputenv("PILON_TEST_SSH_MODE", "transfer-password");
+        const auto cleanup = qScopeGuard([&] { SshCredentials::put(host, user, {}); });
+        SshManager manager;
+        QSignalSpy finished(&manager, &SshManager::taskFinished);
+        manager.transferFile(user, host, m_fixture.filePath("file"), "/file", true);
+        QTRY_VERIFY_WITH_TIMEOUT(manager.promptPassword() && !manager.promptText().isEmpty(), 3000);
+        manager.submitPromptAndSave("test-password");
+        QVERIFY(SshCredentials::get(host, user).isEmpty());
+        QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 1, 3000);
+        QCOMPARE(finished[0][0].toInt(), 0);
+        QCOMPARE(SshCredentials::get(host, user), QString("test-password"));
+        QTRY_VERIFY(!SshCredentials::hasPendingWrites());
+    }
+    void forgettingPasswordsDiscardsAnotherManagersPendingSave() {
+        const QString host = "password-challenge.fixture.invalid", user = "tester";
+        qputenv("PILON_TEST_SSH_MODE", "password-challenge");
+        const auto cleanup = qScopeGuard([&] { SshCredentials::put(host, user, {}); });
+        SshManager connection;
+        connection.connectToHost(user, host);
+        QTRY_VERIFY_WITH_TIMEOUT(connection.promptPassword() && !connection.promptText().isEmpty(), 3000);
+        connection.submitPromptAndSave("test-password");
+        QTRY_COMPARE_WITH_TIMEOUT(connection.promptText(), QString("Verification code:"), 3000);
+        QTRY_VERIFY(!SshCredentials::hasPendingWrites());
+
+        SshManager settings;
+        QVERIFY(settings.forgetPasswords());
+        connection.submitPrompt("fixture-code");
+        QTRY_VERIFY_WITH_TIMEOUT(connection.authenticated(), 3000);
+        QVERIFY(SshCredentials::get(host, user).isEmpty());
+        connection.disconnectFromHost();
+        QTRY_VERIFY_WITH_TIMEOUT(!connection.running(), 3000);
     }
 };
 QTEST_GUILESS_MAIN(SshTests)
