@@ -28,6 +28,7 @@ class RemoteFileManager : public QObject
     Q_PROPERTY(QVariantList entries READ entries NOTIFY entriesChanged)
     Q_PROPERTY(bool showHidden READ showHidden WRITE setShowHidden NOTIFY showHiddenChanged)
     Q_PROPERTY(bool automaticRefreshEnabled READ automaticRefreshEnabled WRITE setAutomaticRefreshEnabled NOTIFY automaticRefreshEnabledChanged)
+    Q_PROPERTY(bool remoteEnabled READ remoteEnabled WRITE setRemoteEnabled NOTIFY remoteEnabledChanged)
     Q_PROPERTY(QVariantMap localDevice READ localDevice CONSTANT)
     Q_PROPERTY(QVariantList bookmarks READ bookmarks NOTIFY bookmarksChanged)
     Q_PROPERTY(QVariantMap transfer READ transfer NOTIFY transferChanged)
@@ -56,6 +57,8 @@ class RemoteFileManager : public QObject
     Q_PROPERTY(bool credentialSavingAvailable READ credentialSavingAvailable CONSTANT)
 
 public:
+    bool remoteEnabled() const { return m_remoteEnabled; }
+    void setRemoteEnabled(bool enabled);
     explicit RemoteFileManager(QObject *parent = nullptr);
     ~RemoteFileManager() override;
 
@@ -91,6 +94,8 @@ public:
     Q_INVOKABLE void search(const QVariantList &devices, const QString &username,
                             const QString &query);
     Q_INVOKABLE void prepareSelection(const QVariantList &entries, const QString &username);
+    Q_INVOKABLE void discardPreparedSelection(const QUrl &file);
+    Q_INVOKABLE void shareFile(const QUrl &file, bool requirePdf);
     Q_INVOKABLE void archiveEntry(const QVariantMap &entry, const QString &username, bool extract);
     Q_INVOKABLE void viewFile(const QVariantMap &entry, const QString &username);
     Q_INVOKABLE void uploadFile(const QVariantMap &device, const QString &username,
@@ -135,14 +140,19 @@ public:
     Q_INVOKABLE bool currentLocationBookmarked() const;
     Q_INVOKABLE void clearPreview();
     Q_INVOKABLE void openPreviewExternally();
+    Q_INVOKABLE QStringList appearanceIconNames() const;
+    Q_INVOKABLE QString importAppearanceIcon(const QUrl &source, const QString &directory) const;
+    Q_INVOKABLE QUrl appearanceIconUrl(const QString &name) const;
     QVariantList previewPages() const { return m_previewPages; }
     QVariantMap previewEntry() const { return m_previewEntry; }
     bool previewCanImport() const;
 
 signals:
+    void remoteEnabledChanged();
     void pilonFileOpening();
     void pilonFileReady(const QUrl &file);
     void selectionReady(const QVariantList &files);
+    void shareFinished(bool opened);
     void showHiddenChanged();
     void automaticRefreshEnabledChanged();
     void clipboardChanged();
@@ -160,13 +170,22 @@ signals:
 
 private:
     friend class RemoteFileTests;
-    void startRequest(const QVariantMap &request);
+    struct CredentialAttempt {
+        QString deviceId, host, username, password;
+        quint64 revision = 0;
+        bool save = false;
+    };
+    void startRequest(const QVariantMap &request, const CredentialAttempt *credential = nullptr);
     void handleOperationFinished();
     void updateFileWatches();
     void startFolderSizes();
     void setBusy(bool busy);
     void setSearching(bool searching);
     void setErrorMessage(const QString &message);
+    void finishSharing(bool opened, const QString &error = {});
+#ifndef Q_OS_ANDROID
+    Q_SLOT void handlePortalShareResponse(uint response, const QVariantMap &results);
+#endif
     void setPrompt(const QString &kind, const QString &text);
     void clearPrompt();
     void loadBookmarks();
@@ -180,6 +199,7 @@ private:
     QVariantList m_entries;
     bool m_showHidden = true;
     bool m_automaticRefreshEnabled = true;
+    bool m_remoteEnabled = true;
     QVariantList m_bookmarks;
     bool m_busy = false;
     bool m_searching = false;
@@ -210,10 +230,17 @@ private:
     QTimer m_fileRefreshTimer;
     bool m_refreshPending = false;
     QHash<QString, QString> m_credentials;
+    CredentialAttempt m_activeCredential;
     QString m_secretToolExecutable;
     QString m_fileOpenerExecutable;
     QVariantList m_undoStack;
     QTemporaryDir m_previewDirectory;
+    bool m_sharing = false;
+    quint64 m_shareGeneration = 0;
+    QUrl m_shareSource;
+#ifndef Q_OS_ANDROID
+    QString m_shareRequestPath;
+#endif
     std::shared_ptr<std::atomic_bool> m_cancelRequested;
     QFutureWatcher<QVariantMap> m_operationWatcher;
     QFutureWatcher<void> m_sizeWatcher;

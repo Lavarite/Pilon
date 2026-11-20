@@ -23,7 +23,8 @@
 namespace {
 constexpr auto includedDevicesKey = "tailscale/includedDevices";
 constexpr auto deviceSelectionInitializedKey = "tailscale/deviceSelectionInitialized";
-constexpr auto savedDevicesKey = "tailscale/savedDevices";
+constexpr auto savedDevicesKey = "ssh/savedDevices";
+constexpr auto legacySavedDevicesKey = "tailscale/savedDevices";
 
 QString savedAddress(const QString &input)
 {
@@ -192,7 +193,8 @@ bool TailscaleManager::externalAppInstalled() const
 
 QVariantList TailscaleManager::loadSavedDevices(QString *error) const
 {
-    const auto bytes = PilonSettings().value(savedDevicesKey).toByteArray();
+    const PilonSettings settings;
+    const auto bytes = settings.value(savedDevicesKey, settings.value(legacySavedDevicesKey)).toByteArray();
     if (bytes.isEmpty()) return {};
     QJsonParseError parse{};
     const auto document = bytes.size() <= 1024 * 1024 ? QJsonDocument::fromJson(bytes, &parse) : QJsonDocument{};
@@ -200,7 +202,7 @@ QVariantList TailscaleManager::loadSavedDevices(QString *error) const
     QSet<QString> ids, addresses;
     static const QRegularExpression id(QStringLiteral("^external:[a-f0-9]{32}$"));
     if (parse.error != QJsonParseError::NoError || !document.isArray() || document.array().size() > 1024) {
-        if (error) *error = tr("Saved devices could not be read. Restore the Devices settings before editing them.");
+        if (error) *error = tr("Saved devices could not be read. Restore the SSH settings before editing them.");
         return {};
     }
     for (const auto &entry : document.array()) {
@@ -211,7 +213,7 @@ QVariantList TailscaleManager::loadSavedDevices(QString *error) const
             || name.contains(QRegularExpression(QStringLiteral("[\\x{0000}-\\x{001f}\\x{007f}]")))
             || address.isEmpty() || savedAddress(address) != address || addresses.contains(address)
             || !entry.toObject().value("included").isBool()) {
-            if (error) *error = tr("Saved devices could not be read. Restore the Devices settings before editing them.");
+            if (error) *error = tr("Saved devices could not be read. Restore the SSH settings before editing them.");
             return {};
         }
         ids.insert(identity); addresses.insert(address);
@@ -485,7 +487,7 @@ void TailscaleManager::setDeviceIncluded(const QString &deviceId, bool included)
     if (deviceId.isEmpty())
         return;
     const bool discovered = m_discoveryConnected && deviceId.startsWith("api:");
-    if (externalApplication() && !discovered) {
+    if (deviceId.startsWith("external:") || (externalApplication() && !discovered)) {
         QString error; auto devices = loadSavedDevices(&error);
         if (!error.isEmpty()) { setErrorMessage(error); return; }
         for (auto &entry : devices) {

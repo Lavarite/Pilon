@@ -22,6 +22,7 @@ TestCase {
 
     QtObject {
         id: tailscale
+        readonly property var devices: includedDevices.map(device => Object.assign({included:true}, device))
         property var includedDevices: [{id: "fixture", name: "Fixture", ip: "127.0.0.1", online: true}]
     }
     QtObject {
@@ -34,15 +35,9 @@ TestCase {
         property string title: "Export fixture"
         property string errorMessage: ""
         property var exported: ({})
-        property bool shareSucceeds: true
         function save() { return true }
         function exportToFolder(folder, filename, options) { exported = {folder: folder, filename: filename, options: options}; return true }
         function preparePdf(filename, options) { exported = {filename: filename, options: options}; return "file:///tmp/" + filename }
-        function sharePdf(filename, options) {
-            exported = {filename: filename, options: options}
-            errorMessage = shareSucceeds ? "" : "Unable to open the system share menu."
-            return shareSucceeds
-        }
     }
     QtObject {
         id: fakeGithub
@@ -105,7 +100,18 @@ TestCase {
         property var transfer: ({})
         signal selectionReady(var files)
         property var preparedSelection: []
-        function prepareSelection(entries, username) { preparedSelection = entries }
+        property string selectionUsername: ""
+        function prepareSelection(entries, username) { preparedSelection = entries; selectionUsername = username }
+        property bool shareSucceeds: true
+        property var shared: ({})
+        signal shareFinished(bool opened)
+        function discardPreparedSelection(file) {}
+        function shareFile(file, pdf) {
+            if (busy) return
+            shared = {file: file, pdf: pdf}
+            errorMessage = shareSucceeds ? "" : "Unable to open the system share menu."
+            shareFinished(shareSucceeds)
+        }
         property bool searching: false
         property bool searchMode: false
         property bool clipboardAvailable: clipboard.entries.length > 0
@@ -151,6 +157,8 @@ TestCase {
             lastPaste = {entries: entries, device: device, username: username, path: path, move: move}
         }
         function reloadBookmarks() { }
+        function appearanceIconNames() { return ["command-line", "film", "pencil", "photo"] }
+        function appearanceIconUrl(name) { return "" }
         function removeBookmark(deviceId, username, path) {
             bookmarks = bookmarks.filter(function(entry) { return entry.deviceId !== deviceId || entry.username !== username || entry.path !== path })
         }
@@ -167,11 +175,114 @@ TestCase {
     }
     MockFiles { id: files }
     MockFiles { id: accessFiles }
+    QtObject {
+        id: appearanceRegistry
+        property string savedAppearance: ""
+        function setting(id, key, fallback) { return savedAppearance || fallback }
+        function setSetting(id, key, value) { savedAppearance = value; return true }
+    }
+    function test_fileAppearanceRules() {
+        const appearance = sharedFiles.appearance
+        const local = {name: "script.PY", path: "/tmp/script.PY", deviceId: "local", directory: false}
+        const other = Object.assign({}, local, {deviceId: "fixture", username: "other"})
+        const remote = Object.assign({}, other, {username: "fixture"})
+        const otherDevice = Object.assign({}, remote, {deviceId: "other-device"})
+        compare(appearance.iconForEntry(local), "icons/command-line.svg")
+        compare(appearance.iconForEntry({name: "Notebook.PIN"}), "icons/application-x-pilon-note.svg")
+        compare(appearance.iconForEntry({name: "Agenda.pical"}), "icons/application-x-pilon-calendar.svg")
+        compare(appearance.iconForEntry({name: "Package.piext"}), "icons/application-x-pilon-extension.svg")
+        compare(appearance.iconForEntry({name: "README"}), "icons/document.svg")
+        const notes = {name: "Notes", path: "/Fixture/Pilon/Notes", directory: true, deviceId: "local"}
+        compare(appearance.iconForEntry(notes), "icons/note.svg")
+        compare(appearance.iconForEntry(Object.assign({}, notes, {path: "/Fixture/Pilon/Calendar"})), "icons/calendar.svg")
+        verify(appearance.savePath(Object.assign({}, notes, {path: notes.path + "/"}), "pencil", ""))
+        compare(appearance.iconForEntry(notes), "icons/pencil.svg")
+        verify(appearance.savePath(notes, "", ""))
+        compare(appearance.iconForEntry(notes), "icons/note.svg")
+        verify(appearance.saveType(".PY", "photo"))
+        verify(appearance.saveType("tar.gz", "film"))
+        compare(appearance.iconForEntry(local), "icons/photo.svg")
+        compare(appearance.iconForEntry({name: "copy.TAR.GZ"}), "icons/film.svg")
+        compare(appearance.iconForEntry({name: ".gz"}), "icons/document.svg")
+        verify(appearance.savePath(Object.assign({}, remote, {path: "/tmp/./script.PY"}), "pencil", "#123456"))
+        appearance.reload()
+        compare(appearance.iconForEntry(remote), "icons/pencil.svg")
+        compare(appearance.iconForEntry(other), "icons/photo.svg")
+        compare(appearance.iconForEntry(otherDevice), "icons/photo.svg")
+        compare(appearance.iconForEntry(local), "icons/photo.svg")
+        compare(appearance.tintForEntry(remote), "#123456")
+        verify(appearance.savePath(remote, "", "#123456"))
+        compare(appearance.iconForEntry(remote), "icons/photo.svg")
+        compare(appearance.tintForEntry(remote), "#123456")
+        verify(appearance.savePath(remote, "pencil", ""))
+        compare(appearance.iconForEntry(remote), "icons/pencil.svg")
+        compare(appearance.tintForEntry(remote), "")
+        verify(appearance.savePath(remote, "", ""))
+        verify(appearance.saveType("py", ""))
+        verify(appearance.saveType("tar.gz", ""))
+        compare(appearance.iconForEntry(remote), "icons/command-line.svg")
+        appearanceRegistry.savedAppearance = JSON.stringify({types: {py: "custom-" + "a".repeat(64)}})
+        appearance.reload()
+        compare(appearance.iconForEntry(remote), "icons/command-line.svg")
+    }
+    function test_fileAppearanceContextAndIconSearch() {
+        const entry = {name: "Fixture", path: "/tmp/Fixture", deviceId: "local", directory: true}
+        page.selectedEntries = [entry]
+        const menu = findChild(page, "fileContextMenu")
+        menu.openAt(80, 120)
+        tryCompare(menu, "opened", true)
+        const action = findChild(page, "fileAppearanceAction")
+        verify(action.shown)
+        const appearanceMenu = findChild(menu, "fileAppearanceMenu")
+        appearanceMenu.open()
+        tryCompare(appearanceMenu, "opened", true)
+        findChild(appearanceMenu, "changeFileIconAction").clicked()
+        const editor = findChild(sharedFiles, "fileAppearanceEditor")
+        tryCompare(editor, "opened", true)
+        verify(editor.dialogWindow !== sharedFiles.ownerWindow)
+        const identity = findChild(editor, "fileAppearanceRuleIdentity")
+        compare(identity.text, entry.path)
+        verify(identity.readOnly)
+        const search = findChild(editor, "fileAppearanceIconSearch")
+        const picker = findChild(editor, "fileAppearanceIconPicker")
+        search.text = "PENC"
+        tryCompare(picker, "count", 1)
+        picker.activated(0)
+        findChild(editor, "saveFileAppearance").clicked()
+        tryCompare(editor, "opened", false)
+        compare(page.iconForFile(entry.name, true, entry.path, "local"), "icons/pencil.svg")
+        verify(sharedFiles.appearance.savePath(entry, "", ""))
+    }
+    Window { id: compactAppearanceOwner; width: 320; height: 360 }
+    function test_fileAppearanceSettingsEditTheSameRuleOnNarrowWindows() {
+        const folder = {name: "Folder", path: "/tmp/Folder", deviceId: "local", directory: true}
+        verify(sharedFiles.appearance.savePath(folder, "pencil", "#193e94"))
+        compactAppearanceOwner.show()
+        sharedFiles.appearance.open(compactAppearanceOwner)
+        const editor = findChild(sharedFiles, "fileAppearanceEditor")
+        tryCompare(editor, "opened", true)
+        compare(editor.dialogWindow.transientParent, compactAppearanceOwner)
+        verify(editor.width <= compactAppearanceOwner.width)
+        const scope = findChild(editor, "fileAppearanceRuleScope")
+        scope.activated(1)
+        const rules = findChild(editor, "fileAppearanceExistingRules")
+        compare(rules.count, 1)
+        rules.popup.open()
+        tryVerify(() => rules.popup.contentItem.itemAtIndex(0) !== null)
+        mouseClick(rules.popup.contentItem.itemAtIndex(0))
+        compare(findChild(editor, "fileAppearanceRuleIdentity").text, folder.path)
+        compare(editor.tint, "#193e94")
+        compare(editor.choice, "pencil")
+        editor.close()
+        compactAppearanceOwner.close()
+    }
     App.FileWorkspace {
         id: sharedFiles
+        appearanceRegistry: appearanceRegistry
         ownerWindow: test.Window.window
         remoteFiles: files
         tailscaleManager: tailscale
+        deviceDiscovery: tailscale
         fileManagerComponent: Component { MockFiles {} }
         username: "fixture"
         mainColour: workspace.mainColour; secondaryColour: workspace.secondaryColour
@@ -200,7 +311,6 @@ TestCase {
         fileManagerComponent: Component { MockFiles {} }
         anchors.fill: parent
         sidebarWidth: 64
-        tailscaleManager: tailscale
         remoteFiles: files
         addonContext: fakeFilesAddon
         username: "fixture"
@@ -348,7 +458,7 @@ TestCase {
             fileWorkspace: sharedFiles
             MockFiles { id: scaledSearchFiles }
             fileManagerComponent: Component { MockFiles {} }
-            sidebarWidth: 64; tailscaleManager: tailscale; remoteFiles: scaledSearchFiles; username: "fixture"
+            sidebarWidth: 64; remoteFiles: scaledSearchFiles; username: "fixture"
             mainColour: workspace.mainColour; secondaryColour: workspace.secondaryColour
             textColour: workspace.textColour; mutedTextColour: workspace.mutedTextColour
             accentColour: workspace.accentColour; accentTextColour: workspace.accentTextColour
@@ -762,6 +872,50 @@ TestCase {
         grabImage(workspace).save("/tmp/pilon-files-compact-context-menu.png")
         menu.close()
     }
+    function test_shareMenuStagesOnlyASingleFileAndKeepsItsDeviceAccount() {
+        const tile = workspace.tiles[0]
+        const menu = findChild(tile, "fileContextMenu")
+        const action = findChild(menu, "shareSelectedFileAction")
+        verify(action !== null)
+        const manager = sharedFiles.shareManager
+        manager.shared = ({})
+        const local = {name: "File.pdf", directory: false, deviceId: "local", path: "/example/File.pdf"}
+        tile.selectedEntries = [Object.assign({}, local, {directory: true})]
+        menu.openAt(30, 40)
+        verify(!action.shown)
+        menu.close()
+        tile.selectedEntries = [local, Object.assign({}, local, {path: "/example/Other.pdf"})]
+        menu.openAt(30, 40)
+        verify(!action.shown)
+        menu.close()
+
+        tile.selectedEntries = [local]
+        menu.openAt(30, 40)
+        verify(action.shown)
+        verify(action.enabled)
+        action.clicked()
+        compare(manager.preparedSelection[0].path, local.path)
+        compare(manager.selectionUsername, "local-user")
+        manager.busy = true
+        manager.selectionReady(["file:///example/File.pdf"])
+        manager.busy = false
+        tryVerify(() => manager.shared.file === "file:///example/File.pdf")
+        verify(!manager.shared.pdf)
+
+        const remote = Object.assign({}, files.entries[0], {username: "remote-account"})
+        tile.selectedEntries = [remote]
+        menu.openAt(30, 40)
+        verify(action.enabled)
+        action.clicked()
+        compare(manager.preparedSelection[0].deviceId, remote.deviceId)
+        compare(manager.preparedSelection[0].username, "remote-account")
+        manager.busy = true
+        manager.selectionReady(["file:///private/staging/File%200"])
+        manager.busy = false
+        tryVerify(() => manager.shared.file === "file:///private/staging/File%200")
+        verify(!manager.shared.pdf)
+    }
+
     function test_optionalAddonActionIsScopedToLocalPaths() {
         const menu = findChild(page, "fileContextMenu")
         const entries = files.entries.slice()
@@ -770,7 +924,8 @@ TestCase {
         const p = point(0)
         mouseClick(area(), p.x, p.y, Qt.RightButton)
         tryCompare(menu,"opened",true)
-        compare(menu.itemAt(1).text,"Archive as ZIP","An uninstalled contribution reserves no row")
+        verify(Array.from({length: menu.count}, (_, index) => menu.itemAt(index)).every(action => action.text !== "Inspect folder"),
+            "An uninstalled contribution reserves no row")
         menu.close()
         fakeFilesAddon.integrationEnabled = true
         mouseClick(area(), p.x, p.y, Qt.RightButton)
@@ -963,6 +1118,10 @@ TestCase {
         compare(noteImportSpy.count, 2); compare(noteImportSpy.signalArguments[1][1], true)
     }
     function init() {
+        findChild(sharedFiles, "fileAppearanceEditor").close()
+        compactAppearanceOwner.close()
+        appearanceRegistry.savedAppearance = ""
+        sharedFiles.appearance.reload()
         accessFiles.cancelPrompt()
         accessFiles.errorMessage = ""
         accessPopup.close()
@@ -1494,18 +1653,24 @@ TestCase {
     function test_pdfShareKeepsOptionsAndRecoversFromLaunchFailure() {
         sharedFiles.exportNote(exportNote)
         const dialog=findWorkspaceChild("noteExportWindow")
-        verify(typeof dialog.sharePdf === "function")
+        const share=findWorkspaceChild("shareNotePdf")
+        const manager=sharedFiles.shareManager
+        compare(findWorkspaceChild("confirmNoteExport").text,"Save to…")
+        verify(share.visible)
         findWorkspaceChild("noteExportFilename").text="Shared note.pdf"
         findWorkspaceChild("noteExportFirstPageHeading").checked=false
         findWorkspaceChild("noteExportPageNumbers").checked=true
-        exportNote.shareSucceeds=false
-        dialog.sharePdf()
+        manager.shareSucceeds=false
+        share.clicked()
         tryCompare(dialog,"visible",true)
         compare(exportNote.exported.filename,"Shared note.pdf")
         compare(exportNote.exported.options.firstPageHeadingOnly,false)
         compare(exportNote.exported.options.pageNumbers,true)
-        exportNote.shareSucceeds=true
-        dialog.sharePdf()
+        compare(manager.shared.file,"file:///tmp/Shared note.pdf")
+        verify(manager.shared.pdf)
+        verify(findWorkspaceChild("notePdfShareError").text.includes("Save to…"))
+        manager.shareSucceeds=true
+        share.clicked()
         tryCompare(dialog,"visible",false)
         compare(findWorkspaceChild("noteExportFilename").text,"Shared note.pdf")
     }
@@ -1546,7 +1711,7 @@ TestCase {
         verify(dialog.fullWidthFooter)
         verify(!findChild(picker, "addFileTile").visible)
         const button = findWorkspaceChild("confirmNoteExport")
-        compare(button.text, "Export")
+        compare(button.text, "Save to…")
         grabImage(picker.Window.window.contentItem).save("/tmp/pilon-note-export-window.png")
         mouseClick(button)
         verify(dialog.overwritePending); verify(dialog.opened)

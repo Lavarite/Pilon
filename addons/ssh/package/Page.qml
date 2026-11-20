@@ -690,11 +690,7 @@ Item {
         target: addon.fileWorkspace
         function onDeviceUsernamesChanged() { sshPage.applyUsernameDefault(false) }
         function onUsernameChanged() { sshPage.applyUsernameDefault(false) }
-    }
-    Connections {
-        target: addon.tailscaleManager
-
-        function onIncludedDevicesChanged() {
+        function onSshDevicesChanged() {
             sshDevice.restoreLastConnection()
         }
     }

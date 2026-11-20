@@ -102,6 +102,7 @@ set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/../addons/files/ui/File
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/../addons/files/ui/FileTile.qml" PROPERTIES QT_RESOURCE_ALIAS "FileTile.qml")
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/../addons/files/ui/FileTransferPopup.qml" PROPERTIES QT_RESOURCE_ALIAS "FileTransferPopup.qml")
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/../addons/files/ui/FileWorkspace.qml" PROPERTIES QT_RESOURCE_ALIAS "FileWorkspace.qml")
+set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/../addons/files/ui/FileAppearance.qml" PROPERTIES QT_RESOURCE_ALIAS "FileAppearance.qml")
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/../addons/files/ui/FilesPage.qml" PROPERTIES QT_RESOURCE_ALIAS "FilesPage.qml")
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/../addons/git/readme.md" PROPERTIES QT_RESOURCE_ALIAS "docs/git.md")
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/../addons/notes/config/handwriting-cuda-requirements.lock" PROPERTIES QT_RESOURCE_ALIAS "handwriting-cuda-requirements.lock")

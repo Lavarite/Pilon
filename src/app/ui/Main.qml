@@ -183,6 +183,12 @@ Window {
         return host ? host.page : null
     }
     function addonEnabled(id) { return addonRegistry.addons.some(row => row.id === id && row.enabled && !row.error) }
+    readonly property bool sshEnabled: workspaceActive && addonEnabled("ssh")
+    onSshEnabledChanged: if (!sshEnabled && sshManager?.running) sshManager.disconnectFromHost()
+    readonly property var sshAddonHost: {
+        const revision = pageRevision
+        return addonHosts.ssh || null
+    }
     property var integrationHosts: []
     property var workspaceGuards: []
     property var workspaceOwners: []
@@ -333,7 +339,6 @@ Window {
         if (enabled) return addonRegistry.setEnabled(id, true) || addonRegistry.error
         const host = addonHosts[id]
         const manager = id === "notes" ? notesManager : id === "calendar" ? calendarManager : id === "assistant" ? assistantManager : null
-        if (id === "ssh" && sshManager.running) return qsTr("Disconnect the terminal before disabling SSH.")
         // shortcut: shared foreground pickers/transfers block disable until their APIs carry request owners.
         if (sharedFiles.filePickerOpen || sharedFiles.sharedManagers().some(item => item && item.busy))
             return qsTr("Finish the open file operation before disabling the add-on.")
@@ -727,8 +732,8 @@ Window {
             property bool cleanupOnly: false
             readonly property bool quiesced: host ? host.quiesced : false
             readonly property string workspaceRoot: window.appService.workspaceRoot || ""
-            readonly property bool deviceDiscoveryEnabled: window.addonEnabled("devices")
-            readonly property var discoveredDevices: deviceDiscoveryEnabled ? tailscaleManager.includedDevices : []
+            readonly property bool deviceDiscoveryEnabled: !!sharedFiles.deviceDiscovery
+            readonly property var discoveredDevices: sharedFiles.sshDevices
             readonly property var workspaceOwners: window.workspaceOwners
             readonly property bool workspaceActive: window.workspaceActive
             readonly property string settingsFile: window.appService.settingsFile || ""
@@ -895,6 +900,7 @@ Window {
 
     Backend.RemoteFileManager {
         id: remoteFiles
+        remoteEnabled: window.sshEnabled
         automaticRefreshEnabled: window.workspaceActive && !workspaceLocked
         showHidden: persistentSettings.showHiddenFiles
     }
@@ -902,6 +908,7 @@ Window {
     Component {
         id: fileManagerFactory
         Backend.RemoteFileManager {
+            remoteEnabled: window.sshEnabled
             automaticRefreshEnabled: window.workspaceActive && !workspaceLocked
             showHidden: persistentSettings.showHiddenFiles
         }
@@ -913,9 +920,11 @@ Window {
         remoteFiles: remoteFiles
         tailscaleManager: tailscaleManager
         fileManagerComponent: fileManagerFactory
+        appearanceRegistry: addonRegistry
         settingsLocation: window.appService.settingsLocation || ""
         localHomePath: Qt.platform.os === "android" ? window.appService.workspaceRoot : StandardPaths.writableLocation(StandardPaths.HomeLocation)
-        deviceDiscoveryEnabled: window.addonEnabled("devices")
+        deviceDiscovery: sshDeviceProviders.item ? (sshDeviceProviders.item.entries[0] || null) : null
+        sshEnabled: window.sshEnabled
         canOpenFiles: window.addonEnabled("files")
         username: persistentSettings.defaultSshUsername.trim() || (Qt.platform.os === "android" ? "" : remoteFiles.localDevice.username)
         notesDirectory: notesManager.storageDirectory
@@ -926,6 +935,15 @@ Window {
         warningColour: window.selectedWarningColour
         warningTextColour: window.contrastingText(window.selectedWarningColour, .96)
         onUsernameCommitted: value => persistentSettings.lastSshUsername = value
+    }
+    Loader {
+        id: sshDeviceProviders
+        active: window.sshEnabled && !!window.sshAddonHost
+        sourceComponent: AddonIntegrationHost {
+            addon: window.sshAddonHost ? window.sshAddonHost.context : null
+            point: "discovered-devices"
+            target: sharedFiles
+        }
     }
 
     Backend.NotesManager { id: notesManager; active: window.workspaceActive && window.runtimesReady && window.addonEnabled("notes") && !window.ownerQuiesced("notes") && canActivateOwner("notes") }
@@ -945,7 +963,8 @@ Window {
         id: assistantManager
         active: window.workspaceActive && window.addonEnabled("assistant") && !window.ownerQuiesced("assistant") && extensionsReady && !workspaceLocked
         calendar: window.workspaceActive && window.addonEnabled("calendar") ? calendarManager : null
-        devices: window.addonEnabled("devices") ? tailscaleManager.includedDevices : []
+        remoteEnabled: window.sshEnabled
+        devices: sharedFiles.sshDevices
         username: sharedFiles.username
         currentLocation: filesPane ? ({deviceId: filesPane.activeRemoteFiles.currentDeviceId,
                            path: filesPane.activeRemoteFiles.currentPath,
@@ -1370,6 +1389,13 @@ Window {
                             onClicked: window.glassFrostiness = 78
                         }
                     }
+                }
+                PilonButton {
+                    objectName: "fileAppearanceSettings"
+                    width: parent.width
+                    text: qsTr("File and folder appearance…")
+                    enabled: window.addonEnabled("files")
+                    onClicked: sharedFiles.appearance.open(settingsMenu)
                 }
                 PilonSectionHeader { objectName: "applicationColoursSection"; width: parent.width; text: qsTr("Colours") }
                 Item {

@@ -25,9 +25,12 @@ TestCase {
     QtObject {
         id: tailscale
         property bool busy: false
+        property string errorMessage: ""
         property var devices: [{id:"google",name:"test-server",ip:"192.0.2.1",online:true},
             {id:"portable",name:"test-portable",ip:"192.0.2.2",online:true}]
         property var includedDevices: devices
+        readonly property var peers: ({devices: devices.map(device => Object.assign({included: true}, device)),
+            refresh: refresh})
         function refresh() {}
     }
     QtObject {
@@ -54,6 +57,7 @@ TestCase {
         id: workspace
         ownerWindow: test.Window.window
         remoteFiles: localFiles; tailscaleManager: tailscale
+        deviceDiscovery: tailscale.peers
         fileManagerComponent: managerFactory
         username: preferences.defaultSshUsername || localFiles.localDevice.username
         mainColour: colours.window; secondaryColour: colours.base

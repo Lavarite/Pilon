@@ -132,7 +132,10 @@ target_link_libraries(pilon_devices PUBLIC Qt6::Gui Qt6::Qml Qt6::Network Qt6::C
 
 add_library(pilon_files STATIC ../addons/files/src/remotefilemanager.cpp ../addons/files/src/remotefilemanager.h)
 target_include_directories(pilon_files PUBLIC ${PILON_INCLUDE_DIRECTORIES})
-target_link_libraries(pilon_files PUBLIC pilon_documents Qt6::Network ${PILON_SSH2_TARGET})
+target_link_libraries(pilon_files PUBLIC pilon_documents Qt6::Network ${PILON_SSH2_TARGET} PRIVATE Qt6::Quick)
+if(NOT ANDROID)
+    target_link_libraries(pilon_files PRIVATE Qt6::DBus)
+endif()
 
 add_library(pilon_notes STATIC
     ../addons/notes/src/noteslibrary.cpp ../addons/notes/src/notesmanager.cpp ../addons/notes/src/notesmanager.h
@@ -266,6 +269,7 @@ qt_add_qml_module(pilon
         app/ui/AccountResetDialog.qml
         app/ui/AppNavigation.qml
         ../addons/files/ui/FileWorkspace.qml
+        ../addons/files/ui/FileAppearance.qml
         app/ui/FirstRunSetup.qml
         app/ui/SetupOverview.qml
         app/ui/SharingConfiguration.qml
@@ -727,7 +731,10 @@ if(PILON_BUILD_TESTS)
     # This suite includes the implementation to exercise its private traversal helpers.
     qt_add_executable(pilon_file_tests ../addons/files/tests/remotefile_tests.cpp ../addons/files/src/remotefilemanager.h)
     target_link_libraries(pilon_file_tests PRIVATE pilon_documents Qt6::Test
-        Qt6::Network Qt6::Concurrent ${PILON_SSH2_TARGET})
+        Qt6::Network Qt6::Concurrent Qt6::Quick ${PILON_SSH2_TARGET})
+    if(NOT ANDROID)
+        target_link_libraries(pilon_file_tests PRIVATE Qt6::DBus)
+    endif()
     add_test(NAME files COMMAND pilon_file_tests -platform offscreen)
     qt_add_executable(pilon_notes_tests ../addons/notes/tests/notes_tests.cpp)
     target_link_libraries(pilon_notes_tests PRIVATE pilon_notes Qt6::Test)

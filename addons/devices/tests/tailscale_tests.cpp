@@ -301,12 +301,27 @@ esac
         QVERIFY(manager.removeDevice(id)); QVERIFY(manager.savedDevices().isEmpty());
         QVERIFY(!manager.removeDevice(id)); QVERIFY(!manager.errorMessage().isEmpty());
     }
+    void legacySavedDevicesAreAvailableAndKeepTheirIdOnFirstEdit() {
+        const QString id = "external:0123456789abcdef0123456789abcdef";
+        const auto legacy = QJsonDocument(QJsonArray{QJsonObject{{"id", id},
+            {"name", "Old"}, {"ip", "old.example"}, {"included", false}}}).toJson();
+        PilonSettings().setValue("tailscale/savedDevices", legacy);
+        TailscaleManager manager;
+        QCOMPARE(manager.savedDevices().first().toMap().value("id").toString(), id);
+        QVERIFY(!manager.savedDevices().first().toMap().value("included").toBool());
+        QVERIFY(manager.saveDevice(id, "Updated", "new.example"));
+        QCOMPARE(manager.savedDevices().first().toMap().value("id").toString(), id);
+        QCOMPARE(manager.savedDevices().first().toMap().value("ip").toString(), QString("new.example"));
+        QCOMPARE(PilonSettings().value("tailscale/savedDevices").toByteArray(), legacy);
+        QVERIFY(PilonSettings().contains("ssh/savedDevices"));
+    }
     void savedDeviceEditPreservesExclusionAndRejectsDuplicateAddresses() {
         TailscaleManager manager;
         QVERIFY(manager.saveDevice({}, "First", "100.64.0.1"));
-        auto array = QJsonDocument::fromJson(PilonSettings().value("tailscale/savedDevices").toByteArray()).array();
+        auto array = QJsonDocument::fromJson(PilonSettings().value("ssh/savedDevices").toByteArray()).array();
+        QCOMPARE(array.size(), 1);
         auto first = array.first().toObject(); first.insert("included", false); array[0] = first;
-        PilonSettings().setValue("tailscale/savedDevices", QJsonDocument(array).toJson());
+        PilonSettings().setValue("ssh/savedDevices", QJsonDocument(array).toJson());
         QVERIFY(manager.saveDevice(first.value("id").toString(), "Edited", "100.64.0.2"));
         QVERIFY(!manager.savedDevices().first().toMap().value("included").toBool());
         QVERIFY(!manager.saveDevice({}, "Duplicate", "100.64.0.2"));
@@ -330,9 +345,9 @@ esac
         QFETCH(QString, name); QFETCH(QString, address);
         TailscaleManager manager;
         QVERIFY(manager.saveDevice({}, "Existing", "100.64.0.1"));
-        const auto before = PilonSettings().value("tailscale/savedDevices");
+        const auto before = PilonSettings().value("ssh/savedDevices");
         QVERIFY(!manager.saveDevice({}, name, address));
-        QCOMPARE(PilonSettings().value("tailscale/savedDevices"), before);
+        QCOMPARE(PilonSettings().value("ssh/savedDevices"), before);
         QVERIFY(!manager.errorMessage().isEmpty());
     }
     void unreadableSavedDevicesArePreservedUntilRestored() {
@@ -343,17 +358,18 @@ esac
         QVERIFY(!manager.saveDevice({}, "Replacement", "100.64.0.1"));
         QVERIFY(!manager.removeDevice("external:missing"));
         QCOMPARE(PilonSettings().value("tailscale/savedDevices").toByteArray(), broken);
+        QVERIFY(!PilonSettings().contains("ssh/savedDevices"));
     }
     void failedSavedDevicePersistencePreservesThePreviousList() {
         TailscaleManager manager;
         QVERIFY(manager.saveDevice({}, "Existing", "100.64.0.1"));
-        const auto before = PilonSettings().value("tailscale/savedDevices");
+        const auto before = PilonSettings().value("ssh/savedDevices");
         const auto folder = QFileInfo(PilonSettings().fileName()).absolutePath();
         const auto permissions = QFileInfo(folder).permissions();
         QVERIFY(QFile::setPermissions(folder, QFile::ReadOwner | QFile::ExeOwner));
         auto restore = qScopeGuard([&] { QFile::setPermissions(folder, permissions); });
         QVERIFY(!manager.saveDevice({}, "Unsaved", "100.64.0.2"));
-        QCOMPARE(PilonSettings().value("tailscale/savedDevices"), before);
+        QCOMPARE(PilonSettings().value("ssh/savedDevices"), before);
         QCOMPARE(manager.savedDevices().size(), 1);
     }
     void destructionStopsPendingStatusWithoutCallbacks() {

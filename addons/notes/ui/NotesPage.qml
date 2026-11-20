@@ -939,7 +939,7 @@ Control {
                         objectName: "noteExportPdf"
                         width: 36; leftPadding: 6; rightPadding: 6
                         display: AbstractButton.IconOnly
-                        icon.source: "icons/share.svg"; icon.width: 24; icon.height: 24
+                        icon.source: "icons/document.svg"; icon.width: 24; icon.height: 24
                         Accessible.name: qsTr("Export PDF"); ToolTip.visible: hovered; ToolTip.text: Accessible.name
                         enabled: page.hasNote
                         onClicked: { ink.finishStroke(); if (page.fileWorkspace) page.fileWorkspace.exportNote(page.notes) }

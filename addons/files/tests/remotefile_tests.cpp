@@ -46,6 +46,95 @@ class RemoteFileTests : public QObject
     }
 
 private slots:
+    void disablingSshStopsRemoteOperationsAndKeepsLocalFiles()
+    {
+        QTemporaryDir directory;
+        QVERIFY(touch(directory.filePath("local-file")));
+        RemoteFileManager manager;
+        manager.browse(manager.localDevice(), {}, directory.path());
+        QTRY_COMPARE(manager.currentPath(), directory.path());
+        manager.setRemoteEnabled(false);
+        manager.browse(device("peer"), "fixture", "/remote");
+        QCOMPARE(manager.currentPath(), directory.path());
+        QVERIFY(!manager.busy());
+        QVERIFY(manager.errorMessage().contains("SSH add-on"));
+        manager.createDirectory(manager.localDevice(), {}, directory.path(), "new-folder");
+        QTRY_VERIFY(!manager.busy());
+        QVERIFY(QFileInfo(directory.filePath("new-folder")).isDir());
+    }
+
+    void paintedDragPreviewFollowsTheOriginalGrabPoint()
+    {
+        QQuickWindow window;
+        window.resize(500, 500);
+        QPixmap pixmap(224, 216);
+        pixmap.setDevicePixelRatio(2);
+        pixmap.fill(Qt::transparent);
+        FileDragPreview preview(&window, pixmap, QPointF(59, 27));
+        QCOMPARE(preview.size(), QSizeF(112, 108));
+        QMimeData data;
+        QDragEnterEvent enter(QPointF(139, 127), Qt::MoveAction, &data, Qt::LeftButton, {});
+        QCoreApplication::sendEvent(&window, &enter);
+        QVERIFY(preview.isVisible());
+        QCOMPARE(preview.position(), QPointF(80, 100));
+        QDragMoveEvent move(QPointF(200.5, 161.5), Qt::MoveAction, &data, Qt::LeftButton, {});
+        QCoreApplication::sendEvent(&window, &move);
+        QCOMPARE(preview.position(), QPointF(141.5, 134.5));
+        QDragLeaveEvent leave;
+        QCoreApplication::sendEvent(&window, &leave);
+        QVERIFY(!preview.isVisible());
+    }
+
+    void disablingSshDiscardsAPendingRemoteBrowseAndRestoresTheLocalFolder()
+    {
+        QTemporaryDir directory;
+        QVERIFY(touch(directory.filePath("keep.txt")));
+        RemoteFileManager manager;
+        manager.browse(manager.localDevice(), {}, directory.path());
+        QTRY_VERIFY(!manager.busy());
+        QCOMPARE(manager.currentPath(), directory.path());
+
+        const auto peer = device("peer");
+        const QVariantMap remoteBrowse{{"kind", "browse"}, {"devices", QVariantList{peer}}, {"path", "/private"}};
+        manager.m_listingRequest = remoteBrowse;
+        manager.m_pendingRequest = remoteBrowse;
+        manager.m_cancelRequested = std::make_shared<std::atomic_bool>(false);
+        QPromise<QVariantMap> pending;
+        pending.start();
+        manager.m_operationWatcher.setFuture(pending.future());
+        manager.setBusy(true);
+        manager.setRemoteEnabled(false);
+        QVERIFY(manager.m_cancelRequested->load());
+        pending.addResult(QVariantMap{{"status", "ok"}, {"device", peer}, {"path", "/private"}});
+        pending.finish();
+        QTRY_VERIFY(!manager.busy());
+        QCOMPARE(manager.currentDeviceId(), QString("local"));
+        QCOMPARE(manager.currentPath(), directory.path());
+        QCOMPARE(manager.entries().value(0).toMap().value("name").toString(), QString("keep.txt"));
+    }
+
+    void onlyVerifiedCredentialsEnterTheSharedCache()
+    {
+        RemoteFileManager manager;
+        const auto peer = device("peer");
+        const auto host = peer.value("ip").toString();
+        const QString username = "unused-fixture-user";
+        const QVariantMap request{{"kind", "browse"}, {"devices", QVariantList{peer}}, {"username", username}};
+        manager.m_pendingRequest = request;
+        manager.m_promptDeviceId = "peer";
+        manager.m_promptUsername = username;
+        manager.setPrompt("credential", "Password");
+        manager.submitCredential("fixture-only");
+        QVERIFY(SshCredentials::get(host, username).isEmpty());
+        QTRY_VERIFY(!manager.busy());
+        QVERIFY(SshCredentials::get(host, username).isEmpty());
+        manager.m_pendingRequest = request;
+        manager.m_activeCredential = {"peer", host, username, "fixture-only", SshCredentials::revision(), false};
+        finishSearch(manager, {{"status", "error"}, {"error", "Unable to open the folder"}, {"credentialAccepted", true}});
+        QTRY_COMPARE(SshCredentials::get(host, username), QString("fixture-only"));
+        SshCredentials::put(host, username, {});
+    }
+
     void savedHostReachabilityRemainsUnknownAndActionable()
     {
         const QVariantMap entry{{"deviceId", "external:fixture"}, {"deviceName", "Saved host"},
@@ -319,6 +408,63 @@ private slots:
         QCoreApplication::setApplicationName("FileTests");
     }
 
+    void appearanceIconImportsAreValidatedAndCopiedIntoWorkspace()
+    {
+        QTemporaryDir workspace;
+        QVERIFY(workspace.isValid());
+        QSettings bootstrap(PilonWorkspace::bootstrapFile(), QSettings::IniFormat);
+        const auto oldRoot = bootstrap.value("workspace/root");
+        const auto oldVersion = bootstrap.value("workspace/version");
+        const auto restore = qScopeGuard([&] {
+            if (oldRoot.isValid()) bootstrap.setValue("workspace/root", oldRoot);
+            else bootstrap.remove("workspace/root");
+            if (oldVersion.isValid()) bootstrap.setValue("workspace/version", oldVersion);
+            else bootstrap.remove("workspace/version");
+            bootstrap.sync();
+        });
+        bootstrap.setValue("workspace/root", workspace.path());
+        bootstrap.setValue("workspace/version", 1);
+        bootstrap.sync();
+        const auto data = PilonWorkspace::addonDataDirectory("files");
+        QCOMPARE(data, workspace.filePath("addon-data/files"));
+        QVERIFY(QDir().mkpath(data));
+
+        RemoteFileManager manager;
+        const auto png = workspace.filePath("source.png");
+        QImage image(32, 24, QImage::Format_ARGB32);
+        image.fill(Qt::red);
+        QVERIFY(image.save(png));
+        const QUrl source = QUrl::fromLocalFile(png);
+        QVERIFY(manager.importAppearanceIcon(source, workspace.path()).isEmpty());
+        const auto first = manager.importAppearanceIcon(source, data);
+        QVERIFY(!first.isEmpty());
+        QCOMPARE(manager.importAppearanceIcon(source, data), first);
+        QVERIFY(QFile::remove(png));
+        const auto importedPng = manager.appearanceIconUrl(first).toLocalFile();
+        QVERIFY(importedPng.startsWith(data + "/appearance-icons/"));
+        QCOMPARE(QImage(importedPng).pixelColor(0, 0), QColor(Qt::red));
+
+        const auto svg = workspace.filePath("source.svg");
+        const QByteArray svgContents =
+            R"(<svg xmlns="http://www.w3.org/2000/svg" width="400" height="200"><rect width="400" height="200" fill="blue"/></svg>)";
+        QVERIFY(writeVersion(svg, svgContents, 1500));
+        const auto second = manager.importAppearanceIcon(QUrl::fromLocalFile(svg), data);
+        QVERIFY(!second.isEmpty());
+        const QImage importedSvg(manager.appearanceIconUrl(second).toLocalFile());
+        QCOMPARE(importedSvg.size(), QSize(256, 128));
+        QCOMPARE(importedSvg.pixelColor(0, 0), QColor(Qt::blue));
+        QVERIFY(QFile::remove(manager.appearanceIconUrl(second).toLocalFile()));
+        QVERIFY(manager.appearanceIconUrl(second).isEmpty());
+
+        QVERIFY(writeVersion(svg, "invalid", 1600));
+        QVERIFY(manager.importAppearanceIcon(QUrl::fromLocalFile(svg), data).isEmpty());
+        image = QImage(2049, 1, QImage::Format_ARGB32);
+        image.fill(Qt::red);
+        QVERIFY(image.save(png));
+        QVERIFY(manager.importAppearanceIcon(source, data).isEmpty());
+        QVERIFY(manager.appearanceIconUrl("../source").isEmpty());
+    }
+
     void sharedCredentialsSurviveClosingTheSavingWindow()
     {
         QTemporaryDir directory;
@@ -400,6 +546,24 @@ private slots:
         manager.setShowHidden(false); QCOMPARE(manager.entries().size(), 2);
         manager.m_searchMode = true; QCOMPARE(manager.entries().size(), 1);
         manager.setShowHidden(true); QCOMPARE(manager.entries().size(), 4);
+    }
+
+    void discardedShareSelectionRemovesOnlyPrivateStaging()
+    {
+        RemoteFileManager manager;
+        QTemporaryDir originals;
+        const auto source = originals.filePath("share.txt");
+        QVERIFY(touch(source));
+        const auto folder = manager.m_previewDirectory.filePath(QUuid::createUuid().toString(QUuid::WithoutBraces));
+        QVERIFY(QDir().mkpath(folder + "/0"));
+        const auto staged = folder + "/0/share.txt";
+        QVERIFY(QFile::copy(source, staged));
+        manager.discardPreparedSelection(QUrl::fromLocalFile(source));
+        QVERIFY(QFile::exists(source));
+        QVERIFY(QFile::exists(staged));
+        manager.discardPreparedSelection(QUrl::fromLocalFile(staged));
+        QVERIFY(!QFileInfo::exists(folder));
+        QVERIFY(QFile::exists(source));
     }
 
     void ordinaryTransfersUseRealSftpInBothDirections()

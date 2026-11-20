@@ -468,7 +468,7 @@ TestCase {
     }
     function test_bottomNavigationUsesLogicalUsableWidth(data) {
         const screen = tabletInput.screenGeometry()
-        const originalFont = Qt.application.font
+        const originalFont = data.fontSize ? tabletInput.applicationFont() : null
         try {
             tabletInput.setScreenGeometry(Qt.rect(0, 0, data.width + 40, data.height + 80))
             appWindow.touchMode = data.touch
@@ -1137,7 +1137,9 @@ TestCase {
         verify(!appWindow.visible)
         verify(!findControl(appWindow,"addonArea").visible)
         compare(findControl(appWindow,"deviceRefreshTimer"),null)
-        compare(findControl(appWindow,"fileWorkspace").sharedManagers().length,4)
+        const fileManagers = findControl(appWindow,"fileWorkspace").sharedManagers()
+        compare(fileManagers.length, 5)
+        verify(fileManagers.every(manager => !manager.busy && !manager.remoteEnabled))
         for (const host of Object.values(appWindow.addonHosts)) {
             compare(host.page,null,host.descriptor.id+" page is not loaded")
             compare(host.runtime,null,host.descriptor.id+" runtime is not loaded")
@@ -1212,12 +1214,51 @@ TestCase {
         verify(!settings.categories.some(section => section.addonId === "devices"))
         verify(appWindow.setAddonEnabled("devices",true) === true)
         verify(appWindow.openSettings("devices")); renderWindow(settings)
-        verify(findControl(settings,"devicesConnectionSection")); verify(findControl(settings,"devicesIncludedSection"))
+        verify(findControl(settings,"devicesConnectionSection")); verify(!findControl(settings,"sshAddDevice"))
         settings.width=600; renderWindow(settings)
         const heading=findControl(settings,"settingsSectionHeading")
-        verify(heading.visible); verify(heading.text.includes("Devices"))
+        verify(heading.visible); verify(heading.text.includes("Tailscale"))
         verify(appWindow.openSettings("application")); renderWindow(settings)
         compare(heading.text,"Application")
+    }
+    function test_disablingSshHidesDevicesAndPreservesTheLocalFolder() {
+        waitForWorkspaceIdle()
+        tabletInput.configureWindow(appWindow, 1024, 700)
+        verify(appWindow.setAddonEnabled("ssh", true) === true)
+        verify(appWindow.selectPage("files"))
+        tryVerify(() => !!appWindow.filesPane)
+        const pane = appWindow.filesPane
+        const files = pane.activeRemoteFiles
+        pane.showLocalFolder(service.workspaceRoot)
+        tryCompare(files, "currentDeviceId", "local")
+        tryCompare(files, "busy", false)
+        const path = files.currentPath
+        const heading = findControl(pane.activeTile, "fileDevicesHeading")
+        verify(heading && heading.visible)
+
+        let result = null
+        Promise.resolve(appWindow.setAddonEnabled("ssh", false)).then(value => result = value)
+        tryVerify(() => result !== null)
+        compare(result, true)
+        tryCompare(heading, "visible", false)
+        tryCompare(findControl(appWindow, "fileSearchDevicesButton"), "visible", false)
+        compare(files.remoteEnabled, false)
+        compare(files.currentPath, path)
+        compare(appWindow.addonHosts.files.context.fileWorkspace.devices.length, 1)
+        compare(appWindow.addonHosts.files.context.assistantManager.remoteEnabled, false)
+        verify(appWindow.setAddonEnabled("ssh", true) === true)
+        tryCompare(heading, "visible", true)
+    }
+    function test_tailscaleProviderLoadsOnRestartWithSshEnabled() {
+        verify(appWindow.setAddonEnabled("ssh", true) === true)
+        verify(appWindow.setAddonEnabled("devices", true) === true)
+        const reopened = createTemporaryObject(mainComponent, test)
+        verify(reopened)
+        tryVerify(() => reopened.extensionsReady && reopened.addonHosts.ssh)
+        const context = reopened.addonHosts.ssh.context
+        verify(context.contributions("discovered-devices").some(row => row.enabled))
+        tryVerify(() => context.fileWorkspace.deviceDiscovery !== null)
+        reopened.close()
     }
     function test_compactSettingsHeadingUsesWindowForeground() {
         appWindow.palette.text="#070707";appWindow.palette.windowText="#d6c3b5"

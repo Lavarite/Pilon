@@ -9,9 +9,10 @@ A changed host key must be investigated rather than accepted automatically.
 Saved passwords use the platform credential store. Disconnection closes the
 session; disabling the add-on preserves its saved configuration and accounts.
 
-Devices supplied by the Devices add-on can be selected when that integration is
-enabled. Direct SSH hosts do not require Tailscale. File browsing and transfers
-are provided by the Files add-on.
+Use **SSH → Connections → Add device** to save a host by IP address or DNS name.
+Saved hosts and enabled peers from the optional Tailscale integration appear in
+SSH and Files. Disabling SSH removes access to other devices while keeping
+local Files available.
 
 ## Source layout
 

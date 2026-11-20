@@ -2,6 +2,8 @@
 #include "../../../src/platform/android/androidcredentials.h"
 #include "../../../src/core/network/localdevice.h"
 #include "../../../src/core/documents/noteimport.h"
+#include "../../../src/core/workspace/pilonworkspace.h"
+#include <QBuffer>
 #include <QMimeDatabase>
 #include <QImageReader>
 #include <QJsonArray>
@@ -18,6 +20,7 @@
 #include <QDir>
 #include <QDirIterator>
 #include <QDrag>
+#include <QDropEvent>
 #include <QFile>
 #include <QFileInfo>
 #include <QIcon>
@@ -26,6 +29,8 @@
 #include <QPainter>
 #include <QPointer>
 #include <QProcess>
+#include <QQuickPaintedItem>
+#include <QQuickWindow>
 #include <QtEndian>
 #include <cmath>
 #include <QQueue>
@@ -41,6 +46,16 @@
 #include <QUuid>
 #include <QWindow>
 #include <QtConcurrentRun>
+
+#ifdef Q_OS_ANDROID
+#include <QJniObject>
+#else
+#include <QDBusArgument>
+#include <QDBusConnection>
+#include <QDBusPendingCallWatcher>
+#include <QDBusPendingReply>
+#include <QDBusUnixFileDescriptor>
+#endif
 
 #include <libssh2.h>
 #include <libssh2_sftp.h>
@@ -154,15 +169,23 @@ QByteArray clipboardSignature(const QMimeData *mime)
 }
 
 thread_local QByteArray keyboardInteractiveCredential;
+thread_local bool keyboardPasswordRequested = false;
+thread_local bool unsupportedKeyboardChallenge = false;
 
 void keyboardInteractiveCallback(const char *, int, const char *, int, int promptCount,
-                                 const LIBSSH2_USERAUTH_KBDINT_PROMPT *,
+                                 const LIBSSH2_USERAUTH_KBDINT_PROMPT *prompts,
                                  LIBSSH2_USERAUTH_KBDINT_RESPONSE *responses, void **)
 {
-    for (int index = 0; index < promptCount; ++index) {
-        responses[index].text = ::strdup(keyboardInteractiveCredential.constData());
-        responses[index].length = static_cast<unsigned int>(keyboardInteractiveCredential.size());
+    if (promptCount == 0) return;
+    const bool password = promptCount == 1 && !prompts[0].echo
+        && QByteArrayView(prompts[0].text, prompts[0].length).trimmed().compare("Password:", Qt::CaseInsensitive) == 0;
+    if (keyboardPasswordRequested || !password) {
+        unsupportedKeyboardChallenge = true;
+        return;
     }
+    keyboardPasswordRequested = true;
+    responses[0].text = ::strdup(keyboardInteractiveCredential.constData());
+    responses[0].length = static_cast<unsigned int>(keyboardInteractiveCredential.size());
 }
 
 QString trustedHostKeySetting(const QString &deviceId)
@@ -349,10 +372,13 @@ QString storedCredential(const QVariantMap &device, const QString &username,
 #endif
 }
 
+using CredentialAccepted = std::function<void(const QString &, const QString &)>;
+
 QVariantMap authenticate(SftpConnection &connection, const QVariantMap &device,
                          const QString &username, const QString &credential,
                          bool credentialProvided, const QByteArray &trustedHostKey,
-                         const std::shared_ptr<std::atomic_bool> &cancelRequested)
+                         const std::shared_ptr<std::atomic_bool> &cancelRequested,
+                         const CredentialAccepted &credentialAccepted = {})
 {
     const auto cancelled = [&] { return cancelRequested && cancelRequested->load(); };
     const QVariantMap cancelledResult{{"status", "cancelled"}};
@@ -370,7 +396,7 @@ QVariantMap authenticate(SftpConnection &connection, const QVariantMap &device,
         return failure(QObject::tr("%1 is unavailable.").arg(deviceName));
     }
     if (deviceId.isEmpty() || host.isEmpty())
-        return failure(QObject::tr("The selected Tailscale device has no usable address."));
+        return failure(QObject::tr("The selected device has no usable address."));
 
     QEventLoop connectLoop;
     QTimer connectPoll;
@@ -430,7 +456,7 @@ QVariantMap authenticate(SftpConnection &connection, const QVariantMap &device,
                      .arg(deviceName, QString::fromLatin1(fingerprint))}};
     }
     if (trustedHostKey != receivedHostKey) {
-        return failure(QObject::tr("The SSH host key for %1 has changed.").arg(deviceName));
+        return failure(QObject::tr("The SSH host key for %1 has changed. Verify it with the server administrator before connecting.").arg(deviceName));
     }
 
     const QByteArray user = username.toUtf8();
@@ -482,7 +508,7 @@ QVariantMap authenticate(SftpConnection &connection, const QVariantMap &device,
     if (cancelled()) return cancelledResult;
 
     QString effectiveCredential = credential;
-    if (effectiveCredential.isEmpty()) effectiveCredential = SshCredentials::get(host, username);
+    if (!credentialProvided && effectiveCredential.isEmpty()) effectiveCredential = SshCredentials::get(host, username);
     if (!libssh2_userauth_authenticated(connection.session) && !credentialProvided
         && effectiveCredential.isEmpty()) {
         effectiveCredential = storedCredential(device, username, cancelRequested);
@@ -509,6 +535,7 @@ QVariantMap authenticate(SftpConnection &connection, const QVariantMap &device,
         }
     }
 
+    bool usedPassword = false;
     if (!libssh2_userauth_authenticated(connection.session) && !effectiveCredential.isEmpty()
         && methods.contains("password")) {
         const QByteArray password = effectiveCredential.toUtf8();
@@ -516,20 +543,28 @@ QVariantMap authenticate(SftpConnection &connection, const QVariantMap &device,
                                      static_cast<unsigned int>(user.size()),
                                      password.constData(),
                                      static_cast<unsigned int>(password.size()), nullptr); });
+        usedPassword = libssh2_userauth_authenticated(connection.session);
     }
 
     if (!libssh2_userauth_authenticated(connection.session) && !effectiveCredential.isEmpty()
         && methods.contains("keyboard-interactive")) {
         keyboardInteractiveCredential = effectiveCredential.toUtf8();
+        keyboardPasswordRequested = false;
+        unsupportedKeyboardChallenge = false;
         call([&] { return libssh2_userauth_keyboard_interactive_ex(
             connection.session, user.constData(), static_cast<unsigned int>(user.size()),
             keyboardInteractiveCallback); });
+        keyboardInteractiveCredential.fill('\0');
         keyboardInteractiveCredential.clear();
+        if (unsupportedKeyboardChallenge && !libssh2_userauth_authenticated(connection.session))
+            return failure(QObject::tr("%1 requires an interactive SSH challenge. Use the SSH terminal for this connection.").arg(deviceName));
+        usedPassword = keyboardPasswordRequested && !unsupportedKeyboardChallenge
+            && libssh2_userauth_authenticated(connection.session);
     }
     if (cancelled()) return cancelledResult;
 
     if (!libssh2_userauth_authenticated(connection.session)) {
-        SshCredentials::put(host, username, {});
+        if (!credentialProvided) SshCredentials::put(host, username, {});
         return {{QStringLiteral("status"), QStringLiteral("credential")},
                 {QStringLiteral("deviceId"), deviceId},
                 {QStringLiteral("username"), username},
@@ -542,7 +577,7 @@ QVariantMap authenticate(SftpConnection &connection, const QVariantMap &device,
                            .arg(deviceName)}};
     }
 
-    if (!effectiveCredential.isEmpty()) SshCredentials::put(host, username, effectiveCredential);
+    if (usedPassword && credentialProvided && credentialAccepted) credentialAccepted(deviceId, username);
     connection.socket.setSocketOption(QAbstractSocket::LowDelayOption, 1);
     const int sftpResult = call([&] {
         connection.sftp = libssh2_sftp_init(connection.session);
@@ -1407,7 +1442,8 @@ QVariantMap previewFile(const QString &path, const QString &root, const std::sha
 
 QVariantMap executeRequest(const QVariantMap &request,
                            const std::shared_ptr<std::atomic_bool> &cancelRequested,
-                           const std::function<void(const QVariantMap &)> &searchResult = {})
+                           const std::function<void(const QVariantMap &)> &searchResult = {},
+                           const CredentialAccepted &credentialAccepted = {})
 {
     static std::once_flag initializationFlag;
     static int initializationResult = -1;
@@ -1435,7 +1471,7 @@ QVariantMap executeRequest(const QVariantMap &request,
         const QVariantMap authentication = authenticate(
             connection, device, username,
             credentials.value(deviceId).toString(), credentials.contains(deviceId),
-            trustedKeys.value(deviceId).toByteArray(), cancelRequested);
+            trustedKeys.value(deviceId).toByteArray(), cancelRequested, credentialAccepted);
         if (!authentication.isEmpty())
             return authentication;
         if (cancelRequested->load())
@@ -1471,7 +1507,7 @@ QVariantMap executeRequest(const QVariantMap &request,
                 *connection, device, device.value("username").toString().isEmpty()
                     ? username : device.value("username").toString(), credentials.value(deviceId).toString(),
                 credentials.contains(deviceId),
-                trustedKeys.value(deviceId).toByteArray(), cancelRequested);
+                trustedKeys.value(deviceId).toByteArray(), cancelRequested, credentialAccepted);
             if (!authentication.isEmpty())
                 return authentication;
             connections.insert(deviceId, connection);
@@ -1494,6 +1530,10 @@ QVariantMap executeRequest(const QVariantMap &request,
             }
             prepareTransfer(total);
             const auto folder = request.value("temporaryDirectory").toString();
+            bool selectionReady = false;
+            const auto cleanup = qScopeGuard([&] {
+                if (!selectionReady && !folder.isEmpty()) QDir(folder).removeRecursively();
+            });
             int index = 0;
             for (const auto &value : request.value("entries").toList()) {
                 const auto entry = value.toMap();
@@ -1504,6 +1544,7 @@ QVariantMap executeRequest(const QVariantMap &request,
                     return failure(QObject::tr("Choose files to import."));
                 QString local = path;
                 if (!connection->local) {
+                    if (folder.isEmpty()) return failure(QObject::tr("Unable to prepare the selected files."));
                     const auto directory = folder + '/' + QString::number(index++);
                     if (!QDir().mkpath(directory)) return failure(QObject::tr("Unable to prepare the selected files."));
                     local = directory + '/' + name;
@@ -1512,6 +1553,8 @@ QVariantMap executeRequest(const QVariantMap &request,
                 }
                 files.append(QUrl::fromLocalFile(local));
             }
+            if (cancelRequested->load()) return {{"status", "cancelled"}};
+            selectionReady = true;
             return {{"status", "ok"}, {"operation", "select"}, {"files", files}};
         }
         if (kind == QLatin1String("deleteMany")) {
@@ -1718,7 +1761,7 @@ QVariantMap executeRequest(const QVariantMap &request,
         const QVariantMap authentication = authenticate(
             connection, device, username, credentials.value(deviceId).toString(),
             credentials.contains(deviceId),
-            trustedKeys.value(deviceId).toByteArray(), cancelRequested);
+            trustedKeys.value(deviceId).toByteArray(), cancelRequested, credentialAccepted);
         if (!authentication.isEmpty())
             return authentication;
         if (cancelRequested->load())
@@ -1877,14 +1920,14 @@ QVariantMap executeRequest(const QVariantMap &request,
             : device.value("username").toString().isEmpty() ? username : device.value("username").toString();
         device.insert("username", deviceUsername);
         searches.append(QtConcurrent::run(&searchPool,
-            [device, deviceId, deviceUsername, credentials, trustedKeys, query, cancelRequested, searchResult] {
+            [device, deviceId, deviceUsername, credentials, trustedKeys, query, cancelRequested, searchResult, credentialAccepted] {
                 if (cancelRequested->load()) return QVariantMap{{"status", "cancelled"}};
                 if (deviceId != "local" && !validUsername(deviceUsername))
                     return failure(QObject::tr("Enter a valid SSH username for %1.").arg(device.value("name").toString()));
                 SftpConnection connection;
                 const auto authentication = authenticate(connection, device, deviceUsername,
                     credentials.value(deviceId).toString(), credentials.contains(deviceId),
-                    trustedKeys.value(deviceId).toByteArray(), cancelRequested);
+                    trustedKeys.value(deviceId).toByteArray(), cancelRequested, credentialAccepted);
                 if (!authentication.isEmpty()) return authentication;
                 if (cancelRequested->load()) return QVariantMap{{"status", "cancelled"}};
                 const QString root = canonicalPath(connection, ".");
@@ -1924,6 +1967,85 @@ QVariantMap executeRequest(const QVariantMap &request,
     }
     return result;
 }
+}
+
+QStringList RemoteFileManager::appearanceIconNames() const
+{
+    const QDir icons(QStringLiteral(":/qt/qml/Pilon/icons"));
+    auto names = icons.entryList({QStringLiteral("*.svg")}, QDir::Files, QDir::Name);
+    for (auto &name : names)
+        name.chop(4);
+    return names;
+}
+
+QString RemoteFileManager::importAppearanceIcon(const QUrl &source, const QString &directory) const
+{
+    constexpr qint64 maxBytes = 2 * 1024 * 1024;
+    const QDir data(directory);
+    if (directory.isEmpty() || data.absolutePath() != PilonWorkspace::addonDataDirectory("files")
+        || !data.exists() || QFileInfo(data.absolutePath()).isSymLink())
+        return {};
+
+    QString input;
+    if (source.isLocalFile()) {
+        const QFileInfo local(source.toLocalFile());
+        if (!local.isFile() || local.size() > maxBytes)
+            return {};
+        input = local.absoluteFilePath();
+    }
+#ifdef Q_OS_ANDROID
+    else if (source.scheme() == QStringLiteral("content")) {
+        input = source.toString(QUrl::FullyEncoded);
+    }
+#endif
+    if (input.isEmpty())
+        return {};
+    QFile file(input);
+    if (!file.open(QIODevice::ReadOnly))
+        return {};
+    QBuffer contents;
+    contents.setData(file.read(maxBytes + 1));
+    if (contents.size() > maxBytes || !contents.open(QIODevice::ReadOnly))
+        return {};
+    QImageReader reader(&contents);
+    reader.setDecideFormatFromContent(true);
+    const auto format = reader.format();
+    const QSize size = reader.size();
+    if ((format != "png" && format != "svg") || !size.isValid() || size.isEmpty()
+        || size.width() > 2048 || size.height() > 2048)
+        return {};
+    const QSize iconSize = size.boundedTo(QSize(256, 256));
+    if (iconSize != size)
+        reader.setScaledSize(size.scaled(iconSize, Qt::KeepAspectRatio));
+    const QImage image = reader.read();
+    if (image.isNull())
+        return {};
+
+    constexpr auto storageName = "appearance-icons";
+    const QFileInfo storage(data.filePath(storageName));
+    if (storage.isSymLink() || !data.mkpath(storageName))
+        return {};
+    const QString name = QStringLiteral("custom-") +
+        QString::fromLatin1(QCryptographicHash::hash(contents.data(), QCryptographicHash::Sha256).toHex());
+    const QString destination = QDir(storage.absoluteFilePath()).filePath(name + ".png");
+    if (QFileInfo(destination).isSymLink())
+        return {};
+    QSaveFile saved(destination);
+    if (!saved.open(QIODevice::WriteOnly) || !image.save(&saved, "PNG") || !saved.commit())
+        return {};
+    return name;
+}
+
+QUrl RemoteFileManager::appearanceIconUrl(const QString &name) const
+{
+    static const QRegularExpression key(QStringLiteral("\\Acustom-[a-f0-9]{64}\\z"));
+    if (!key.match(name).hasMatch())
+        return {};
+    const QString root = PilonWorkspace::addonDataDirectory("files");
+    const QFileInfo folder(QDir(root).filePath("appearance-icons"));
+    const QFileInfo file(QDir(folder.filePath()).filePath(name + ".png"));
+    return !QFileInfo(root).isSymLink() && !folder.isSymLink() && !file.isSymLink() && file.isFile()
+        ? QUrl::fromLocalFile(file.absoluteFilePath()) : QUrl{};
 }
 
 RemoteFileManager::RemoteFileManager(QObject *parent)
@@ -1990,6 +2112,106 @@ void RemoteFileManager::setAutomaticRefreshEnabled(bool enabled)
     emit automaticRefreshEnabledChanged();
 }
 QVariantMap RemoteFileManager::localDevice() const { return pilonLocalDevice(); }
+
+namespace {
+bool usesRemoteFiles(const QVariantMap &request)
+{
+    const auto devices = request.value("devices").toList();
+    return std::any_of(devices.cbegin(), devices.cend(), [](const QVariant &device) {
+        return device.toMap().value("id") != "local";
+    });
+}
+
+bool containsRemoteEntries(const QVariantList &entries)
+{
+    return std::any_of(entries.cbegin(), entries.cend(), [](const QVariant &entry) {
+        return entry.toMap().value("deviceId") != "local";
+    });
+}
+
+class FileDragPreview final : public QQuickPaintedItem
+{
+public:
+    FileDragPreview(QQuickWindow *window, const QPixmap &pixmap, QPointF hotSpot)
+        : QQuickPaintedItem(window->contentItem()), m_pixmap(pixmap), m_hotSpot(hotSpot)
+    {
+        setObjectName(QStringLiteral("filesDragPreview"));
+        setAcceptedMouseButtons(Qt::NoButton);
+        setSize(pixmap.deviceIndependentSize());
+        setZ(1000);
+        setVisible(false);
+        window->installEventFilter(this);
+    }
+
+    void paint(QPainter *painter) override { painter->drawPixmap(QPointF{}, m_pixmap); }
+
+private:
+    bool eventFilter(QObject *, QEvent *event) override
+    {
+        switch (event->type()) {
+        case QEvent::DragEnter:
+        case QEvent::DragMove:
+            setPosition(parentItem()->mapFromScene(static_cast<QDropEvent *>(event)->position()) - m_hotSpot);
+            setVisible(true);
+            break;
+        case QEvent::DragLeave:
+        case QEvent::Drop:
+            setVisible(false);
+            break;
+        default:
+            break;
+        }
+        return false;
+    }
+
+    QPixmap m_pixmap;
+    QPointF m_hotSpot;
+};
+}
+
+void RemoteFileManager::setRemoteEnabled(bool enabled)
+{
+    if (m_remoteEnabled == enabled) return;
+    m_remoteEnabled = enabled;
+    if (!enabled) {
+        if (m_previewEntry.value("deviceId").toString() != "local") clearPreview();
+        if (usesRemoteFiles(m_listingRequest) || usesRemoteFiles(m_pendingRequest)
+            || usesRemoteFiles(m_queuedRequest)) {
+            const auto local = localDevice();
+            auto listing = m_listingRequest;
+            if (listing.isEmpty() || usesRemoteFiles(listing)) {
+                const QString path = m_currentDeviceId == "local" && !m_currentPath.isEmpty()
+                    ? m_currentPath : QStringLiteral(".");
+                listing = {{"kind", "browse"}, {"devices", QVariantList{local}},
+                    {"username", local.value("username")}, {"path", path}};
+            }
+            const bool finishing = m_busy || m_searching || m_operationWatcher.isRunning();
+            cancel();
+            clearPrompt();
+            m_listingRequest.clear();
+            m_entries.clear();
+            m_currentDeviceId.clear();
+            m_currentDeviceName.clear();
+            m_currentHost.clear();
+            m_currentUsername.clear();
+            m_currentPath.clear();
+            m_searchMode = false;
+            setErrorMessage({});
+            updateFileWatches();
+            emit entriesChanged();
+            emit locationChanged();
+            if (finishing) m_queuedRequest = listing;
+            else {
+                m_pendingRequest.clear();
+                m_queuedRequest.clear();
+                startRequest(listing);
+            }
+        }
+    }
+    emit undoChanged();
+    emit clipboardChanged();
+    emit remoteEnabledChanged();
+}
 QVariantList RemoteFileManager::bookmarks() const { return m_bookmarks; }
 bool RemoteFileManager::busy() const { return m_busy; }
 bool RemoteFileManager::searching() const { return m_searching; }
@@ -2008,10 +2230,17 @@ QUrl RemoteFileManager::previewUrl() const { return m_previewUrl; }
 bool RemoteFileManager::clipboardAvailable() const
 {
     const auto *mime = QGuiApplication::clipboard()->mimeData();
+    if (!m_remoteEnabled) {
+        const auto entries = clipboardFileEntries(mime);
+        return !entries.isEmpty() && !containsRemoteEntries(entries);
+    }
     return mime && (mime->hasFormat("application/x-pilon-remote-entries") || mime->hasUrls()
                     || mime->hasFormat("x-special/gnome-copied-files"));
 }
-bool RemoteFileManager::canUndo() const { return !m_undoStack.isEmpty(); }
+bool RemoteFileManager::canUndo() const
+{
+    return !m_undoStack.isEmpty() && (m_remoteEnabled || !usesRemoteFiles(m_undoStack.constLast().toMap()));
+}
 bool RemoteFileManager::credentialSavingAvailable() const
 {
 #ifdef Q_OS_ANDROID
@@ -2052,6 +2281,139 @@ void RemoteFileManager::prepareSelection(const QVariantList &entries, const QStr
     startRequest({{"kind", "select"}, {"devices", devices}, {"entries", entries}, {"username", username},
         {"temporaryDirectory", m_previewDirectory.filePath(QUuid::createUuid().toString(QUuid::WithoutBraces))}});
 }
+
+void RemoteFileManager::discardPreparedSelection(const QUrl &file)
+{
+    if (!file.isLocalFile() || !m_previewDirectory.isValid()) return;
+    const auto root = m_previewDirectory.path() + '/';
+    const auto path = QDir::cleanPath(file.toLocalFile());
+    if (!path.startsWith(root)) return;
+    const auto folder = path.mid(root.size()).section('/', 0, 0);
+    if (!QUuid::fromString(folder).isNull()) QDir(root + folder).removeRecursively();
+}
+
+void RemoteFileManager::shareFile(const QUrl &url, bool requirePdf)
+{
+    if (m_busy || m_sharing) {
+        emit shareFinished(false);
+        return;
+    }
+    const QFileInfo file(url.toLocalFile());
+    if (!url.isLocalFile() || !file.isAbsolute() || !file.isFile() || !file.isReadable()) {
+        discardPreparedSelection(url);
+        setErrorMessage(tr("The file is unavailable for sharing."));
+        emit shareFinished(false);
+        return;
+    }
+
+    m_sharing = true;
+    m_shareSource = url;
+    const auto generation = ++m_shareGeneration;
+    setErrorMessage({});
+    setBusy(true);
+#ifdef Q_OS_ANDROID
+    if (!QNativeInterface::QAndroidApplication::isActivityContext()) {
+        finishSharing(false, tr("Open Pilon before sharing a file."));
+        return;
+    }
+    const auto context = QNativeInterface::QAndroidApplication::context();
+    const auto source = file.absoluteFilePath();
+    auto *retention = new QFutureWatcher<QString>(this);
+    connect(retention, &QFutureWatcher<QString>::finished, this, [this, retention, context, generation, requirePdf] {
+        const QString retained = retention->result();
+        retention->deleteLater();
+        if (retained.isEmpty()) {
+            if (generation == m_shareGeneration) finishSharing(false, tr("Unable to prepare the file for sharing."));
+            return;
+        }
+        if (generation == m_shareGeneration) {
+            const auto mime = requirePdf ? QStringLiteral("application/pdf") : QMimeDatabase().mimeTypeForFile(retained).name();
+            auto request = QNativeInterface::QAndroidApplication::runOnAndroidMainThread([context, retained, mime] {
+                return QVariant(bool(QJniObject::callStaticMethod<jboolean>("org/pilon/PilonSharing", "shareFile",
+                    "(Landroid/app/Activity;Ljava/lang/String;Ljava/lang/String;)Z", context.object(),
+                    QJniObject::fromString(retained).object<jstring>(), QJniObject::fromString(mime).object<jstring>())));
+            });
+            request.waitForFinished();
+            if (request.result().toBool()) { finishSharing(true); return; }
+        }
+        const QFileInfo copy(retained);
+        QFile::remove(copy.filePath());
+        QDir().rmdir(copy.absolutePath());
+        if (generation == m_shareGeneration) finishSharing(false, tr("Unable to open the system share menu."));
+    });
+    retention->setFuture(QtConcurrent::run([context, source, requirePdf] {
+        return QJniObject::callStaticObjectMethod("org/pilon/PilonSharing", "retainFile",
+            "(Landroid/content/Context;Ljava/lang/String;Z)Ljava/lang/String;", context.object(),
+            QJniObject::fromString(source).object<jstring>(), jboolean(requirePdf)).toString();
+    }));
+#else
+    Q_UNUSED(requirePdf);
+    QFile attachment(file.absoluteFilePath());
+    if (!attachment.open(QIODevice::ReadOnly)) {
+        finishSharing(false, tr("The file is unavailable for sharing."));
+        return;
+    }
+
+    auto bus = QDBusConnection::sessionBus();
+    if (!bus.isConnected()) { finishSharing(false, tr("File sharing is unavailable on this desktop.")); return; }
+    const QString token = QStringLiteral("pilon_") + QUuid::createUuid().toString(QUuid::Id128);
+    QString sender = bus.baseService().mid(1);
+    sender.replace('.', '_');
+    m_shareRequestPath = QStringLiteral("/org/freedesktop/portal/desktop/request/") + sender + '/' + token;
+    if (!bus.connect(QStringLiteral("org.freedesktop.portal.Desktop"), m_shareRequestPath,
+        QStringLiteral("org.freedesktop.portal.Request"), QStringLiteral("Response"), this, SLOT(handlePortalShareResponse(uint,QVariantMap)))) {
+        finishSharing(false, tr("File sharing is unavailable on this desktop."));
+        return;
+    }
+
+    QDBusArgument attachments;
+    attachments.beginArray(QMetaType::fromType<QDBusUnixFileDescriptor>());
+    attachments << QDBusUnixFileDescriptor(attachment.handle());
+    attachments.endArray();
+    auto message = QDBusMessage::createMethodCall(QStringLiteral("org.freedesktop.portal.Desktop"),
+        QStringLiteral("/org/freedesktop/portal/desktop"), QStringLiteral("org.freedesktop.portal.Email"),
+        QStringLiteral("ComposeEmail"));
+    message << QString{} << QVariantMap{{"handle_token", token}, {"attachment_fds", QVariant::fromValue(attachments)}};
+    auto *call = new QDBusPendingCallWatcher(bus.asyncCall(message, 5000), this);
+    connect(call, &QDBusPendingCallWatcher::finished, this, [this, generation, call] {
+        const QDBusPendingReply<QDBusObjectPath> reply = *call;
+        call->deleteLater();
+        if (m_sharing && generation == m_shareGeneration && (reply.isError() || reply.value().path() != m_shareRequestPath))
+            finishSharing(false, tr("File sharing is unavailable on this desktop."));
+    });
+    QTimer::singleShot(30000, this, [this, generation] {
+        if (m_sharing && generation == m_shareGeneration)
+            finishSharing(false, tr("The desktop did not respond to file sharing."));
+    });
+#endif
+}
+
+void RemoteFileManager::finishSharing(bool opened, const QString &error)
+{
+#ifndef Q_OS_ANDROID
+    if (!m_shareRequestPath.isEmpty()) {
+        QDBusConnection::sessionBus().disconnect(QStringLiteral("org.freedesktop.portal.Desktop"),
+            m_shareRequestPath, QStringLiteral("org.freedesktop.portal.Request"), QStringLiteral("Response"),
+            this, SLOT(handlePortalShareResponse(uint,QVariantMap)));
+        m_shareRequestPath.clear();
+    }
+    if (!opened) discardPreparedSelection(m_shareSource);
+#else
+    discardPreparedSelection(m_shareSource);
+#endif
+    m_shareSource.clear();
+    m_sharing = false;
+    setErrorMessage(error);
+    setBusy(false);
+    emit shareFinished(opened);
+}
+
+#ifndef Q_OS_ANDROID
+void RemoteFileManager::handlePortalShareResponse(uint response, const QVariantMap &)
+{
+    finishSharing(response == 0, response > 1 ? tr("Unable to open the desktop email composer.") : QString{});
+}
+#endif
 
 void RemoteFileManager::viewFile(const QVariantMap &entry, const QString &username)
 {
@@ -2255,7 +2617,7 @@ void RemoteFileManager::undo()
 
 void RemoteFileManager::copyToClipboard(const QVariantList &entries, bool cut)
 {
-    if (entries.isEmpty()) return;
+    if (entries.isEmpty() || (!m_remoteEnabled && containsRemoteEntries(entries))) return;
     auto *mime = fileMimeData(entries);
     mime->setData("application/x-kde-cutselection", cut ? "1" : "0");
     if (mime->hasUrls()) {
@@ -2280,7 +2642,7 @@ void RemoteFileManager::pasteFromClipboard(const QVariantMap &device, const QStr
         || mime->data("x-special/gnome-copied-files").startsWith("cut\n");
     const QByteArray signature = clipboardSignature(mime);
     pasteEntries(entries, device, username, directory, cut);
-    if (cut) m_pendingRequest.insert("cutClipboardSignature", signature);
+    if (cut && m_busy) m_pendingRequest.insert("cutClipboardSignature", signature);
 }
 
 void RemoteFileManager::pasteLocalUrls(const QVariantList &urls, const QVariantMap &device,
@@ -2306,7 +2668,7 @@ void RemoteFileManager::reloadBookmarks()
 void RemoteFileManager::startDrag(const QVariantList &entries, const QUrl &iconSource,
                                    const QColor &iconColour, const QColor &textColour, const QPointF &grabOffset)
 {
-    if (entries.isEmpty() || m_busy || m_searching)
+    if (entries.isEmpty() || m_busy || m_searching || (!m_remoteEnabled && containsRemoteEntries(entries)))
         return;
     auto *mimeData = fileMimeData(entries);
     auto *drag = new QDrag(this);
@@ -2318,7 +2680,7 @@ void RemoteFileManager::startDrag(const QVariantList &entries, const QUrl &iconS
     dragPixmap.fill(Qt::transparent);
     const QString iconPath = iconSource.scheme() == "qrc" ? ':' + iconSource.path() : iconSource.toLocalFile();
     QPixmap icon = QIcon(iconPath).pixmap(QSize(44, 44), scale);
-    if (!icon.isNull()) {
+    if (!icon.isNull() && iconColour.alpha() > 0) {
         QPainter tint(&icon);
         tint.setCompositionMode(QPainter::CompositionMode_SourceIn);
         tint.fillRect(icon.rect(), iconColour);
@@ -2351,9 +2713,27 @@ void RemoteFileManager::startDrag(const QVariantList &entries, const QUrl &iconS
             }
         }
     }
-    drag->setPixmap(dragPixmap);
-    drag->setHotSpot(iconBounds.topLeft().toPoint() + grabOffset.toPoint());
+    const QPointF hotSpot = iconBounds.topLeft() + grabOffset;
+    QPointer<FileDragPreview> preview;
+    auto *window = qobject_cast<QQuickWindow *>(QGuiApplication::focusWindow());
+    // Hyprland places its Wayland drag surface at the bottom-right of the pointer.
+    // Keep the native drag and move the painted preview with in-window drop events.
+    const bool needsPreview = window && QGuiApplication::platformName().startsWith("wayland")
+        && qEnvironmentVariable("XDG_CURRENT_DESKTOP").split(':').contains("Hyprland", Qt::CaseInsensitive);
+    if (needsPreview) {
+        preview = new FileDragPreview(window, dragPixmap, hotSpot);
+        QPixmap blank(1, 1);
+        blank.fill(Qt::transparent);
+        drag->setPixmap(blank);
+    } else {
+        drag->setPixmap(dragPixmap);
+        drag->setHotSpot(hotSpot.toPoint());
+    }
     drag->exec(Qt::CopyAction | Qt::MoveAction | Qt::LinkAction, Qt::MoveAction);
+    if (preview) {
+        preview->setVisible(false);
+        preview->deleteLater();
+    }
     drag->deleteLater();
 }
 
@@ -2378,19 +2758,20 @@ void RemoteFileManager::submitCredentialInternal(const QString &credential, bool
     sanitized.remove(QLatin1Char('\r'));
     sanitized.remove(QLatin1Char('\n'));
     QString account = m_promptUsername;
+    QString host;
     const auto devices = m_pendingRequest.value("devices").toList();
     for (const auto &value : devices) {
         const auto device = value.toMap();
         if (device.value("id") != m_promptDeviceId) continue;
         if (account.isEmpty()) account = device.value("username").toString();
         if (account.isEmpty()) account = m_pendingRequest.value("username").toString();
-        SshCredentials::put(device.value("ip").toString(), account, sanitized);
+        host = device.value("ip").toString().trimmed();
+        break;
     }
-    m_credentials.insert(m_promptDeviceId + '\n' + account, sanitized);
-    if (save && !sanitized.isEmpty()) saveCredential(m_promptDeviceId, account, sanitized);
+    if (host.isEmpty() || sanitized.isEmpty()) return;
+    const CredentialAttempt attempt{m_promptDeviceId, host, account, sanitized, SshCredentials::revision(), save};
     const QVariantMap request = m_pendingRequest;
-    clearPrompt();
-    startRequest(request);
+    startRequest(request, &attempt);
 }
 
 void RemoteFileManager::saveCredential(const QString &deviceId, const QString &username,
@@ -2484,6 +2865,15 @@ void RemoteFileManager::cancelPrompt()
 
 void RemoteFileManager::cancel()
 {
+    if (m_sharing) {
+        ++m_shareGeneration;
+#ifndef Q_OS_ANDROID
+        auto closeRequest = QDBusMessage::createMethodCall(QStringLiteral("org.freedesktop.portal.Desktop"),
+            m_shareRequestPath, QStringLiteral("org.freedesktop.portal.Request"), QStringLiteral("Close"));
+        QDBusConnection::sessionBus().asyncCall(closeRequest);
+#endif
+        finishSharing(false);
+    }
     // Publish cancellation before shutdown wakes a blocked SSH worker.
     if (m_cancelRequested)
         m_cancelRequested->store(true);
@@ -2682,8 +3072,12 @@ QVariantMap RemoteFileManager::transfer() const
         {"speed", speed}, {"remaining", m_transfer->totalKnown && speed > 0 ? qMax(0.0, (m_transfer->total - m_transfer->overall) / speed) : -1.0}};
 }
 
-void RemoteFileManager::startRequest(const QVariantMap &request)
+void RemoteFileManager::startRequest(const QVariantMap &request, const CredentialAttempt *credential)
 {
+    if (!m_remoteEnabled && usesRemoteFiles(request)) {
+        setErrorMessage(tr("Enable the SSH add-on to access other devices."));
+        return;
+    }
     const QString kind = request.value(QStringLiteral("kind")).toString();
     const bool searchRequest = kind == QLatin1String("search");
     if (m_operationWatcher.isRunning()) {
@@ -2714,6 +3108,7 @@ void RemoteFileManager::startRequest(const QVariantMap &request)
     }
     if (!resumeSearch) setErrorMessage(request.value("operationError").toString());
     m_pendingRequest = request;
+    m_activeCredential = credential ? *credential : CredentialAttempt{};
     if (resumeSearch) m_pendingRequest.insert("previousEntries", m_entries);
 
     if (searchRequest && !resumeSearch && !refreshing) {
@@ -2742,7 +3137,9 @@ void RemoteFileManager::startRequest(const QVariantMap &request)
         auto account = device.value("username").toString();
         if (account.isEmpty()) account = request.value("username").toString();
         const auto key = id + '\n' + account;
-        if (credentials.contains(key)) credentials.insert(id, credentials.value(key));
+        if (id == m_activeCredential.deviceId && account == m_activeCredential.username)
+            credentials.insert(id, m_activeCredential.password);
+        else if (credentials.contains(key)) credentials.insert(id, credentials.value(key));
     }
     preparedRequest.insert(QStringLiteral("credentials"), credentials);
     preparedRequest.insert(QStringLiteral("trustedKeys"), trustedHostKeys(devices));
@@ -2758,7 +3155,8 @@ void RemoteFileManager::startRequest(const QVariantMap &request)
         setBusy(true);
     QPointer<RemoteFileManager> manager(this);
     m_operationWatcher.setFuture(QtConcurrent::run(
-        [preparedRequest, cancellation = m_cancelRequested, progress = m_transfer, manager, generation] {
+        [preparedRequest, cancellation = m_cancelRequested, progress = m_transfer, manager, generation,
+         credentialId = m_activeCredential.deviceId, credentialUsername = m_activeCredential.username] {
             auto *previousProgress = std::exchange(transferProgress, progress.get());
             auto resetProgress = qScopeGuard([&] { transferProgress = previousProgress; });
             const auto searchResult = [manager, generation](const QVariantMap &entry) {
@@ -2772,10 +3170,16 @@ void RemoteFileManager::startRequest(const QVariantMap &request)
                     },
                     Qt::QueuedConnection);
             };
-            auto result = executeRequest(preparedRequest, cancellation, searchResult);
+            std::atomic_bool accepted{false};
+            auto result = executeRequest(preparedRequest, cancellation, searchResult,
+                [&](const QString &id, const QString &username) {
+                    if (id == credentialId && username == credentialUsername) accepted.store(true);
+                });
             if (cancellation->load()) {
                 result.insert("status", "cancelled");
                 result.remove("error");
+            } else if (accepted.load()) {
+                result.insert("credentialAccepted", true);
             }
             return result;
         }));
@@ -2800,7 +3204,14 @@ void RemoteFileManager::handleOperationFinished()
     const bool mutation = kind == "deleteMany" || kind == "delete" || kind == "paste"
         || kind == "move" || kind == "undo" || kind == "mkdir" || kind == "upload" || kind == "uploadMany" || kind == "archive" || kind == "extract";
     const QVariantMap result = m_operationWatcher.result();
+    const auto credential = std::exchange(m_activeCredential, CredentialAttempt{});
     const QString status = result.value(QStringLiteral("status")).toString();
+    if (result.value("credentialAccepted").toBool() && !credential.password.isEmpty()
+        && (!m_cancelRequested || !m_cancelRequested->load()) && credential.revision == SshCredentials::revision()) {
+        m_credentials.remove(credential.deviceId + '\n' + credential.username);
+        SshCredentials::put(credential.host, credential.username, credential.password);
+        if (credential.save) saveCredential(credential.deviceId, credential.username, credential.password);
+    }
     const auto refreshListing = [&](const QString &error = QString{}) {
         auto request = m_listingRequest;
         if (request.isEmpty() && result.contains("device") && !result.value("refreshPath").toString().isEmpty())
@@ -2886,7 +3297,13 @@ void RemoteFileManager::handleOperationFinished()
     if (!operation.isEmpty()) {
         m_pendingRequest.clear();
         if (operation == "openPilon") { emit pilonFileReady(result.value("file").toUrl()); return; }
-        if (operation == "select") { emit selectionReady(result.value("files").toList()); return; }
+        if (operation == "select") {
+            const auto files = result.value("files").toList();
+            if (m_cancelRequested && m_cancelRequested->load()) {
+                for (const auto &file : files) discardPreparedSelection(file.toUrl());
+            } else emit selectionReady(files);
+            return;
+        }
         if (operation == QLatin1String("view")) {
             const QString localPath = result.value(QStringLiteral("localPath")).toString();
             const QString name = result.value(QStringLiteral("name")).toString();

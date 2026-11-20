@@ -15,7 +15,6 @@ Control {
     palette.placeholderText: mutedTextColour; palette.highlight: accentColour; palette.highlightedText: accentTextColour
 
     required property real sidebarWidth
-    required property var tailscaleManager
     required property var fileWorkspace
     required property var remoteFiles
     required property string username
@@ -38,8 +37,8 @@ Control {
     property bool searchVisible: false
     property string searchQuery: ""
     property var selectedDeviceIds: []
-    readonly property bool localSearchOnly: Qt.platform.os === "android"
-        && selectedDeviceIds.length === 1 && selectedDeviceIds[0] === "local"
+    readonly property bool localSearchOnly: !fileWorkspace.sshEnabled || (Qt.platform.os === "android"
+        && selectedDeviceIds.length === 1 && selectedDeviceIds[0] === "local")
     property var addonContext: null
     property bool canAddToNote: false
     property bool canCreateNote: false
@@ -129,7 +128,7 @@ Control {
         anchors.right: parent.right
         anchors.rightMargin: 16
         y: 16
-        readonly property bool compact: width < 600
+        readonly property bool compact: filesPage.fileWorkspace.sshEnabled && width < 600
         height: compact ? 96 : 56
         radius: 16
         color: filesPage.withOpacity(filesPage.secondaryColour, 0.68)
@@ -179,9 +178,10 @@ Control {
                 id: searchDevicesButton
                 objectName: "fileSearchDevicesButton"
 
+                visible: filesPage.fileWorkspace.sshEnabled
                 x: filesUsername.visible ? filesUsername.width + 24 : 0
-                width: fileSearchBar.compact ? Math.max(0, parent.width - x)
-                       : Math.min(170, Math.max(112, parent.width * 0.25))
+                width: !visible ? 0 : fileSearchBar.compact ? Math.max(0, parent.width - x)
+                    : Math.min(170, Math.max(112, parent.width * 0.25))
                 height: 34
                 text: filesPage.selectionSummary()
                 rightPadding: 34
@@ -425,6 +425,8 @@ Control {
             const device = fileWorkspace.deviceForId(entry.deviceId)
             if (device !== null)
                 manager.browse(device, entry.username || fileWorkspace.usernameForDevice(entry.deviceId), entry.path)
+        } else if (!fileWorkspace.sshEnabled && !manager.currentDeviceId) {
+            manager.browse(manager.localDevice, manager.localDevice.username, fileWorkspace.localHomePath)
         }
         return tile
     }
@@ -962,11 +964,18 @@ Control {
     }
 
     Connections {
-        target: filesPage.tailscaleManager
-        function onIncludedDevicesChanged() { filesPage.syncSelectedDevices() }
-    }
-    Connections {
         target: filesPage.fileWorkspace
+        function onDevicesChanged() { filesPage.syncSelectedDevices() }
+        function onSshEnabledChanged() {
+            if (filesPage.fileWorkspace.sshEnabled) return
+            searchDevicesPopup.close()
+            if (filesPage.searchVisible) filesPage.closeSearch()
+            for (const tile of filesPage.tiles) {
+                const manager = tile.remoteFiles
+                if (!manager.currentDeviceId && !manager.busy)
+                    manager.browse(manager.localDevice, manager.localDevice.username, filesPage.fileWorkspace.localHomePath)
+            }
+        }
         function onFilesChanged() { filesPage.refresh() }
         function onBookmarksChanged(source) {
             const managers = [filesPage.searchManager].concat(filesPage.tiles.map(tile => tile.remoteFiles))

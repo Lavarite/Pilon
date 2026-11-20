@@ -37,6 +37,7 @@ class AssistantManager : public QObject
     Q_PROPERTY(QVariantList messages READ messages NOTIFY messagesChanged)
     Q_PROPERTY(QVariantList attachments READ attachments NOTIFY attachmentsChanged)
     Q_PROPERTY(QVariantList devices MEMBER m_devices NOTIFY devicesChanged)
+    Q_PROPERTY(bool remoteEnabled READ remoteEnabled WRITE setRemoteEnabled NOTIFY devicesChanged)
     Q_PROPERTY(QString username MEMBER m_username NOTIFY devicesChanged)
     Q_PROPERTY(QVariantMap currentLocation MEMBER m_currentLocation NOTIFY devicesChanged)
     Q_PROPERTY(int effort READ effort WRITE setEffort NOTIFY effortChanged)
@@ -74,6 +75,8 @@ class AssistantManager : public QObject
     Q_PROPERTY(SshManager *connection READ connection CONSTANT)
 
 public:
+    bool remoteEnabled() const { return m_remoteEnabled; }
+    void setRemoteEnabled(bool enabled);
     explicit AssistantManager(QObject *parent = nullptr);
     ~AssistantManager() override;
     bool active() const { return m_active; }
@@ -289,6 +292,7 @@ private:
     QVariantList m_attachments;
     QVariantList m_turnAttachments;
     QVariantList m_devices;
+    bool m_remoteEnabled = true;
     QVariantMap m_currentLocation;
     QString m_username;
     int m_effort = 0;

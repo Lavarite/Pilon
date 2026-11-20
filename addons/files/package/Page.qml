@@ -15,7 +15,6 @@ FilesPage {
     addonContext: addon
     anchors.fill: parent
     sidebarWidth: 0
-    tailscaleManager: addon.tailscaleManager
     remoteFiles: addon.remoteFiles
     fileWorkspace: addon.fileWorkspace
     fileManagerComponent: addon.fileManagerComponent
