@@ -226,7 +226,7 @@ bool SshManager::forgetPasswords()
         return false;
     }
 #endif
-    { QMutexLocker lock(&SshCredentials::mutex); SshCredentials::values.clear(); }
+    SshCredentials::clear();
     setErrorMessage({});
     return true;
 }
@@ -403,6 +403,7 @@ void SshManager::disconnectFromHost()
         return;
 
     m_disconnectRequested = true;
+    m_passwordToSave.clear();
     clearPrompt();
     setConnectionText({});
     if (m_secretLookupProcess.state() != QProcess::NotRunning)
@@ -435,8 +436,10 @@ void SshManager::submitPromptInternal(const QString &input, bool shouldSavePassw
     response.remove(QLatin1Char('\0'));
     response.remove(QLatin1Char('\r'));
     response.remove(QLatin1Char('\n'));
-    if (shouldSavePassword && m_promptPassword && !response.isEmpty())
-        savePassword(response);
+    if (shouldSavePassword && m_promptPassword && passwordSavingAvailable()) {
+        m_passwordToSave = response;
+        m_passwordSaveRevision = SshCredentials::revision();
+    }
     clearPrompt();
     setConnectionText({});
     m_preAuthenticationOutput.clear();
@@ -528,6 +531,7 @@ void SshManager::readPseudoTerminal()
         m_preAuthenticationOutput.clear();
         clearPrompt();
         setConnectionText({});
+        saveAuthenticatedPassword();
         setAuthenticated(true);
         if (m_taskMode)
             m_taskOutput.append(authenticatedOutput);
@@ -557,6 +561,9 @@ void SshManager::handleFinished(int exitCode, QProcess::ExitStatus exitStatus)
     readPseudoTerminal();
     const bool disconnected = m_disconnectRequested;
     m_disconnectRequested = false;
+    if (m_transferMode && !disconnected && exitStatus == QProcess::NormalExit && exitCode == 0)
+        saveAuthenticatedPassword();
+    m_passwordToSave.clear();
     setAuthenticated(false);
     clearPrompt();
     setConnectionText({});
@@ -677,6 +684,8 @@ void SshManager::updatePrompt()
     m_promptText = candidate;
     m_promptSecret = secret;
     m_promptPassword = password;
+    if (password)
+        m_passwordToSave.clear();
 #ifdef Q_OS_ANDROID
     ++m_promptRevision;
 #endif
@@ -749,6 +758,14 @@ bool SshManager::lookupSavedPassword()
     m_secretLookupProcess.start();
     return true;
 #endif
+}
+
+void SshManager::saveAuthenticatedPassword()
+{
+    const auto password = std::exchange(m_passwordToSave, {});
+    // Settings may forget passwords while a different connection is waiting for authentication.
+    if (!password.isEmpty() && m_passwordSaveRevision == SshCredentials::revision())
+        savePassword(password);
 }
 
 void SshManager::savePassword(const QString &password)

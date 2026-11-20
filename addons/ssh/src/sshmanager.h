@@ -78,6 +78,7 @@ private:
     void updatePrompt();
     void clearPrompt();
     bool lookupSavedPassword();
+    void saveAuthenticatedPassword();
     void savePassword(const QString &password);
     void submitPromptInternal(const QString &input, bool savePassword);
 
@@ -98,6 +99,8 @@ private:
     QString m_initialDirectory;
     QString m_currentUsername;
     QString m_currentHost;
+    QString m_passwordToSave;
+    quint64 m_passwordSaveRevision = 0;
     bool m_promptSecret = false;
     bool m_promptPassword = false;
     bool m_loadingPassword = false;

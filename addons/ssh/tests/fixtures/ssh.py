@@ -18,7 +18,7 @@ if mode == 'host':
 elif mode == 'approval':
     print('To authenticate, visit:\nhttps://login.fixture.invalid/approve', flush=True)
     sys.stdin.readline()
-elif mode == 'password':
+elif mode in ('password', 'password-challenge', 'transfer-password'):
     attributes = termios.tcgetattr(0)
     attributes[3] &= ~termios.ECHO
     termios.tcsetattr(0, termios.TCSANOW, attributes)
@@ -26,6 +26,13 @@ elif mode == 'password':
     sys.stdout.flush()
     if sys.stdin.readline().strip() != 'test-password':
         sys.exit(255)
+    if mode == 'transfer-password':
+        sys.exit(0)
+    if mode == 'password-challenge':
+        sys.stdout.write('Verification code: ')
+        sys.stdout.flush()
+        if sys.stdin.readline().strip() != 'fixture-code':
+            sys.exit(255)
 sys.stdout.write('\x1ePILON_AUTHENTICATED\x1fConnected\n')
 sys.stdout.flush()
 sys.stdin.readline()
