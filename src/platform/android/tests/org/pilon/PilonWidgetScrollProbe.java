@@ -347,7 +347,27 @@ public final class PilonWidgetScrollProbe extends Instrumentation {
         dirty.setClipData(android.content.ClipData.newRawUri("Fixture", android.net.Uri.parse("content://fixture/unused"))); dirty.setSelector(new Intent("unexpected")); Intent neutral = PilonWidgets.neutralWidgetIntent(context, dirty);
         check(neutral.getExtras() == null && neutral.getSelector() == null && neutral.getClipData() == null && neutral.getData() == null
             && neutral.getFlags() == Intent.FLAG_ACTIVITY_SINGLE_TOP && Intent.ACTION_MAIN.equals(neutral.getAction()), "header widget launch is neutral before Qt");
-        String oldUri = clicked; step = "maximum-valid-cache"; JSONObject maximum = maximum(); write(context, maximum);
+        String oldUri = clicked;
+        step = "empty-agenda-replaces-timeline-and-keeps-period-action";
+        JSONArray filledRows = timed.getJSONArray("rows");
+        timed.put("rows", new JSONArray()).put("actionId", "period"); normal.put("generation", 5);
+        normal.getJSONObject("actions").put("period", new JSONObject().put("kind", "period").put("date", "2026-11-09").put("minute", 540));
+        write(context, normal);
+        main(() -> PilonWidgets.update(context, activity.id, PilonWidgetData.catalog(PilonWidgets.directory(context)))); SystemClock.sleep(700); waitForIdleSync();
+        main(() -> {
+            check(activity.host.findViewById(R.id.widget_timeline_list) == null, "empty agenda removes the scrolling timeline");
+            check(title(activity.host, context.getString(R.string.pilon_widget_calendar_empty)) != null, "empty agenda explains the current period");
+            check(title(activity.host, "9 November 2026") != null, "empty agenda retains the date header");
+            check(activity.host.findViewById(R.id.widget_root).performClick(), "empty agenda keeps the widget click action");
+        });
+        SystemClock.sleep(400); waitForIdleSync();
+        check(clicked != null && clicked.startsWith("pilon://widget/calendar/agenda?") && clicked.contains("action=period&generation=5"),
+            "empty agenda opens its Calendar period");
+        step = "populated-agenda-restores-timeline";
+        timed.put("rows", filledRows); normal.put("generation", 6); write(context, normal);
+        main(() -> PilonWidgets.update(context, activity.id, PilonWidgetData.catalog(PilonWidgets.directory(context)))); SystemClock.sleep(700); waitForIdleSync();
+        check(activity.host.findViewById(R.id.widget_timeline_list) != null && cards(activity.host) == 3, "events replace the empty state");
+        step = "maximum-valid-cache"; JSONObject maximum = maximum(); write(context, maximum);
         PilonWidgetData.Catalog catalog = PilonWidgetData.catalog(PilonWidgets.directory(context)); PilonWidgetData.Provider provider = catalog.find(OWNER, WIDGET);
         PilonWidgetData.Snapshot snapshot = PilonWidgetData.snapshot(PilonWidgets.directory(context), catalog, provider); check(snapshot != null, "maximum cache accepted by production reader");
         int sourceBytes = maximum.toString().getBytes(StandardCharsets.UTF_8).length; check(sourceBytes <= PilonWidgetData.MAX_BYTES, "maximum cache bounded");

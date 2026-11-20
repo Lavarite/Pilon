@@ -5,6 +5,7 @@
     <string name="pilon_widget_configure">Choose a widget</string>
     <string name="pilon_widget_refresh">Open Pilon to refresh</string>
     <string name="pilon_widget_empty">No items</string>
+    <string name="pilon_widget_calendar_empty">No events scheduled</string>
     <string name="pilon_widget_unavailable">Widget unavailable</string>
     <string name="pilon_widget_save_failed">Widget configuration could not be saved. Try again.</string>
     <string name="pilon_widget_more">%1$d more</string>

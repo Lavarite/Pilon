@@ -63,7 +63,11 @@ Control {
     }
     onRangeStartChanged: calendar.setVisibleRange(iso(rangeStart),iso(addDays(rangeStart,dayCount)))
     onDayCountChanged: calendar.setVisibleRange(iso(rangeStart),iso(addDays(rangeStart,dayCount)))
-    onVisibleChanged: { gesture = null; currentDate = new Date() }
+    onVisibleChanged: {
+        gesture = null
+        currentDate = new Date()
+        if (!visible) resetPeriodSlide()
+    }
     Timer { interval: 60000; running: page.visible; repeat: true; onTriggered: page.currentDate = new Date() }
     readonly property bool overlapEvents: calendar.preferences.eventLayout === "overlap"
     readonly property bool touchMode: Window.window && Window.window.uiScale !== undefined && Window.window.uiScale > 1
@@ -220,8 +224,50 @@ Control {
         if (!changed && calendar.error) { operationIssue.message = calendar.error; operationIssue.open() }
     }
     Keys.onEscapePressed: gesture = null
-    onViewModeChanged: { gesture = null; timeline.contentX = 0; month.contentX = 0 }
-    function navigate(direction) { if(viewMode===2) selectedDate=dateAt(selectedDate.getFullYear(),selectedDate.getMonth()+direction,1); else selectedDate=addDays(selectedDate,direction*(viewMode===1?7:1)) }
+    property real periodOffset: 0
+    property int periodDirection: 0
+    property var periodTarget: null
+    onSelectedDateChanged: if (periodTarget) resetPeriodSlide()
+    onViewModeChanged: {
+        resetPeriodSlide()
+        gesture = null
+        timeline.contentX = 0
+        month.contentX = 0
+    }
+    function resetPeriodSlide() {
+        periodAnimation.stop()
+        swipeReset.stop()
+        periodTarget = null
+        periodOffset = 0
+    }
+    function navigate(direction) {
+        if (gesture) return
+        if (periodAnimation.running) {
+            const target = periodTarget
+            resetPeriodSlide()
+            if (target) selectedDate = target
+        }
+        swipeReset.stop()
+        periodDirection = direction
+        periodTarget = viewMode === 2
+            ? dateAt(selectedDate.getFullYear(), selectedDate.getMonth() + direction, 1)
+            : addDays(selectedDate, direction * (viewMode === 1 ? 7 : 1))
+        periodAnimation.start()
+    }
+    SequentialAnimation {
+        id: periodAnimation
+        NumberAnimation { target: page; property: "periodOffset"; to: -page.periodDirection * periodTouchArea.width; duration: 135; easing.type: Easing.InQuad }
+        ScriptAction {
+            script: {
+                const target = page.periodTarget
+                page.periodTarget = null
+                page.periodOffset = page.periodDirection * periodTouchArea.width
+                page.selectedDate = target
+            }
+        }
+        NumberAnimation { target: page; property: "periodOffset"; to: 0; duration: 170; easing.type: Easing.OutCubic }
+    }
+    NumberAnimation { id: swipeReset; target: page; property: "periodOffset"; to: 0; duration: 140; easing.type: Easing.OutCubic }
     function edit(e) { editor.show(calendar.event(e.id),e.occurrence,"",-1,e) }
     function create(d,minute) { editor.show(calendar.newEvent(iso(d),minute)) }
     function openProposal(id) { proposalPrompt.showProposal(id) }
@@ -246,7 +292,7 @@ Control {
     }
     background: Rectangle { color: "transparent" }
     ColumnLayout {
-        anchors.fill: parent; spacing: 12
+        anchors.fill: parent; spacing: 12; clip: true
         GridLayout {
             id: headerControls
             readonly property real controlHeight: Math.max(selectedDateButton.implicitHeight, viewSelector.implicitHeight)
@@ -276,7 +322,7 @@ Control {
                             icon.source: "icons/calendar.svg"; icon.width: 24; icon.height: 24
                             Accessible.name: qsTr("Today")
                             ToolTip.visible: hovered; ToolTip.text: text
-                            onClicked: page.selectedDate = new Date()
+                            onClicked: { page.resetPeriodSlide(); page.selectedDate = new Date() }
                         }
                         CalendarIconButton { objectName: "calendarNext"; flat: true; icon.source: "icons/chevron-right.svg"; Accessible.name: qsTr("Next period"); onClicked: page.navigate(1) }
                     }
@@ -337,7 +383,9 @@ Control {
             onEventRequested: (proposalId, index) => page.reviewProposal(proposalId, index)
         }
         ColumnLayout {
+            id: monthPeriod
             visible: page.viewMode===2; spacing: 1; Layout.fillWidth: true; Layout.fillHeight: true
+            transform: Translate { x: page.periodOffset }
             Flickable {
                 objectName: "calendarMonthHeader"
                 Layout.fillWidth: true; implicitHeight: monthHeaders.implicitHeight
@@ -380,15 +428,15 @@ Control {
                     readonly property int capacity: entries.length > fullRows
                         ? Math.max(0, Math.floor((height - page.monthDateHeight - 10 - page.monthMoreHeight - 2) / (page.monthEventHeight + 2))) : fullRows
                     Layout.fillWidth: true; Layout.fillHeight: true; Layout.preferredWidth: 100; Layout.preferredHeight: 100
-                    color: Qt.alpha(page.secondaryColour,.48); border.color: Qt.alpha(page.textColour,.08)
+                    color: Qt.alpha(page.secondaryColour,.28); border.color: Qt.alpha(page.textColour,.05)
                     Rectangle {
                         anchors.fill: parent; anchors.margins: 1
                         visible: dayCell.isToday
                         gradient: Gradient {
                             orientation: Gradient.Horizontal
-                            GradientStop { position: 0; color: Qt.alpha(page.accentColour,.03) }
-                            GradientStop { position: .5; color: Qt.alpha(page.accentColour,.12) }
-                            GradientStop { position: 1; color: Qt.alpha(page.accentColour,.03) }
+                            GradientStop { position: 0; color: Qt.alpha(page.accentColour,.02) }
+                            GradientStop { position: .5; color: Qt.alpha(page.accentColour,.07) }
+                            GradientStop { position: 1; color: Qt.alpha(page.accentColour,.02) }
                         }
                     }
                     MouseArea { anchors.fill: parent; onDoubleClicked: page.create(dayCell.date,540) }
@@ -416,7 +464,9 @@ Control {
             }
         }
         ColumnLayout {
+            id: timelinePeriod
             visible: page.viewMode!==2; Layout.fillHeight: true; Layout.fillWidth: true; spacing: 4
+            transform: Translate { x: page.periodOffset }
             Item {
                 Layout.fillWidth: true; implicitHeight: timelineHeaders.implicitHeight
                 Flickable {
@@ -451,7 +501,7 @@ Control {
                 Item {
                     id: timeGrid
                     width: timeline.contentWidth; height: timeline.contentHeight
-                    Repeater { model: 24; delegate: Rectangle { required property int index; x: page.timeGutterWidth - 4; y: index*60; width: timeGrid.width - x; height: 1; color: Qt.alpha(page.textColour,.1) } }
+                    Repeater { model: 24; delegate: Rectangle { required property int index; x: page.timeGutterWidth; y: index*60; width: timeGrid.width - x; height: 1; color: Qt.alpha(page.textColour,.07) } }
                     Row {
                         x: page.timeGutterWidth; width: parent.width - x; height: parent.height
                         Repeater {
@@ -466,12 +516,12 @@ Control {
                                     visible: page.iso(dayColumn.date) === page.today
                                     gradient: Gradient {
                                         orientation: Gradient.Horizontal
-                                        GradientStop { position: 0; color: Qt.alpha(page.accentColour,.03) }
-                                        GradientStop { position: .5; color: Qt.alpha(page.accentColour,.12) }
-                                        GradientStop { position: 1; color: Qt.alpha(page.accentColour,.03) }
+                                        GradientStop { position: 0; color: Qt.alpha(page.accentColour,.02) }
+                                        GradientStop { position: .5; color: Qt.alpha(page.accentColour,.07) }
+                                        GradientStop { position: 1; color: Qt.alpha(page.accentColour,.02) }
                                     }
                                 }
-                                Rectangle { width: 1; height: parent.height; color: Qt.alpha(page.textColour,.08) }
+                                Rectangle { width: 1; height: parent.height; color: Qt.alpha(page.textColour,.05) }
                                 MouseArea { anchors.fill: parent; onDoubleClicked: mouse => page.create(dayColumn.date,Math.floor(mouse.y/15)*15) }
                                 Repeater {
                                     model: page.timelineEvents(dayColumn.date)
@@ -645,11 +695,57 @@ Control {
                 Rectangle {
                     objectName: "calendarTimeGutter"
                     parent: timeline
-                    width: page.timeGutterWidth; height: timeline.height; color: page.mainColour; z: 2
+                    width: page.timeGutterWidth; height: timeline.height
+                    // Cover events only when columns scroll behind the fixed labels.
+                    color: timeline.atXBeginning ? "transparent" : page.mainColour; z: 2
                     Column {
                         y: -timeline.contentY
                         Repeater { model: 24; delegate: Label { required property int index; height: 60; width: page.timeGutterWidth - 8; text: String(index).padStart(2,"0")+":00"; color: page.mutedTextColour; font.pixelSize: 11; horizontalAlignment: Text.AlignRight } }
                     }
+                }
+            }
+        }
+    }
+    Item {
+        id: periodTouchArea
+        readonly property Item period: page.viewMode === 2 ? monthPeriod : timelinePeriod
+        x: period.x; y: period.y; width: period.width; height: period.height
+        z: 1
+        PointHandler {
+            acceptedDevices: PointerDevice.TouchScreen
+            property bool atStart: false
+            property bool atEnd: false
+            property bool blocked: false
+            property real distance: 0
+            onGrabChanged: transition => {
+                if (transition === PointerDevice.GrabPassive) {
+                    // A scroll that reaches an edge stays a scroll until the next touch.
+                    const view = page.viewMode === 2 ? month : timeline
+                    atStart = view.atXBeginning
+                    atEnd = view.atXEnd
+                    blocked = page.gesture !== null || periodAnimation.running || view.moving
+                    distance = 0
+                    return
+                }
+                if (transition === PointerDevice.UngrabPassive && !blocked && !page.gesture && Math.abs(distance) >= 48) {
+                    page.navigate(distance < 0 ? 1 : -1)
+                } else if (page.periodOffset !== 0 && !periodAnimation.running) {
+                    distance = 0
+                    swipeReset.restart()
+                }
+            }
+            onPointChanged: {
+                if (!active || periodAnimation.running) return
+                blocked = blocked || page.gesture !== null
+                const dx = point.position.x - point.pressPosition.x
+                const dy = point.position.y - point.pressPosition.y
+                if (Math.abs(dy) >= 12 && Math.abs(dy) >= Math.abs(dx)) blocked = true
+                const outward = dx < 0 ? atEnd : atStart
+                distance = !blocked && outward && Math.abs(dx) > Math.abs(dy) * 1.35 ? dx : 0
+                if (Math.abs(distance) >= 12 || page.periodOffset !== 0) {
+                    swipeReset.stop()
+                    const limit = periodTouchArea.width * .75
+                    page.periodOffset = Math.min(limit, Math.max(-limit, distance))
                 }
             }
         }
@@ -672,7 +768,7 @@ Control {
         parent: selectedDateButton
         palette: page.palette
         firstDay: page.calendar.preferences.firstDay || 1
-        onDatePicked: value => page.selectedDate = value
+        onDatePicked: value => { page.resetPeriodSlide(); page.selectedDate = value }
     }
     CalendarEventEditor { id: editor; parent: page.Overlay.overlay; calendar: page.calendar; mainColour: page.mainColour; secondaryColour: page.secondaryColour; textColour: page.textColour; mutedTextColour: page.mutedTextColour; accentColour: page.accentColour; onSettingsRequested: page.settingsRequested() }
     PilonPopup {
