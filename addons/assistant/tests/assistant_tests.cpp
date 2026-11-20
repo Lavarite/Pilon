@@ -1213,14 +1213,19 @@ time.sleep(30)
         const auto cleanup = qScopeGuard([&] { qputenv("PATH", oldPath); SshCredentials::put("fixture.invalid", "tester", {}); });
         QFile ssh(directory.filePath("ssh")); QVERIFY(ssh.open(QIODevice::WriteOnly));
         ssh.write(R"PY(#!/usr/bin/env python3
-import sys,os,time
+import sys,os,termios
 from pathlib import Path
 mode=Path(__file__).with_name('mode').read_text()
+terminal=termios.tcgetattr(sys.stdin)
+secret_terminal=terminal[:]
+secret_terminal[3] &= ~termios.ECHO
+termios.tcsetattr(sys.stdin, termios.TCSANOW, secret_terminal)
 print('Enter passphrase:' if mode=='passphrase' else 'Password:',end='',flush=True)
 secret=input()
 if mode=='rejected':
     print('Permission denied.\nPassword:',end='',flush=True)
     secret=input()
+termios.tcsetattr(sys.stdin, termios.TCSANOW, terminal)
 sys.stdout.write('\x1ePILON_AUTHENTICATED\x1f'); sys.stdout.flush()
 os.execl('/bin/sh','sh','-c',sys.argv[-1])
 )PY"); ssh.close(); QVERIFY(ssh.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
