@@ -126,4 +126,38 @@ TestCase {
         keyClick(Qt.Key_Space)
         compare(bar.currentId, "page4")
     }
+    function test_bottomNavigationScrollsAndKeepsFocusOnReflow() {
+        const bar = createTemporaryObject(navigationComponent, test)
+        bar.pages = Array.from({length: 9}, (_, index) => ({id: "page" + index, title: "Page " + index}))
+        bar.currentId = "page0"
+        const first = findChild(bar, "page0Navigation")
+        first.forceActiveFocus()
+        bar.horizontal = true
+        bar.height = 44
+        tryVerify(() => first.activeFocus)
+        const scroll = findChild(bar, "sidebarScroll")
+        tryVerify(() => scroll.contentWidth > scroll.width && scroll.interactive)
+        compare(scroll.contentHeight, scroll.height)
+        verify(!findChild(bar, "sidebarToggle").visible)
+        waitForRendering(bar)
+        const swipe = touchEvent(bar)
+        swipe.press(0, bar, 130, 20).commit()
+        swipe.move(0, bar, 95, 20).commit()
+        swipe.move(0, bar, 30, 20).commit()
+        swipe.release(0, bar, 30, 20).commit()
+        tryVerify(() => scroll.contentX > 0)
+        compare(bar.currentId, "page0")
+        first.forceActiveFocus()
+        keyClick(Qt.Key_Left)
+        const last = findChild(bar, "page8Navigation")
+        verify(last.activeFocus)
+        tryVerify(() => last.mapToItem(scroll, last.width, 0).x <= scroll.width + 1)
+        keyClick(Qt.Key_Space)
+        compare(bar.currentId, "page8")
+        bar.horizontal = false
+        bar.height = 240
+        tryVerify(() => last.activeFocus && last.checked)
+        keyClick(Qt.Key_Up)
+        verify(findChild(bar, "page7Navigation").activeFocus)
+    }
 }
