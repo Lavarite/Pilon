@@ -806,14 +806,24 @@ Control {
                         id: noteDrag
                         acceptedDevices: PointerDevice.Mouse | PointerDevice.Stylus | PointerDevice.TouchPad
                         target: null
+                        function positionGhost() {
+                            const position = noteRow.mapToItem(page, centroid.position)
+                            dragGhost.x = position.x - dragGhost.Drag.hotSpot.x
+                            dragGhost.y = position.y - dragGhost.Drag.hotSpot.y
+                        }
                         onActiveChanged: {
-                            if (active) { page.dragEntry = noteRow.modelData; dragGhost.Drag.active = true }
-                            else { dragGhost.Drag.drop(); dragGhost.Drag.active = false; page.dragEntry = null }
+                            if (active) {
+                                const origin = noteRow.mapToItem(page, 0, 0)
+                                const press = noteRow.mapToItem(page, centroid.pressPosition)
+                                dragGhost.Drag.hotSpot = Qt.point(press.x - origin.x, press.y - origin.y)
+                                positionGhost()
+                                page.dragEntry = noteRow.modelData
+                                dragGhost.Drag.active = true
+                            } else {
+                                dragGhost.Drag.drop(); dragGhost.Drag.active = false; page.dragEntry = null
+                            }
                         }
-                        onCentroidChanged: {
-                            const position = noteRow.mapToItem(page, centroid.position.x, centroid.position.y)
-                            dragGhost.x = position.x - 16; dragGhost.y = position.y - 16
-                        }
+                        onCentroidChanged: if (active) positionGhost()
                     }
                     TapHandler {
                         acceptedButtons: Qt.RightButton
@@ -1658,9 +1668,10 @@ Control {
     }
     Item {
         id: dragGhost
+        objectName: "noteLibraryDragGhost"
         z: 1000; width: 180; height: 36
         visible: Drag.active
-        Drag.keys: ["pilon-note"]; Drag.hotSpot.x: 16; Drag.hotSpot.y: 16
+        Drag.keys: ["pilon-note"]
         Drag.supportedActions: Qt.MoveAction; Drag.proposedAction: Qt.MoveAction
         Row {
             spacing: 8
@@ -1671,7 +1682,7 @@ Control {
     Timer {
         interval: 40; repeat: true; running: dragGhost.Drag.active
         onTriggered: {
-            const p = page.mapToItem(noteList, dragGhost.x, dragGhost.y)
+            const p = dragGhost.mapToItem(noteList, dragGhost.Drag.hotSpot)
             if (p.y < 32) noteList.contentY = Math.max(0, noteList.contentY - 12)
             else if (p.y > noteList.height - 32) noteList.contentY = Math.min(Math.max(0, noteList.contentHeight - noteList.height), noteList.contentY + 12)
         }
