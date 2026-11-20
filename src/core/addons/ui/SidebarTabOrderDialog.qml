@@ -12,6 +12,10 @@ PilonDialog {
     required property var registry
     property var sidebarNavigation: null
     readonly property var tabs: registry.sidebarAddons.filter(entry => entry.enabled)
+    // An unchanged registry refresh must leave the preview delegates and their drag intact.
+    readonly property string previewPagesJson: JSON.stringify(tabs.map(entry => ({
+        id: entry.id, title: entry.name, icon: String(entry.icon), sidebarVisible: entry.sidebarVisible
+    })))
     property string error: ""
     width: 190 + padding * 2
     height: Math.min(600, topPadding + bottomPadding + preview.implicitHeight
@@ -53,7 +57,7 @@ PilonDialog {
                 anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
                 anchors.bottom: settingsButton.top
                 anchors.bottomMargin: 12
-                pages: dialog.tabs.map(entry => ({id: entry.id, title: entry.name, icon: entry.icon, sidebarVisible: entry.sidebarVisible}))
+                pages: JSON.parse(dialog.previewPagesJson)
                 currentId: dialog.sidebarNavigation ? dialog.sidebarNavigation.currentId : ""
                 expanded: true
                 reorderEnabled: true
