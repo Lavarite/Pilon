@@ -52,7 +52,75 @@ private slots:
         SshManager manager;
         manager.connectToHost("tester", "host.fixture.invalid");
         QTRY_VERIFY_WITH_TIMEOUT(!manager.running(), 3000);
-        QCOMPARE(manager.errorMessage(), "ssh: Could not resolve hostname unavailable.fixture.invalid: Name or service not known");
+        QCOMPARE(manager.errorMessage(), "Could not find the SSH host.");
+        QVERIFY(manager.errorDetails().contains("Could not resolve hostname unavailable.fixture.invalid"));
+        QVERIFY(manager.canRetry());
+    }
+    void networkFailureSummaries_data() {
+        QTest::addColumn<QByteArray>("mode");
+        QTest::addColumn<QString>("summary");
+        QTest::addColumn<bool>("retry");
+        QTest::newRow("refused") << QByteArray("refused") << QString("The device refused the SSH connection.") << true;
+        QTest::newRow("timeout") << QByteArray("timeout") << QString("The SSH connection timed out.") << true;
+        QTest::newRow("denied") << QByteArray("denied") << QString("Permission denied by SSH.") << false;
+    }
+    void networkFailureSummaries() {
+        QFETCH(QByteArray, mode);
+        QFETCH(QString, summary);
+        QFETCH(bool, retry);
+        qputenv("PILON_TEST_SSH_MODE", mode);
+        SshManager manager;
+        manager.connectToHost("tester", "host.fixture.invalid");
+        QTRY_VERIFY_WITH_TIMEOUT(!manager.running(), 3000);
+        QCOMPARE(manager.errorMessage(), summary);
+        QCOMPARE(manager.canRetry(), retry);
+        QVERIFY(!manager.errorDetails().isEmpty());
+        manager.connectToHost("tester", "invalid host!");
+        QCOMPARE(manager.errorMessage(), "Enter a valid IP address or host name.");
+        QVERIFY(manager.errorDetails().isEmpty());
+        QVERIFY(!manager.canRetry());
+    }
+    void changedHostDoesNotOfferTrustOrRetry() {
+        qputenv("PILON_TEST_SSH_MODE", "changed-key");
+        SshManager manager;
+        manager.connectToHost("tester", "keys.fixture.invalid");
+        QTRY_VERIFY_WITH_TIMEOUT(!manager.running(), 3000);
+        QCOMPARE(manager.errorMessage(), "The SSH host key changed. Verify the new key with the device owner.");
+        QVERIFY(manager.errorDetails().contains("REMOTE HOST IDENTIFICATION HAS CHANGED"));
+        QCOMPARE(manager.promptKind(), SshManager::NoPrompt);
+        QVERIFY(!manager.canRetry());
+    }
+    void retryAfterRejectedSavedPasswordOffersNewInput() {
+        qputenv("PILON_TEST_SSH_MODE", "password");
+        const QString host = "retry.fixture.invalid", user = "tester";
+        auto restore = qScopeGuard([&] { SshCredentials::put(host, user, {}); });
+        SshCredentials::put(host, user, "incorrect-saved-password");
+        SshManager manager;
+        manager.connectToHost(user, host);
+        QTRY_VERIFY_WITH_TIMEOUT(!manager.running(), 3000);
+        QCOMPARE(manager.errorMessage(), "SSH authentication failed.");
+        QVERIFY(!manager.errorDetails().contains("incorrect-saved-password"));
+        QVERIFY(manager.canRetry());
+        manager.retryConnection();
+        QTRY_VERIFY_WITH_TIMEOUT(!manager.promptText().isEmpty(), 3000);
+        QCOMPARE(manager.errorMessage(), QString{});
+        manager.submitPrompt("test-password");
+        QTRY_VERIFY_WITH_TIMEOUT(manager.authenticated(), 3000);
+        manager.disconnectFromHost();
+        QTRY_VERIFY_WITH_TIMEOUT(!manager.running(), 3000);
+    }
+    void challengeUsesTerminalEchoMode() {
+        qputenv("PILON_TEST_SSH_MODE", "challenge");
+        SshManager manager;
+        manager.connectToHost("tester", "challenge.fixture.invalid");
+        QTRY_VERIFY_WITH_TIMEOUT(!manager.promptText().isEmpty(), 3000);
+        QCOMPARE(manager.promptKind(), SshManager::ChallengePrompt);
+        QVERIFY(!manager.promptSecret());
+        QVERIFY(!manager.promptPassword());
+        manager.submitPrompt("1");
+        QTRY_VERIFY_WITH_TIMEOUT(manager.authenticated(), 3000);
+        manager.disconnectFromHost();
+        QTRY_VERIFY_WITH_TIMEOUT(!manager.running(), 3000);
     }
     void shortSuccessfulLogoutHasNoError() {
         qputenv("PILON_TEST_SSH_MODE", "logout");
@@ -72,8 +140,11 @@ private slots:
         QVERIFY(details.contains("host.fixture.invalid (192.0.2.1)"));
         QVERIFY(details.contains("SHA256:fixtureFingerprint"));
         QVERIFY(manager.promptText().startsWith("Are you sure"));
+        QCOMPARE(manager.promptKind(), SshManager::HostTrustPrompt);
         QVERIFY(!manager.promptSecret());
         manager.submitPrompt("yes");
+        QVERIFY(!manager.promptText().isEmpty());
+        manager.trustHost();
         QTRY_VERIFY_WITH_TIMEOUT(manager.authenticated(), 3000);
         QVERIFY(manager.property("connectionText").toString().isEmpty());
         manager.disconnectFromHost();
@@ -103,6 +174,27 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(manager.authenticated(), 3000);
         QVERIFY(!manager.property("connectionText").toString().contains("test-password"));
         QVERIFY(!displayed.join('\n').contains("test-password"));
+        manager.disconnectFromHost();
+        QTRY_VERIFY_WITH_TIMEOUT(!manager.running(), 3000);
+    }
+    void unavailableKeyringAllowsManualPassword() {
+        qputenv("PILON_TEST_SSH_MODE", "password");
+        QFile keyring(m_fixture.filePath("secret-tool"));
+        const auto writeScript = [&](const QByteArray &script) {
+            if (!keyring.open(QIODevice::WriteOnly)) return false;
+            const bool written = keyring.write(script) == script.size();
+            keyring.close();
+            return written;
+        };
+        const auto restore = qScopeGuard([&] { writeScript("#!/bin/sh\nexit 1\n"); });
+        QVERIFY(writeScript("#!/bin/sh\nprintf 'keyring locked\\n' >&2\nexit 1\n"));
+        SshManager manager;
+        manager.connectToHost("tester", "keyring.fixture.invalid");
+        QTRY_COMPARE_WITH_TIMEOUT(manager.promptKind(), SshManager::PasswordPrompt, 3000);
+        QCOMPARE(manager.connectionText(), "Could not read saved SSH passwords. Enter your password.");
+        manager.submitPrompt("test-password");
+        QTRY_VERIFY_WITH_TIMEOUT(manager.authenticated(), 3000);
+        QVERIFY(manager.connectionText().isEmpty());
         manager.disconnectFromHost();
         QTRY_VERIFY_WITH_TIMEOUT(!manager.running(), 3000);
     }
@@ -165,6 +257,7 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(connection.promptPassword() && !connection.promptText().isEmpty(), 3000);
         connection.submitPromptAndSave("test-password");
         QTRY_COMPARE_WITH_TIMEOUT(connection.promptText(), QString("Verification code:"), 3000);
+        QCOMPARE(connection.promptKind(), SshManager::SecretPrompt);
         QTRY_VERIFY(!SshCredentials::hasPendingWrites());
 
         SshManager settings;

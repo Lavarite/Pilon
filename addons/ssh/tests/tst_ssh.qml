@@ -200,12 +200,13 @@ TestCase {
     function test_longErrorHasSummaryAndScrollablePersistentDetails(data) {
         const dialog = openConnection("long-error", data)
         tryCompare(findChild(appWindow, "sshManager"), "running", false)
-        compare(findChild(dialog, "sshErrorSummary").text, "Permission denied (publickey).")
+        compare(findChild(dialog, "sshErrorSummary").text, "SSH authentication failed.")
         verify(!findChild(dialog, "sshConnectionDetailsScroll").visible)
         const toggle = contained(dialog, "sshErrorDetailsToggle")
         mouseClick(toggle)
         const scroll = findChild(dialog, "sshConnectionDetailsScroll")
         tryVerify(() => scroll.visible && scroll.contentHeight > scroll.availableHeight)
+        verify(findChild(dialog, "sshConnectionDetails").text.includes("Permission denied (publickey)."))
         contained(dialog, "sshErrorDetailsToggle")
         const position = scroll.contentHeight - scroll.availableHeight
         scroll.contentItem.contentY = position
@@ -214,5 +215,33 @@ TestCase {
         mouseClick(toggle)
         verify(!scroll.visible)
         verify(dialog.visible)
+    }
+    function test_changedHostKeyCanOnlyBeDismissed() {
+        const dialog = openConnection("changed-key", {width: 400, height: 600, touch: true})
+        const manager = findChild(appWindow, "sshManager")
+        tryCompare(manager, "running", false)
+        compare(findChild(dialog, "sshErrorSummary").text,
+                "The SSH host key changed. Verify the new key with the device owner.")
+        verify(!findChild(dialog, "sshRetryConnection").visible)
+        verify(!findChild(dialog, "sshContinueConnection").visible)
+        const dismiss = contained(dialog, "sshCancelConnection")
+        compare(dismiss.text, "Dismiss")
+        mouseClick(dismiss)
+        tryCompare(dialog, "visible", false)
+        compare(manager.errorMessage, "")
+    }
+    function test_visibleChallengeAndCancel() {
+        const dialog = openConnection("challenge", {width: 400, height: 600, touch: true})
+        const manager = findChild(appWindow, "sshManager")
+        tryVerify(() => dialog.prompting)
+        const input = contained(dialog, "sshPromptInput")
+        compare(input.echoMode, TextInput.Normal)
+        tryVerify(() => input.activeFocus)
+        input.text = "unfinished"
+        mouseClick(contained(dialog, "sshCancelConnection"))
+        tryCompare(manager, "running", false)
+        tryCompare(dialog, "visible", false)
+        compare(input.text, "")
+        compare(manager.errorMessage, "")
     }
 }
