@@ -54,12 +54,6 @@ PilonScrollView {
             visible: !page.external && page.manager.loggedIn && !page.manager.accountClaimed
             text: qsTr("Choose Use in Pilon before using this existing system session.")
         }
-        Label {
-            Layout.fillWidth: true; wrapMode: Text.Wrap
-            color: page.addon.selectedTextColour
-            visible: !page.external && page.manager.loggedIn
-            text: qsTr("Signing out also affects other apps using this system session.")
-        }
         Flow {
             Layout.fillWidth: true
             spacing: 8
@@ -94,7 +88,14 @@ PilonScrollView {
             PilonWrapButton { objectName: "devicesStartService"; text: qsTr("Start service"); visible: !page.external && page.manager.externalAppInstalled !== false && !page.manager.serviceRunning; enabled: !page.manager.busy; onClicked: page.manager.startService() }
             PilonWrapButton { text: qsTr("Sign in"); visible: !page.external && page.manager.serviceRunning && !page.manager.loggedIn; enabled: !page.manager.busy; onClicked: page.manager.login() }
             PilonWrapButton { objectName: "devicesUseAccount"; text: qsTr("Use in Pilon"); visible: !page.external && page.manager.loggedIn && !page.manager.accountClaimed; enabled: !page.manager.busy && page.manager.statusKnown; onClicked: page.manager.useCurrentAccount() }
-            PilonWrapButton { objectName: "devicesSignOut"; text: qsTr("Sign out"); visible: !page.external && page.manager.loggedIn; enabled: !page.manager.busy; onClicked: page.manager.logout() }
+            PilonWrapButton {
+                id: signOutButton
+                objectName: "devicesSignOut"
+                text: qsTr("Sign out")
+                visible: !page.external && page.manager.loggedIn
+                enabled: !page.manager.busy
+                onClicked: signOutConfirmation.open()
+            }
         }
         Label {
             Layout.fillWidth: true; wrapMode: Text.Wrap; textFormat: Text.PlainText
@@ -212,6 +213,56 @@ PilonScrollView {
         target: page.external ? page.manager : null
         function onDiscoveryChanged() {
             if (page.discoveryConnected) { discoveryId.text = ""; discoverySecret.text = "" }
+        }
+    }
+
+    PilonDialog {
+        id: signOutConfirmation
+        objectName: "devicesSignOutConfirmation"
+        parent: page.Overlay.overlay
+        title: qsTr("Sign out of Tailscale")
+        width: Math.min(480, parent.width - 32)
+        height: Math.min(implicitHeight, parent.height - 32)
+        modal: true
+        palette: page.palette
+        onOpened: cancelSignOut.forceActiveFocus()
+        onClosed: if (signOutButton.visible && signOutButton.enabled) signOutButton.forceActiveFocus()
+        onAccepted: if (signOutButton.visible && signOutButton.enabled) page.manager.logout()
+
+        contentItem: PilonScrollView {
+            implicitHeight: signOutContent.implicitHeight
+            contentWidth: availableWidth
+            clip: true
+            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+            ColumnLayout {
+                id: signOutContent
+                width: parent.width
+                spacing: 12
+                Label {
+                    Layout.fillWidth: true
+                    wrapMode: Text.Wrap
+                    text: qsTr("Signing out also affects other apps using this system session.")
+                    color: page.addon.selectedTextColour
+                }
+                Flow {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    PilonWrapButton {
+                        id: cancelSignOut
+                        objectName: "devicesCancelSignOut"
+                        width: Math.min(implicitWidth, parent.width)
+                        text: qsTr("Cancel")
+                        onClicked: signOutConfirmation.reject()
+                    }
+                    PilonWrapButton {
+                        objectName: "devicesConfirmSignOut"
+                        width: Math.min(implicitWidth, parent.width)
+                        text: qsTr("Sign out")
+                        enabled: signOutButton.visible && signOutButton.enabled
+                        onClicked: signOutConfirmation.accept()
+                    }
+                }
+            }
         }
     }
 
