@@ -2574,6 +2574,11 @@ TestCase {
             const row = child("noteRow_" + id), target = child("noteRow_" + targetId)
             const start = row.mapToItem(test, 70, 18), end = target.mapToItem(test, 90, 18)
             mousePress(test, start.x, start.y); mouseMove(test, start.x + 24, start.y, 40)
+            const ghost = child("noteLibraryDragGhost")
+            const origin = row.mapToItem(page, 24, 0)
+            verify(ghost && ghost.visible)
+            fuzzyCompare(ghost.x, origin.x, 1)
+            fuzzyCompare(ghost.y, origin.y, 1)
             mouseMove(test, end.x, end.y, 80); mouseRelease(test, end.x, end.y); wait(60)
         }
         drag(noteId, destination); compare(notes.currentFolder, destination)

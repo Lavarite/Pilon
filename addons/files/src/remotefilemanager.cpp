@@ -2304,7 +2304,7 @@ void RemoteFileManager::reloadBookmarks()
 }
 
 void RemoteFileManager::startDrag(const QVariantList &entries, const QUrl &iconSource,
-                                   const QColor &iconColour, const QColor &textColour)
+                                   const QColor &iconColour, const QColor &textColour, const QPointF &grabOffset)
 {
     if (entries.isEmpty() || m_busy || m_searching)
         return;
@@ -2323,9 +2323,10 @@ void RemoteFileManager::startDrag(const QVariantList &entries, const QUrl &iconS
         tint.setCompositionMode(QPainter::CompositionMode_SourceIn);
         tint.fillRect(icon.rect(), iconColour);
     }
+    const QRectF iconBounds(34, 10, 44, 44);
     {
         QPainter painter(&dragPixmap);
-        painter.drawPixmap(QRectF(34, 10, 44, 44), icon, QRectF(icon.rect()));
+        painter.drawPixmap(iconBounds, icon, QRectF(icon.rect()));
         QFont font = QGuiApplication::font();
         font.setPixelSize(14);
         painter.setFont(font);
@@ -2351,7 +2352,7 @@ void RemoteFileManager::startDrag(const QVariantList &entries, const QUrl &iconS
         }
     }
     drag->setPixmap(dragPixmap);
-    drag->setHotSpot(QPoint(56, 32));
+    drag->setHotSpot(iconBounds.topLeft().toPoint() + grabOffset.toPoint());
     drag->exec(Qt::CopyAction | Qt::MoveAction | Qt::LinkAction, Qt::MoveAction);
     drag->deleteLater();
 }

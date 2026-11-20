@@ -6,6 +6,7 @@
 #include <QHash>
 #include <QSet>
 #include <QObject>
+#include <QPointF>
 #include <QString>
 #include <QTemporaryDir>
 #include <QTimer>
@@ -117,7 +118,7 @@ public:
                                     const QString &username, const QString &directory, bool move);
     Q_INVOKABLE void reloadBookmarks();
     Q_INVOKABLE void startDrag(const QVariantList &entries, const QUrl &iconSource,
-                               const QColor &iconColour, const QColor &textColour);
+                               const QColor &iconColour, const QColor &textColour, const QPointF &grabOffset);
     Q_INVOKABLE void refresh();
     Q_INVOKABLE void submitCredential(const QString &credential);
     Q_INVOKABLE void submitCredentialAndSave(const QString &credential);

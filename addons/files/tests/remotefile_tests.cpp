@@ -498,9 +498,11 @@ private slots:
         QVERIFY(touch(path));
         const QVariantMap entry{{"deviceId", "local"}, {"path", path}, {"name", QFileInfo(path).fileName()}};
         RemoteFileManager manager;
-        manager.startDrag({entry}, QUrl::fromLocalFile(QFINDTESTDATA("../../../src/assets/icons/document-text.svg")), Qt::white, Qt::white);
+        const auto icon = QUrl::fromLocalFile(QFINDTESTDATA("../../../src/assets/icons/document-text.svg"));
+        manager.startDrag({entry}, icon, Qt::white, Qt::white, QPointF(53, 47));
         auto *drag = manager.findChild<QDrag *>();
         QVERIFY(drag);
+        QCOMPARE(drag->hotSpot(), QPoint(87, 57));
         QCOMPARE(drag->mimeData()->urls(), QList<QUrl>{QUrl::fromLocalFile(path)});
         QVERIFY(drag->mimeData()->data("text/uri-list").contains("%23"));
         QCOMPARE(QJsonDocument::fromJson(drag->mimeData()->data("application/x-pilon-remote-entries")).toVariant().toList(),
@@ -511,7 +513,7 @@ private slots:
         delete drag;
         auto remote = entry;
         remote.insert("deviceId", "remote");
-        manager.startDrag({entry, remote}, QUrl::fromLocalFile(QFINDTESTDATA("../../../src/assets/icons/document-text.svg")), Qt::white, Qt::white);
+        manager.startDrag({entry, remote}, icon, Qt::white, Qt::white, QPointF(22, 22));
         drag = manager.findChild<QDrag *>();
         QVERIFY(drag);
         QVERIFY(!drag->mimeData()->hasUrls()); // A mixed selection is never a partial upload.
@@ -524,7 +526,7 @@ private slots:
         RemoteFileManager manager;
         QVariantMap entry{{"deviceId", "remote"}, {"path", "/image.png"}, {"name", "image.png"}};
         const auto preview = [&](const char *icon) {
-            manager.startDrag({entry}, QUrl::fromLocalFile(QString::fromUtf8(icon)), QColor("#aabbcc"), Qt::white);
+            manager.startDrag({entry}, QUrl::fromLocalFile(QString::fromUtf8(icon)), QColor("#aabbcc"), Qt::white, QPointF(22, 22));
             auto *drag = manager.findChild<QDrag *>();
             const QImage image = drag->pixmap().toImage();
             delete drag;
