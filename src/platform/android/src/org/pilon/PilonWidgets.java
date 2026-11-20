@@ -182,7 +182,8 @@ public final class PilonWidgets {
         manager.updateAppWidget(id, views);
         if (snapshot != null) {
             JSONObject frame = snapshot.frame(System.currentTimeMillis());
-            if (frame != null && frame.has("timeGrid")) manager.notifyAppWidgetViewDataChanged(id, R.id.widget_timeline_list);
+            if (frame != null && frame.has("timeGrid") && !emptyAgenda(binding, frame))
+                manager.notifyAppWidgetViewDataChanged(id, R.id.widget_timeline_list);
         }
     }
     static RemoteViews sizedViews(Context context, int id, Binding binding, PilonWidgetData.Provider provider, PilonWidgetData.Snapshot snapshot, List<?> sizes) {
@@ -296,6 +297,10 @@ public final class PilonWidgets {
     static RemoteViews render(Context context, int id, Binding binding, PilonWidgetData.Provider provider, PilonWidgetData.Snapshot snapshot, float width, float height, boolean preview) {
         return renderAt(context, id, binding, provider, snapshot, width, height, preview, System.currentTimeMillis());
     }
+    private static boolean emptyAgenda(Binding binding, JSONObject frame) {
+        return binding != null && "calendar".equals(binding.addonId) && "agenda".equals(binding.widgetId)
+            && frame.optJSONArray("rows").length() == 0;
+    }
     private static RemoteViews renderAt(Context context, int id, Binding binding, PilonWidgetData.Provider provider, PilonWidgetData.Snapshot snapshot, float width, float height, boolean preview, long now) {
         RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.pilon_widget); int[] palette = colours(context, snapshot);
         views.setInt(R.id.widget_root, "setBackgroundColor", palette[0]); views.setTextColor(R.id.widget_title, palette[1]); views.setTextColor(R.id.widget_status, palette[1]); views.removeAllViews(R.id.widget_rows);
@@ -313,6 +318,12 @@ public final class PilonWidgets {
         }
         if (!preview) views.setOnClickPendingIntent(R.id.widget_root, launch(context, id, frame == null ? null : binding, frame == null ? null : snapshot, frame == null ? "open" : frame.optString("actionId", "open")));
         if (frame == null) { views.setTextViewText(R.id.widget_status, context.getString(R.string.pilon_widget_refresh)); return views; }
+        if (emptyAgenda(binding, frame)) {
+            views.setTextViewText(R.id.widget_title, frame.optString("title"));
+            views.setTextViewText(R.id.widget_status, context.getString(R.string.pilon_widget_calendar_empty));
+            views.setInt(R.id.widget_status, "setMaxLines", 3);
+            return views;
+        }
         if (frame.has("timeGrid")) return !preview && owns(context, id)
             ? PilonWidgetTimelineService.render(context, id, binding, snapshot, frame, width, height)
             : PilonWidgetTimeGrid.render(context, id, binding, snapshot, frame, width, height, preview);

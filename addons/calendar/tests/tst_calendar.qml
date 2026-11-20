@@ -1676,9 +1676,10 @@ TestCase {
     }
     function test_navigationAndViews() {
         page.selectedDate = new Date(2028,1,29,12)
-        page.viewMode = 0; page.navigate(1); compare(page.iso(page.selectedDate),"2028-03-01")
-        page.viewMode = 1; page.navigate(-1); compare(page.iso(page.selectedDate),"2028-02-23")
-        page.viewMode = 2; page.navigate(1); compare(page.iso(page.selectedDate),"2028-03-01")
+        page.viewMode = 0; page.navigate(1); tryVerify(() => page.iso(page.selectedDate) === "2028-03-01")
+        page.viewMode = 1; page.navigate(-1); tryVerify(() => page.iso(page.selectedDate) === "2028-02-23")
+        page.viewMode = 2; page.navigate(1); tryVerify(() => page.iso(page.selectedDate) === "2028-03-01")
+        tryCompare(page, "periodOffset", 0)
         compare(page.dayCount,42)
     }
     function test_touchTimelineScrollTapAndHoldDrag() {
@@ -1846,8 +1847,9 @@ TestCase {
         }
         touchClick(findChild(page, "calendarToday")); compare(page.iso(page.selectedDate), page.iso(new Date()))
         const today = page.selectedDate
-        touchClick(findChild(page, "calendarPrevious")); compare(page.iso(page.selectedDate), page.iso(page.addDays(today, -1)))
-        touchClick(findChild(page, "calendarNext")); compare(page.iso(page.selectedDate), page.iso(today))
+        touchClick(findChild(page, "calendarPrevious")); tryVerify(() => page.iso(page.selectedDate) === page.iso(page.addDays(today, -1)))
+        touchClick(findChild(page, "calendarNext")); tryVerify(() => page.iso(page.selectedDate) === page.iso(today))
+        tryCompare(page, "periodOffset", 0)
     }
     function test_editorExpansionAndRecurrenceResizeNativeWindow_data() {
         return [{tag: "phone", width: 320, height: 480}, {tag: "landscape", width: 800, height: 360},

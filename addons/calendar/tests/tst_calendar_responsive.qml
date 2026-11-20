@@ -203,10 +203,70 @@ TestCase {
         verify(calendarInput.saveWindow(page, "/tmp/pilon-calendar-navigation-" + data.tag + ".png").saved)
         owner.requestActivate()
         const initial = page.iso(page.selectedDate)
-        mouseClick(previous); verify(page.iso(page.selectedDate) !== initial)
-        mouseClick(next); compare(page.iso(page.selectedDate), data.mode === 2 ? "2026-11-01" : initial)
+        mouseClick(previous); tryVerify(() => page.iso(page.selectedDate) !== initial)
+        mouseClick(next); tryVerify(() => page.iso(page.selectedDate) === (data.mode === 2 ? "2026-11-01" : initial))
         today.forceActiveFocus(); keyClick(Qt.Key_Space)
         compare(page.iso(page.selectedDate), page.iso(new Date()))
+    }
+    function swipe(page, view, from, distance) {
+        const touch = touchEvent(page)
+        const start = view.mapToItem(page, from, view.height * .4)
+        touch.press(0, page, start.x, start.y).commit()
+        for (let step = 1; step <= 4; ++step) {
+            touch.move(0, page, start.x + distance * step / 4, start.y).commit()
+            wait(20)
+        }
+        touch.release(0, page, start.x + distance, start.y).commit()
+    }
+    function test_swipeChangesOnePeriod_data() {
+        return [{tag: "day", mode: 0, width: 360, next: "2097-03-06", previous: "2097-03-05"},
+                {tag: "day-dst", mode: 0, width: 360, date: new Date(2026, 2, 28, 12), next: "2026-03-29", previous: "2026-03-28"},
+                {tag: "week-wide", mode: 1, width: 1440, next: "2097-03-12", previous: "2097-03-05"},
+                {tag: "week-narrow", mode: 1, width: 360, next: "2097-03-12", previous: "2097-03-05"},
+                {tag: "month-wide", mode: 2, width: 1440, next: "2097-04-01", previous: "2097-03-01"},
+                {tag: "month-year", mode: 2, width: 360, date: new Date(2097, 11, 5, 12), next: "2098-01-01", previous: "2097-12-01"}]
+    }
+    function test_swipeChangesOnePeriod(data) {
+        const owner = createTemporaryObject(ownerComponent, test, {width: data.width})
+        verify(owner)
+        const page = owner.page
+        page.viewMode = data.mode
+        if (data.date) page.selectedDate = data.date
+        const initial = page.iso(page.selectedDate)
+        owner.update(); verify(waitForRendering(owner.contentItem))
+        const view = findChild(page, data.mode === 2 ? "calendarMonth" : "calendarTimeline")
+        view.contentX = view.contentWidth - view.width
+        swipe(page, view, view.width * .7, -30)
+        tryCompare(page, "periodOffset", 0)
+        compare(page.iso(page.selectedDate), initial, "A short swipe leaves the period unchanged")
+        swipe(page, view, view.width * .7, -100)
+        tryVerify(() => page.iso(page.selectedDate) === data.next)
+        tryCompare(page, "periodOffset", 0)
+        view.contentX = 0
+        swipe(page, view, view.width * .4, 100)
+        tryVerify(() => page.iso(page.selectedDate) === data.previous)
+        tryCompare(page, "periodOffset", 0)
+    }
+    function test_arrowsSlideBothPeriods() {
+        const owner = createTemporaryObject(ownerComponent, test)
+        verify(owner)
+        const page = owner.page
+        page.viewMode = 0
+        owner.update(); verify(waitForRendering(owner.contentItem))
+        const next = findChild(page, "calendarNext"), previous = findChild(page, "calendarPrevious")
+        const positions = []
+        page.periodOffsetChanged.connect(() => positions.push([page.iso(page.selectedDate), page.periodOffset]))
+        mouseClick(next)
+        tryVerify(() => page.iso(page.selectedDate) === "2097-03-06")
+        tryCompare(page, "periodOffset", 0)
+        verify(positions.some(([date, x]) => date === "2097-03-05" && x < 0), "The outgoing day moves left")
+        verify(positions.some(([date, x]) => date === "2097-03-06" && x > 0), "The incoming day enters from the right")
+        positions.length = 0
+        mouseClick(previous)
+        tryVerify(() => page.iso(page.selectedDate) === "2097-03-05")
+        tryCompare(page, "periodOffset", 0)
+        verify(positions.some(([date, x]) => date === "2097-03-06" && x > 0), "The outgoing day moves right")
+        verify(positions.some(([date, x]) => date === "2097-03-05" && x < 0), "The incoming day enters from the left")
     }
     function test_readableDaysScrollInsteadOfCompress(data) {
         const owner = createTemporaryObject(ownerComponent, test, {width: data.width, uiScale: data.scale, textSize: data.textSize || 16})

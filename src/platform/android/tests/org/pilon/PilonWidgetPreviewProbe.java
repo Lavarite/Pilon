@@ -211,11 +211,30 @@ public final class PilonWidgetPreviewProbe extends Instrumentation {
             grid.getJSONArray("timeline").getJSONObject(0).put("timeGrid", new JSONObject().put("startMinute", 540).put("endMinute", 1440));
             grid.getJSONArray("timeline").getJSONObject(0).getJSONArray("rows").getJSONObject(0)
                 .put("timeRange", new JSONObject().put("startMinute", 540).put("endMinute", 600)).put("accent", "#ffb86c");
+            JSONObject gridFrame = grid.getJSONArray("timeline").getJSONObject(0);
+            gridFrame.put("actionId", "period"); grid.getJSONObject("actions").put("period", new JSONObject().put("kind", "period").put("date", "2026-11-10").put("minute", 540));
+            JSONArray originalRows = gridFrame.getJSONArray("rows");
+            step = "calendar-agenda-empty-at-minimum-with-large-font";
+            gridFrame.put("rows", new JSONArray()); write(calendarFile, grid);
+            for (boolean preview : new boolean[]{true, false}) {
+                View empty = sized(largeContext, catalog, catalog.providers.get(0), 160, 160, preview, "agenda-empty-" + preview);
+                check(empty.findViewById(R.id.widget_time_grid) == null);
+                check(((TextView)empty.findViewById(R.id.widget_title)).getText().toString().equals("10/11/2026"));
+                TextView status = empty.findViewById(R.id.widget_status);
+                check(status.getText().toString().equals("No events scheduled"));
+                for (int line = 0; line < status.getLineCount(); ++line) check(status.getLayout().getEllipsisCount(line) == 0);
+            }
+            step = "calendar-agenda-all-day-is-populated";
+            gridFrame.put("rows", new JSONArray().put(new JSONObject().put("id", "all_day").put("title", "All-day event").put("allDay", true)));
+            write(calendarFile, grid);
+            View allDay = sized(context, catalog, catalog.providers.get(0), 180, 180, true, "agenda-all-day");
+            check(allDay.findViewById(R.id.widget_time_grid) != null);
+            check(((ViewGroup)allDay.findViewById(R.id.widget_grid_all_day)).getChildCount() == 1);
+            step = "calendar-agenda-populated-replaces-empty";
+            gridFrame.put("rows", originalRows);
             write(calendarFile, grid);
             View gridView = sized(context, catalog, catalog.providers.get(0), 320, 360, true, "time-grid-normal");
             check(gridView.findViewById(R.id.widget_time_grid) != null);
-            JSONObject gridFrame = grid.getJSONArray("timeline").getJSONObject(0);
-            gridFrame.put("actionId", "period"); grid.getJSONObject("actions").put("period", new JSONObject().put("kind", "period").put("date", "2026-11-10").put("minute", 540));
             JSONArray timed = new JSONArray();
             String[] titles = {"First", "Second", "Longer", "Later"}; int[] starts = {540, 570, 660, 1260}, ends = {600, 630, 780, 1320};
             for (int index = 0; index < titles.length; ++index) {
