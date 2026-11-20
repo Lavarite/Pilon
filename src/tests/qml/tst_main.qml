@@ -235,10 +235,14 @@ TestCase {
     function revealControl(control) {
         verify(control!==null)
         for (let parent = control.parent; parent; parent = parent.parent) {
-            if (parent.contentY === undefined || !parent.contentItem || parent.contentHeight <= parent.height) continue
+            if (parent.contentY === undefined || !parent.contentItem) continue
             const point = control.mapToItem(parent.contentItem, 0, 0)
-            parent.contentY = Math.max(0, Math.min(parent.contentHeight - parent.height,
-                point.y - (parent.height - control.height) / 2))
+            if (parent.contentWidth > parent.width)
+                parent.contentX = Math.max(0, Math.min(parent.contentWidth - parent.width,
+                    point.x - (parent.width - control.width) / 2))
+            if (parent.contentHeight > parent.height)
+                parent.contentY = Math.max(0, Math.min(parent.contentHeight - parent.height,
+                    point.y - (parent.height - control.height) / 2))
         }
         waitForPolish(control)
         const host=control.Window.window
@@ -417,8 +421,8 @@ TestCase {
                 tryCompare(scroll, "moving", false)
                 const navigationControl = () => {
                     const control = findControl(navigation, entry[0])
-                    // A recreated delegate starts at y=0 until the column positions it.
-                    return control?.parent?.y >= toggle.y + toggle.height ? control : null
+                    return control && (navigation.horizontal ? control.width > 0 : control.parent.y >= toggle.y + toggle.height)
+                        ? control : null
                 }
                 tryVerify(() => navigationControl() !== null, 5000, entry[0] + " is positioned in the sidebar")
                 tap(navigationControl(), navigationControl, data.touch)
@@ -452,6 +456,66 @@ TestCase {
             tap(findControl(appWindow, "filesNavigation"))
             verify(tabletInput.saveWindow(appWindow.contentItem, "/tmp/pilon-audit-main-" + data.tag + "-" + appWindow.Screen.devicePixelRatio + "x.png"))
         } finally { tabletInput.setScreenGeometry(screen) }
+    }
+    function test_bottomNavigationUsesLogicalUsableWidth_data() {
+        return [
+            {tag: "desktop", width: 640, height: 480, touch: false, bottom: false},
+            {tag: "portrait-large-type", width: 360, height: 740, touch: false, bottom: true, fontSize: 28},
+            {tag: "scaled-landscape", width: 800, height: 600, touch: true, bottom: true},
+            {tag: "tablet-landscape", width: 1024, height: 768, touch: true, bottom: false},
+            {tag: "occluding-fold", width: 1024, height: 768, touch: true, bottom: true, fold: true}
+        ]
+    }
+    function test_bottomNavigationUsesLogicalUsableWidth(data) {
+        const screen = tabletInput.screenGeometry()
+        const originalFont = Qt.application.font
+        try {
+            tabletInput.setScreenGeometry(Qt.rect(0, 0, data.width + 40, data.height + 80))
+            appWindow.touchMode = data.touch
+            tabletInput.configureWindow(appWindow, data.width, data.height)
+            appWindow.SafeArea.additionalMargins.bottom = 20
+            if (data.fontSize) tabletInput.setApplicationFont(Qt.font({family: originalFont.family, pixelSize: data.fontSize}))
+            if (data.fold) {
+                service.foldVertical = true
+                service.foldOccluding = true
+                service.foldBounds = Qt.rect(500, 0, 24, data.height)
+            }
+            service.offline = true
+            const navigation = findControl(appWindow, "appNavigation")
+            const frame = findControl(appWindow, "navigationArea")
+            const area = findControl(appWindow, "addonArea")
+            const settings = findControl(appWindow, "settingsNavigation")
+            const offline = findControl(appWindow, "offlineIndicator")
+            tryCompare(navigation, "horizontal", data.bottom)
+            renderWindow(appWindow)
+            verify(offline.visible)
+            if (data.bottom) {
+                fuzzyCompare(area.width * appWindow.uiScale, appWindow.workspaceGeometry.width, 1)
+                fuzzyCompare(area.height, frame.y, 1)
+                fuzzyCompare((frame.y + frame.height) * appWindow.uiScale,
+                    appWindow.workspaceGeometry.height, 1)
+                verify(navigation.x + navigation.width <= offline.x && offline.x + offline.width <= settings.x)
+                verify(settings.x + settings.width < frame.width && settings.height <= frame.height)
+            } else {
+                fuzzyCompare(area.x, frame.width, 1)
+                fuzzyCompare(area.height * appWindow.uiScale, appWindow.workspaceGeometry.height, 1)
+            }
+            const files = findControl(navigation, "filesNavigation")
+            verify(appWindow.selectPage("files"))
+            files.forceActiveFocus()
+            tryCompare(files, "activeFocus", true)
+            if (data.fold) service.foldOccluding = false
+            else appWindow.width = data.bottom ? 1024 : (data.touch ? 800 : 570)
+            tryCompare(navigation, "horizontal", !data.bottom)
+            compare(findControl(navigation, "filesNavigation"), files)
+            compare(appWindow.selectedPage, "files")
+            verify(files.activeFocus && files.checked)
+        } finally {
+            service.offline = false
+            service.foldOccluding = false
+            tabletInput.setApplicationFont(originalFont)
+            tabletInput.setScreenGeometry(screen)
+        }
     }
     function test_compactSettingsPageHeaderSharesCloseRow_data() {
         return [{tag: "desktop", width: 560, height: 480, touch: false},
@@ -1286,23 +1350,28 @@ TestCase {
         settings.close()
     }
     function test_sidebarScrollsInsteadOfOverlappingSettings() {
-        appWindow.touchMode = true
-        appWindow.height = appWindow.minimumHeight
-        const scroll = findControl(appWindow, "sidebarScroll")
-        const settings = findControl(appWindow, "settingsNavigation")
-        const top = scroll.mapToItem(settings.parent, 0, 0)
-        verify(top.y + scroll.height <= settings.y - 8)
-        verify(scroll.clip)
-        if (scroll.contentHeight > scroll.height) verify(scroll.interactive)
-        const toggle=findControl(appWindow,"sidebarToggle")
-        for(let i=0;i<2;++i) {
-            scroll.contentY=0; renderWindow(appWindow)
-            // Expanded navigation rotates the button; compare its rendered top edge.
-            const first=toggle.mapToItem(appWindow.contentItem,0,0)
-            const last=toggle.mapToItem(appWindow.contentItem,toggle.width,toggle.height)
-            fuzzyCompare(Math.min(first.y,last.y),16*appWindow.uiScale,1)
-            compare(toggle.height,44)
-            tap(toggle)
-        }
+        const screen = tabletInput.screenGeometry()
+        try {
+            tabletInput.setScreenGeometry(Qt.rect(0, 0, 1064, 848))
+            appWindow.touchMode = true
+            tabletInput.configureWindow(appWindow, 1024, appWindow.minimumHeight)
+            tryCompare(findControl(appWindow, "appNavigation"), "horizontal", false)
+            const scroll = findControl(appWindow, "sidebarScroll")
+            const settings = findControl(appWindow, "settingsNavigation")
+            const top = scroll.mapToItem(settings.parent, 0, 0)
+            verify(top.y + scroll.height <= settings.y - 8)
+            verify(scroll.clip)
+            if (scroll.contentHeight > scroll.height) verify(scroll.interactive)
+            const toggle=findControl(appWindow,"sidebarToggle")
+            for(let i=0;i<2;++i) {
+                scroll.contentY=0; renderWindow(appWindow)
+                // Expanded navigation rotates the button; compare its rendered top edge.
+                const first=toggle.mapToItem(appWindow.contentItem,0,0)
+                const last=toggle.mapToItem(appWindow.contentItem,toggle.width,toggle.height)
+                fuzzyCompare(Math.min(first.y,last.y),16*appWindow.uiScale,1)
+                compare(toggle.height,44)
+                tap(toggle)
+            }
+        } finally { tabletInput.setScreenGeometry(screen) }
     }
 }

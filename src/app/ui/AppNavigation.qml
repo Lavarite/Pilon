@@ -9,6 +9,7 @@ Item {
     property var pages: []
     property string currentId: "files"
     property bool expanded: false
+    property bool horizontal: false
     property bool reorderEnabled: false
     property bool visibilityControls: false
     readonly property real pageInset: visibilityControls && width < 190 ? 0 : 10
@@ -27,6 +28,7 @@ Item {
     onWidthChanged: finishDrag(false)
     onHeightChanged: finishDrag(false)
     onPagesChanged: draggedItem = null
+    onHorizontalChanged: Qt.callLater(scroll.revealCurrent)
     function focusOffset(index, delta) {
         const button = buttons.itemAt((index + delta + pages.length) % pages.length)
         if (button) button.navigationButton.forceActiveFocus()
@@ -64,31 +66,58 @@ Item {
         id: scroll
         objectName: navigation.reorderEnabled ? "sidebarPreviewScroll" : "sidebarScroll"
         anchors.fill: parent
-        contentWidth: width; contentHeight: entries.implicitHeight
-        clip: true; interactive: !navigation.dragging && contentHeight > height
+        contentWidth: navigation.horizontal ? Math.max(width, entries.implicitWidth) : width
+        contentHeight: navigation.horizontal ? height : entries.implicitHeight
+        flickableDirection: navigation.horizontal ? Flickable.HorizontalFlick : Flickable.VerticalFlick
+        clip: true
+        interactive: !navigation.dragging && (navigation.horizontal ? contentWidth > width : contentHeight > height)
         boundsBehavior: Flickable.StopAtBounds
         onActiveFocusChanged: if (activeFocus) revealFocus()
         function revealFocus() {
             const item = navigation.Window.window ? navigation.Window.window.activeFocusItem : null
             let ancestor = item
             while (ancestor && ancestor !== entries) ancestor = ancestor.parent
-            if (!ancestor) return
+            if (!ancestor) return false
+            revealItem(item)
+            return true
+        }
+        function revealCurrent() {
+            if (revealFocus()) return
+            const index = navigation.pages.findIndex(page => page.id === navigation.currentId)
+            if (index >= 0) revealItem(buttons.itemAt(index)?.navigationButton)
+        }
+        function revealItem(item) {
+            if (!item) return
             const point = item.mapToItem(contentItem, 0, 0)
-            if (point.y < contentY) contentY = point.y
+            if (navigation.horizontal) {
+                if (point.x < contentX) contentX = point.x
+                else if (point.x + item.width > contentX + width) contentX = point.x + item.width - width
+            } else if (point.y < contentY) contentY = point.y
             else if (point.y + item.height > contentY + height) contentY = point.y + item.height - height
         }
         Connections {
             target: navigation.Window.window
             function onActiveFocusItemChanged() { scroll.revealFocus() }
         }
-        Column {
+        WheelHandler {
+            target: null
+            enabled: navigation.horizontal && scroll.interactive
+            onWheel: event => {
+                const delta = event.angleDelta.y / 2
+                scroll.contentX = Math.max(0, Math.min(scroll.contentWidth - scroll.width, scroll.contentX - delta))
+            }
+        }
+        Grid {
             id: entries
-            width: scroll.width
+            width: scroll.contentWidth
+            columns: navigation.horizontal ? Math.max(1, navigation.pages.length) : 1
             spacing: 8
+            onPositioningComplete: if (navigation.horizontal) scroll.revealCurrent()
             PilonToolButton {
                 objectName: navigation.reorderEnabled ? "sidebarPreviewToggle" : "sidebarToggle"
-                visible: !navigation.reorderEnabled
-                width: parent.width - 20; x: 10; height: 44
+                visible: !navigation.reorderEnabled && !navigation.horizontal
+                width: parent.width - 20; height: 44
+                transform: Translate { x: 10 }
                 text: navigation.expanded ? qsTr("Collapse navigation") : qsTr("Expand navigation")
                 display: AbstractButton.IconOnly
                 icon.source: "icons/chevron-right.svg"
@@ -107,32 +136,44 @@ Item {
                         required property var modelData
                         required property int index
                         property alias navigationButton: button
-                        width: entries.width - navigation.pageInset * 2
+                        width: navigation.horizontal ? (modelData.icon ? 44
+                            : Math.max(44, button.implicitContentWidth + button.leftPadding + button.rightPadding)) : entries.width
                         height: button.height
-                        x: navigation.pageInset
                         z: navigation.draggedItem === row ? 1 : 0
                         transform: Translate { y: navigation.draggedItem === row ? navigation.dragY - row.y : 0 }
                         PilonNavigationButton {
                             id: button
-                            width: row.width - (navigation.visibilityControls ? 40 : 0)
+                            x: navigation.horizontal ? 0 : navigation.pageInset
+                            width: row.width - x * 2 - (navigation.visibilityControls ? 40 : 0)
                             focus: true
                             objectName: navigation.reorderEnabled ? row.modelData.id + "PreviewNavigation" : row.modelData.objectName || row.modelData.id + "Navigation"
-                            text: navigation.expanded || row.modelData.icon ? row.modelData.title : Array.from(row.modelData.title).slice(0, 2).join("")
+                            readonly property bool showLabel: navigation.expanded && !navigation.horizontal
+                            text: showLabel || row.modelData.icon ? row.modelData.title : Array.from(row.modelData.title).slice(0, 2).join("")
                             Accessible.name: row.modelData.title
-                            ToolTip.visible: hovered && !navigation.expanded
+                            ToolTip.visible: hovered && !showLabel
                             ToolTip.text: row.modelData.title
                             icon.source: row.modelData.icon ? Qt.resolvedUrl(row.modelData.icon) : ""
-                            display: navigation.expanded ? AbstractButton.TextBesideIcon : (row.modelData.icon ? AbstractButton.IconOnly : AbstractButton.TextOnly)
-                            wrapLabel: navigation.expanded
+                            display: showLabel ? AbstractButton.TextBesideIcon : (row.modelData.icon ? AbstractButton.IconOnly : AbstractButton.TextOnly)
+                            wrapLabel: showLabel
                             checked: navigation.currentId === row.modelData.id
                             Accessible.description: navigation.reorderEnabled ? qsTr("Drag to reorder. Alt+Up or Alt+Down moves this tab.") : ""
                             onClicked: navigation.activated(row.modelData.id)
+                            Keys.onLeftPressed: event => {
+                                if (navigation.horizontal) navigation.focusOffset(row.DelegateModel.itemsIndex, -1)
+                                else event.accepted = false
+                            }
+                            Keys.onRightPressed: event => {
+                                if (navigation.horizontal) navigation.focusOffset(row.DelegateModel.itemsIndex, 1)
+                                else event.accepted = false
+                            }
                             Keys.onUpPressed: event => {
-                                if (navigation.reorderEnabled && event.modifiers & Qt.AltModifier) navigation.requestReorder(row.DelegateModel.itemsIndex, row.DelegateModel.itemsIndex - 1)
+                                if (navigation.horizontal) event.accepted = false
+                                else if (navigation.reorderEnabled && event.modifiers & Qt.AltModifier) navigation.requestReorder(row.DelegateModel.itemsIndex, row.DelegateModel.itemsIndex - 1)
                                 else navigation.focusOffset(row.DelegateModel.itemsIndex, -1)
                             }
                             Keys.onDownPressed: event => {
-                                if (navigation.reorderEnabled && event.modifiers & Qt.AltModifier) navigation.requestReorder(row.DelegateModel.itemsIndex, row.DelegateModel.itemsIndex + 1)
+                                if (navigation.horizontal) event.accepted = false
+                                else if (navigation.reorderEnabled && event.modifiers & Qt.AltModifier) navigation.requestReorder(row.DelegateModel.itemsIndex, row.DelegateModel.itemsIndex + 1)
                                 else navigation.focusOffset(row.DelegateModel.itemsIndex, 1)
                             }
                             MouseArea {

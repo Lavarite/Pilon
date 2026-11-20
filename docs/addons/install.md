@@ -25,6 +25,11 @@ Drag a tab to change the saved order, or focus it and press **Alt+Up** or
 **Alt+Down**. The sidebar updates after each drop. Clear a tab's checkbox to hide
 its page without disabling the add-on; check it again to restore the page.
 
+Below 600 logical pixels of usable workspace width, navigation moves to the
+bottom and gives the page the full width. That recovers 64 logical pixels
+from the collapsed sidebar, or 150 from the expanded sidebar. Swipe the bar
+or use the Left and Right arrow keys to reach tabs outside the visible area.
+
 Enabled package settings appear as grouped sections in the main Settings menu.
 Opening them does not create its page or start background work. Disabled add-ons
 have no settings entries. Disabling keeps data, preferences and accounts. All

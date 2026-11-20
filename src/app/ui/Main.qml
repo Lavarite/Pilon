@@ -35,6 +35,7 @@ Window {
                        Math.max(0, height - margins.top - margins.bottom))
     }
     readonly property rect workspaceGeometry: appService.foldOccluding === true ? usableGeometry : safeGeometry
+    readonly property bool bottomNavigation: workspaceGeometry.width / uiScale < 600
     readonly property rect usableGeometry: {
         const area = safeGeometry
         const fold = appService.foldBounds
@@ -546,9 +547,7 @@ Window {
         }
     }
 
-    minimumWidth: mobilePlatform ? 0 : Math.min(Screen.width - 40, uiScale * (notesPane && notesPane.visible
-                  ? sidebar.width + (notesPane.libraryVisible ? 340 : 480)
-                  : 480))
+    minimumWidth: mobilePlatform ? 0 : Math.min(Screen.width - 40, uiScale * (notesPane?.visible && notesPane.libraryVisible ? 340 : 480))
     minimumHeight: mobilePlatform ? 0 : Math.min(Screen.height - 80, uiScale * (notesPane && notesPane.visible ? 320 : filesPane && filesPane.visible
                    ? Math.max(320, 100 + (filesPane.tiles.length > 2 ? 310 : 150)
                               + (filesPane.searchVisible ? 160 : 0)) : 320))
@@ -674,7 +673,9 @@ Window {
         id: addonArea
         objectName: "addonArea"
         visible: window.workspaceActive
-        anchors.fill: parent; anchors.leftMargin: sidebar.width
+        anchors.fill: parent
+        anchors.leftMargin: window.bottomNavigation ? 0 : sidebar.width
+        anchors.bottomMargin: window.bottomNavigation ? sidebar.height : 0
         clip: true
         ColumnLayout {
             objectName: "emptyAddonsPage"
@@ -1061,21 +1062,22 @@ Window {
 
     Rectangle {
         id: sidebar
+        objectName: "navigationArea"
         visible: window.workspaceActive
 
-        anchors.left: parent.left
-        anchors.top: parent.top
-        anchors.bottom: parent.bottom
-        width: navigation.expanded ? 150 : 64
+        y: window.bottomNavigation ? parent.height - height : 0
+        width: window.bottomNavigation ? parent.width : navigation.expanded ? 150 : 64
+        height: window.bottomNavigation ? Math.max(44, navigation.implicitHeight) + 16 : parent.height
         color: window.withOpacity(window.selectedSecondaryColour, 0.48)
 
         AppNavigation {
             id: navigation
             objectName: "appNavigation"
-            anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
-            anchors.topMargin: 16
-            anchors.bottom: settingsButton.top
-            anchors.bottomMargin: offlineIndicator.visible ? 36 : 12
+            horizontal: window.bottomNavigation
+            x: horizontal ? 8 : 0
+            y: horizontal ? (parent.height - height) / 2 : 16
+            width: horizontal ? Math.max(0, (offlineIndicator.visible ? offlineIndicator.x : settingsButton.x) - x - 8) : parent.width
+            height: horizontal ? parent.height - 16 : Math.max(0, settingsButton.y - y - (offlineIndicator.visible ? 36 : 12))
             pages: window.pages
             currentId: window.selectedPage
             onActivated: id => window.selectPage(id, true)
@@ -1084,9 +1086,8 @@ Window {
         ControlsImpl.ColorImage {
             id: offlineIndicator
             objectName: "offlineIndicator"
-            anchors.horizontalCenter: parent.horizontalCenter
-            anchors.bottom: settingsButton.top
-            anchors.bottomMargin: 8
+            x: window.bottomNavigation ? settingsButton.x - width - 8 : (parent.width - width) / 2
+            y: window.bottomNavigation ? (parent.height - height) / 2 : settingsButton.y - height - 8
             width: 20; height: 20
             source: "icons/wifi-off.svg"
             color: window.selectedMutedTextColour
@@ -1098,13 +1099,12 @@ Window {
             id: settingsButton
             objectName: "settingsNavigation"
 
-            anchors.horizontalCenter: parent.horizontalCenter
-            anchors.bottom: parent.bottom
-            anchors.bottomMargin: 10
-            width: navigation.expanded ? sidebar.width - 20 : 44
+            x: window.bottomNavigation ? parent.width - width - 8 : (parent.width - width) / 2
+            y: window.bottomNavigation ? (parent.height - height) / 2 : parent.height - height - 10
+            width: navigation.expanded && !window.bottomNavigation ? sidebar.width - 20 : 44
             height: 44
             text: qsTr("Settings")
-            display: navigation.expanded ? AbstractButton.TextBesideIcon
+            display: navigation.expanded && !window.bottomNavigation ? AbstractButton.TextBesideIcon
                                       : AbstractButton.IconOnly
             icon.source: "icons/cog-6-tooth.svg"
             icon.width: 24
