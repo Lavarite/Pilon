@@ -149,13 +149,64 @@ TestCase {
         }
         capture(page,"cover-width")
     }
-    function test_nativeAccountControlsRemainAvailable() {
-        manager.externalApplication = false; manager.loggedIn = true; manager.serviceRunning = true
-        wait(30)
-        verify(control("devicesSignOut").visible); verify(control("devicesUseAccount").visible)
-        verify(!control("devicesAddSaved").visible); verify(!control("devicesOpenExternal").visible)
-        capture(page,"native-account")
-        mouseClick(control("devicesSignOut")); compare(manager.calls.join(","), "logout")
+    function clickConfirmationAction(dialog, action) {
+        const host = dialog.dialogWindow
+        action.forceActiveFocus(Qt.TabFocusReason)
+        tryCompare(action, "activeFocus", true)
+        verify(waitForPolish(dialog.contentItem))
+        host.update(); verify(waitForRendering(host.contentItem))
+        tryVerify(() => {
+            const first = action.mapToItem(host.contentItem, 0, 0)
+            const last = action.mapToItem(host.contentItem, action.width, action.height)
+            return action.width > 0 && action.height > 0 && first.x >= 0 && first.y >= 0
+                && last.x <= host.width + 1 && last.y <= host.height + 1
+        })
+        mouseClick(action)
+    }
+    function test_nativeAccountControlsRemainAvailable_data() {
+        return [{tag: "normal", font: 0}, {tag: "narrow-large-font", font: 28}]
+    }
+    function test_nativeAccountControlsRemainAvailable(data) {
+        const screen = tabletInput.screenGeometry(), font = tabletInput.applicationFont()
+        try {
+            if (data.font) {
+                tabletInput.setScreenGeometry(Qt.rect(0, 0, 320, 640))
+                tabletInput.setApplicationFont(Qt.font({family: font.family, pixelSize: data.font}))
+                owner.uiScale = 1.4
+                owner.width = 320; owner.height = 640
+            }
+            manager.externalApplication = false; manager.loggedIn = true; manager.serviceRunning = true
+            verify(control("devicesSignOut").visible); verify(control("devicesUseAccount").visible)
+            verify(!control("devicesAddSaved").visible); verify(!control("devicesOpenExternal").visible)
+            capture(page, data.font ? "native-account-large-font" : "native-account")
+            click("devicesSignOut")
+            compare(manager.calls.length, 0, "Opening confirmation does not sign out")
+            const confirmation = control("devicesSignOutConfirmation")
+            tryCompare(confirmation, "opened", true)
+            tryCompare(confirmation.dialogWindow, "visible", true)
+            compare(confirmation.dialogWindow.transientParent, owner)
+            const cancel = control("devicesCancelSignOut")
+            tryCompare(cancel, "activeFocus", true)
+            clickConfirmationAction(confirmation, cancel)
+            tryCompare(confirmation, "opened", false)
+            compare(manager.calls.length, 0)
+            verify(manager.loggedIn)
+            tryCompare(control("devicesSignOut"), "activeFocus", true)
+
+            click("devicesSignOut")
+            tryCompare(confirmation, "opened", true)
+            const signOut = control("devicesConfirmSignOut")
+            manager.busy = true
+            verify(!signOut.enabled)
+            manager.busy = false
+            clickConfirmationAction(confirmation, signOut)
+            tryCompare(confirmation, "opened", false)
+            compare(manager.calls.join(","), "logout")
+        } finally {
+            owner.uiScale = 1
+            tabletInput.setApplicationFont(font)
+            tabletInput.setScreenGeometry(screen)
+        }
     }
     function test_missingDesktopClientShowsDownloadInsteadOfServiceActions() {
         manager.externalApplication = false
