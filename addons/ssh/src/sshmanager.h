@@ -16,23 +16,36 @@ class SshManager : public QObject
 
     Q_PROPERTY(bool running READ running NOTIFY runningChanged)
     Q_PROPERTY(bool authenticated READ authenticated NOTIFY authenticatedChanged)
+    Q_PROPERTY(bool connecting READ connecting NOTIFY connectingChanged)
     Q_PROPERTY(QString errorMessage READ errorMessage NOTIFY errorMessageChanged)
+    Q_PROPERTY(QString errorDetails READ errorDetails NOTIFY errorMessageChanged)
+    Q_PROPERTY(bool canRetry READ canRetry NOTIFY errorMessageChanged)
     Q_PROPERTY(QString connectionText READ connectionText NOTIFY connectionTextChanged)
     Q_PROPERTY(QString promptText READ promptText NOTIFY promptChanged)
+    Q_PROPERTY(PromptKind promptKind READ promptKind NOTIFY promptChanged)
+    Q_PROPERTY(quint64 promptRevision READ promptRevision NOTIFY promptChanged)
     Q_PROPERTY(bool promptSecret READ promptSecret NOTIFY promptChanged)
     Q_PROPERTY(bool promptPassword READ promptPassword NOTIFY promptChanged)
     Q_PROPERTY(bool passwordSavingAvailable READ passwordSavingAvailable CONSTANT)
     Q_PROPERTY(QVariantList savedConnections READ savedConnections NOTIFY savedConnectionsChanged)
 
 public:
+    enum PromptKind { NoPrompt, HostTrustPrompt, PasswordPrompt, SecretPrompt, ChallengePrompt };
+    Q_ENUM(PromptKind)
+
     explicit SshManager(QObject *parent = nullptr);
     ~SshManager() override;
 
     [[nodiscard]] bool running() const;
     [[nodiscard]] bool authenticated() const;
+    [[nodiscard]] bool connecting() const { return m_running && !m_authenticated && !m_disconnectRequested; }
     [[nodiscard]] QString errorMessage() const;
+    [[nodiscard]] QString errorDetails() const { return m_errorDetails; }
+    [[nodiscard]] bool canRetry() const { return m_canRetry; }
     [[nodiscard]] QString connectionText() const;
     [[nodiscard]] QString promptText() const;
+    [[nodiscard]] PromptKind promptKind() const;
+    [[nodiscard]] quint64 promptRevision() const { return m_promptRevision; }
     [[nodiscard]] bool promptSecret() const;
     [[nodiscard]] bool promptPassword() const;
     [[nodiscard]] bool passwordSavingAvailable() const;
@@ -46,16 +59,20 @@ public:
     Q_INVOKABLE void connectToHostAt(const QString &username, const QString &host,
                                      const QString &directory);
     Q_INVOKABLE void disconnectFromHost();
+    Q_INVOKABLE void retryConnection();
+    Q_INVOKABLE void dismissError();
     Q_INVOKABLE QString cleanupBlockedReason() const;
     Q_INVOKABLE bool forgetPasswords();
     Q_INVOKABLE void submitPrompt(const QString &input);
     Q_INVOKABLE void submitPromptAndSave(const QString &input);
+    Q_INVOKABLE void trustHost();
     Q_INVOKABLE void writeTerminalData(const QByteArray &data);
     Q_INVOKABLE void resizeTerminal(int rows, int columns);
 
 signals:
     void runningChanged();
     void authenticatedChanged();
+    void connectingChanged();
     void errorMessageChanged();
     void connectionTextChanged();
     void promptChanged();
@@ -67,13 +84,14 @@ private:
     void startConnection(const QString &username, const QString &host,
                          const QString &directory, const QString &command = {},
                          const QString &localPath = {}, const QString &remotePath = {},
-                         bool upload = false);
+                         bool upload = false, bool retry = false);
     void readPseudoTerminal();
     void closePseudoTerminal();
     void handleFinished(int exitCode, QProcess::ExitStatus exitStatus);
     void setRunning(bool running);
     void setAuthenticated(bool authenticated);
-    void setErrorMessage(const QString &message);
+    void setErrorMessage(const QString &message, const QString &details = {}, bool canRetry = false);
+    void reportConnectionFailure(const QString &details, int exitCode, bool canRetry);
     void setConnectionText(const QString &text);
     void updatePrompt();
     void clearPrompt();
@@ -94,6 +112,8 @@ private:
     bool m_authenticated = false;
     QString m_sessionOutput;
     QString m_errorMessage;
+    QString m_errorDetails;
+    bool m_canRetry = false;
     QString m_connectionText;
     QString m_promptText;
     QString m_initialDirectory;
@@ -101,13 +121,12 @@ private:
     QString m_currentHost;
     QString m_passwordToSave;
     quint64 m_passwordSaveRevision = 0;
-    bool m_promptSecret = false;
-    bool m_promptPassword = false;
+    PromptKind m_promptKind = NoPrompt;
     bool m_loadingPassword = false;
     bool m_passwordLookupAttempted = false;
-#ifdef Q_OS_ANDROID
     quint64 m_promptRevision = 0;
-#endif
+    quint64 m_lookupPromptRevision = 0;
+    quint64 m_connectionRevision = 0;
     int m_terminalRows = 24;
     int m_terminalColumns = 80;
     bool m_disconnectRequested = false;

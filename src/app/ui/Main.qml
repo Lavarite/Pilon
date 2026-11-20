@@ -1636,22 +1636,20 @@ Window {
     PilonPopup {
         id: sshLoginNotification
         objectName: "sshLoginNotification"
-        readonly property bool prompting: sshManager.promptText.length > 0
-        readonly property bool hostConfirmation: prompting && sshManager.promptText.indexOf("yes/no") >= 0
-        readonly property bool connecting: sshManager.running && !sshManager.authenticated
-            && (prompting || sshManager.connectionText.length > 0)
+        readonly property bool prompting: sshManager.promptKind !== Backend.SshManager.NoPrompt
+        readonly property bool hostConfirmation: sshManager.promptKind === Backend.SshManager.HostTrustPrompt
+        readonly property bool connecting: sshManager.connecting
         readonly property bool failed: sshManager.errorMessage.length > 0
-        readonly property string details: failed ? sshManager.errorMessage : sshManager.connectionText
-        readonly property string errorSummary: sshManager.errorMessage.split("\n").filter(line => line.trim()).pop() || ""
+        readonly property string details: failed ? sshManager.errorDetails : sshManager.connectionText
         property bool showErrorDetails: false
-        property string lastPrompt: ""
+        property real lastPromptRevision: -1
 
         function refresh() {
-            const changed = lastPrompt !== sshManager.promptText
+            const changed = lastPromptRevision !== sshManager.promptRevision
             if (changed) {
                 sshPromptInput.clear()
                 saveSshPassword.checked = false
-                lastPrompt = sshManager.promptText
+                lastPromptRevision = sshManager.promptRevision
             }
             if (prompting || connecting || failed) {
                 open()
@@ -1659,9 +1657,9 @@ Window {
             } else close()
         }
         function submit() {
-            const response = hostConfirmation ? "yes" : sshPromptInput.text
-            if (saveSshPassword.checked) sshManager.submitPromptAndSave(response)
-            else sshManager.submitPrompt(response)
+            if (hostConfirmation) sshManager.trustHost()
+            else if (saveSshPassword.checked) sshManager.submitPromptAndSave(sshPromptInput.text)
+            else sshManager.submitPrompt(sshPromptInput.text)
             sshPromptInput.clear()
         }
         function linkedText(value) {
@@ -1681,7 +1679,10 @@ Window {
         modal: connecting || prompting
         focus: modal
         closePolicy: Popup.CloseOnEscape
-        onClosed: if (connecting || prompting) sshManager.disconnectFromHost()
+        onClosed: {
+            if (connecting || prompting) sshManager.disconnectFromHost()
+            else if (failed) sshManager.dismissError()
+        }
         palette: window.palette
         background: Rectangle {
             radius: 8; color: window.selectedMainColour
@@ -1712,7 +1713,7 @@ Window {
                     objectName: "sshErrorSummary"
                     Layout.fillWidth: true
                     visible: sshLoginNotification.failed
-                    text: sshLoginNotification.errorSummary
+                    text: sshManager.errorMessage
                     textFormat: Text.PlainText
                     color: window.selectedWarningColour
                     wrapMode: Text.Wrap; maximumLineCount: 3; elide: Text.ElideRight
@@ -1720,8 +1721,9 @@ Window {
                 }
                 Label {
                     Layout.fillWidth: true
-                    visible: sshLoginNotification.prompting
-                    text: sshManager.promptText
+                    visible: sshLoginNotification.prompting || (sshLoginNotification.connecting
+                        && !sshLoginNotification.failed && sshLoginNotification.details.length === 0)
+                    text: sshLoginNotification.prompting ? sshManager.promptText : qsTr("Connecting…")
                     textFormat: Text.PlainText
                     color: window.selectedTextColour
                     wrapMode: Text.Wrap
@@ -1743,8 +1745,9 @@ Window {
                         id: sshConnectionDetails
                         objectName: "sshConnectionDetails"
                         width: sshDetailsScroll.availableWidth
-                        text: sshLoginNotification.linkedText(sshLoginNotification.details)
-                        textFormat: TextEdit.RichText
+                        text: sshLoginNotification.failed ? sshLoginNotification.details
+                            : sshLoginNotification.linkedText(sshLoginNotification.details)
+                        textFormat: sshLoginNotification.failed ? TextEdit.PlainText : TextEdit.RichText
                         wrapMode: TextEdit.Wrap
                         readOnly: true; selectByMouse: true; padding: 0
                         background: null
@@ -1754,7 +1757,7 @@ Window {
                 }
                 PilonButton {
                     objectName: "sshErrorDetailsToggle"
-                    visible: sshLoginNotification.failed
+                    visible: sshLoginNotification.failed && sshLoginNotification.details.length > 0
                     text: sshLoginNotification.showErrorDetails ? qsTr("Hide details") : qsTr("Show details")
                     onClicked: sshLoginNotification.showErrorDetails = !sshLoginNotification.showErrorDetails
                 }
@@ -1777,7 +1780,7 @@ Window {
                 }
                 Flow {
                     Layout.fillWidth: true
-                    visible: sshLoginNotification.connecting || sshLoginNotification.prompting
+                    visible: sshLoginNotification.connecting || sshLoginNotification.prompting || sshLoginNotification.failed
                     layoutDirection: Qt.RightToLeft
                     spacing: 8
                     PilonButton {
@@ -1790,10 +1793,21 @@ Window {
                         onClicked: sshLoginNotification.submit()
                     }
                     PilonButton {
+                        objectName: "sshRetryConnection"
+                        visible: sshLoginNotification.failed && sshManager.canRetry && !sshManager.running
+                        width: Math.min(implicitWidth, parent.width)
+                        text: qsTr("Retry")
+                        highlighted: true
+                        onClicked: sshManager.retryConnection()
+                    }
+                    PilonButton {
                         objectName: "sshCancelConnection"
                         width: Math.min(implicitWidth, parent.width)
-                        text: qsTr("Cancel")
-                        onClicked: sshManager.disconnectFromHost()
+                        text: sshLoginNotification.connecting ? qsTr("Cancel") : qsTr("Dismiss")
+                        onClicked: {
+                            if (sshLoginNotification.connecting) sshManager.disconnectFromHost()
+                            else sshLoginNotification.close()
+                        }
                     }
                 }
             }
@@ -1803,7 +1817,7 @@ Window {
             target: sshManager
             function onPromptChanged() { Qt.callLater(sshLoginNotification.refresh) }
             function onConnectionTextChanged() { Qt.callLater(sshLoginNotification.refresh) }
-            function onRunningChanged() { Qt.callLater(sshLoginNotification.refresh) }
+            function onConnectingChanged() { Qt.callLater(sshLoginNotification.refresh) }
             function onErrorMessageChanged() {
                 sshLoginNotification.showErrorDetails = false
                 Qt.callLater(sshLoginNotification.refresh)

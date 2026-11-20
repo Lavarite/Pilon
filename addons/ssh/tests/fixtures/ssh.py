@@ -7,6 +7,18 @@ if mode == 'long-error':
 if mode == 'failure':
     print('ssh: Could not resolve hostname unavailable.fixture.invalid: Name or service not known', flush=True)
     sys.exit(255)
+if mode == 'refused':
+    print('ssh: connect to host host.fixture.invalid port 22: Connection refused', flush=True)
+    sys.exit(255)
+if mode == 'timeout':
+    print('ssh: connect to host host.fixture.invalid port 22: Connection timed out', flush=True)
+    sys.exit(255)
+if mode == 'denied':
+    print('ssh: connect to host host.fixture.invalid port 22: Permission denied', flush=True)
+    sys.exit(255)
+if mode == 'changed-key':
+    print('WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!\nHost key verification failed.', flush=True)
+    sys.exit(255)
 if mode == 'logout':
     sys.stdout.write('\x1ePILON_AUTHENTICATED\x1f')
     sys.stdout.flush()
@@ -18,6 +30,11 @@ if mode == 'host':
 elif mode == 'approval':
     print('To authenticate, visit:\nhttps://login.fixture.invalid/approve', flush=True)
     sys.stdin.readline()
+elif mode == 'challenge':
+    sys.stdout.write('Choose a verification option: ')
+    sys.stdout.flush()
+    if sys.stdin.readline().strip() != '1':
+        sys.exit(255)
 elif mode in ('password', 'password-challenge', 'transfer-password'):
     attributes = termios.tcgetattr(0)
     attributes[3] &= ~termios.ECHO
@@ -25,6 +42,7 @@ elif mode in ('password', 'password-challenge', 'transfer-password'):
     sys.stdout.write('tester@host.fixture.invalid password: ')
     sys.stdout.flush()
     if sys.stdin.readline().strip() != 'test-password':
+        print('Permission denied (publickey,password).', flush=True)
         sys.exit(255)
     if mode == 'transfer-password':
         sys.exit(0)

@@ -20,6 +20,7 @@
 #include <fcntl.h>
 #include <pty.h>
 #include <sys/ioctl.h>
+#include <termios.h>
 #include <unistd.h>
 
 namespace {
@@ -44,11 +45,18 @@ QString cleanTerminalText(const QByteArray &output)
     for (const QChar character : text) {
         const ushort value = character.unicode();
         if (character == QLatin1Char('\n') || character == QLatin1Char('\t')
-            || (value >= 0x20 && value != 0x7f)) {
+            || (value >= 0x20 && (value < 0x7f || value >= 0xa0)
+                && character.category() != QChar::Other_Format)) {
             cleaned.append(character);
         }
     }
     return cleaned;
+}
+
+bool terminalEchoDisabled(int descriptor)
+{
+    termios settings{};
+    return tcgetattr(descriptor, &settings) == 0 && !(settings.c_lflag & ECHO);
 }
 
 bool validUsername(const QString &username)
@@ -112,22 +120,33 @@ SshManager::SshManager(QObject *parent)
 #endif
 {
     connect(&m_secretLookupProcess, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
-        if (error == QProcess::FailedToStart) { m_loadingPassword = false; if (m_promptPassword) emit promptChanged(); }
+        if (error == QProcess::FailedToStart && m_lookupPromptRevision == m_promptRevision && m_loadingPassword) {
+            m_loadingPassword = false;
+            setConnectionText(tr("Could not read saved SSH passwords. Enter your password."));
+            emit promptChanged();
+        }
     });
     connect(&m_process, &QProcess::finished, this, &SshManager::handleFinished);
     connect(&m_secretLookupProcess, &QProcess::finished, this,
             [this](int exitCode, QProcess::ExitStatus exitStatus) {
-                m_loadingPassword = false;
                 QByteArray password = m_secretLookupProcess.readAllStandardOutput();
+                const auto keyringError = m_secretLookupProcess.readAllStandardError();
+                if (m_lookupPromptRevision != m_promptRevision || !m_loadingPassword) {
+                    password.fill('\0');
+                    return;
+                }
+                m_loadingPassword = false;
                 if (password.endsWith('\n'))
                     password.chop(1);
                 if (password.endsWith('\r'))
                     password.chop(1);
                 if (exitStatus == QProcess::NormalExit && exitCode == 0
-                    && !password.isEmpty() && m_promptPassword) {
+                    && !password.isEmpty() && m_promptKind == PasswordPrompt) {
                     SshCredentials::put(m_currentHost, m_currentUsername, QString::fromUtf8(password));
                     submitPrompt(QString::fromUtf8(password));
-                } else if (m_promptPassword) {
+                } else {
+                    if (!keyringError.trimmed().isEmpty() || exitStatus != QProcess::NormalExit)
+                        setConnectionText(tr("Could not read saved SSH passwords. Enter your password."));
                     emit promptChanged();
                 }
                 password.fill('\0');
@@ -175,14 +194,19 @@ QString SshManager::promptText() const
     return m_loadingPassword ? QString{} : m_promptText;
 }
 
+SshManager::PromptKind SshManager::promptKind() const
+{
+    return m_loadingPassword ? NoPrompt : m_promptKind;
+}
+
 bool SshManager::promptSecret() const
 {
-    return m_promptSecret;
+    return m_promptKind == PasswordPrompt || m_promptKind == SecretPrompt;
 }
 
 bool SshManager::promptPassword() const
 {
-    return m_promptPassword;
+    return m_promptKind == PasswordPrompt;
 }
 
 bool SshManager::passwordSavingAvailable() const
@@ -210,7 +234,7 @@ bool SshManager::forgetPasswords()
     }
     ++m_promptRevision;
     m_loadingPassword = false;
-    if (m_promptPassword) emit promptChanged();
+    if (m_promptKind == PasswordPrompt) emit promptChanged();
 #else
     if (m_secretToolExecutable.isEmpty()) {
         setErrorMessage(tr("Install secret-tool (libsecret) to remove saved SSH passwords, then try again."));
@@ -245,12 +269,15 @@ void SshManager::connectToHostAt(const QString &usernameInput, const QString &ho
 void SshManager::startConnection(const QString &usernameInput, const QString &hostInput,
                                  const QString &directoryInput, const QString &command,
                                  const QString &localPath, const QString &remotePath,
-                                 bool upload)
+                                 bool upload, bool retry)
 {
     if (m_process.state() != QProcess::NotRunning) {
         setErrorMessage(tr("An SSH session is already running."));
         return;
     }
+
+    ++m_connectionRevision;
+    dismissError();
 
     const QString username = usernameInput.trimmed();
     if (username.isEmpty() || hostInput.trimmed().isEmpty()) {
@@ -327,7 +354,7 @@ void SshManager::startConnection(const QString &usernameInput, const QString &ho
     m_initialDirectory = directory;
     m_currentUsername = username;
     m_currentHost = host;
-    m_passwordLookupAttempted = false;
+    m_passwordLookupAttempted = retry;
     m_disconnectRequested = false;
     m_taskMode = !command.isEmpty() || transfer;
     m_transferMode = transfer;
@@ -351,6 +378,7 @@ void SshManager::startConnection(const QString &usernameInput, const QString &ho
     m_process.setProcessEnvironment(environment);
     QStringList arguments{m_taskMode ? QStringLiteral("-T") : QStringLiteral("-tt"),
                           QStringLiteral("-o"), QStringLiteral("ConnectTimeout=10"),
+                          QStringLiteral("-o"), QStringLiteral("StrictHostKeyChecking=ask"),
                           QStringLiteral("-o"), QStringLiteral("PermitLocalCommand=yes"),
                           QStringLiteral("-o"),
                           QStringLiteral("LocalCommand=printf '\\036PILON_AUTHENTICATED\\037'"),
@@ -386,7 +414,7 @@ void SshManager::startConnection(const QString &usernameInput, const QString &ho
     ::close(slaveFd);
     if (!started) {
         closePseudoTerminal();
-        setErrorMessage(m_process.errorString());
+        setErrorMessage(tr("Could not start the OpenSSH client."), m_process.errorString());
         return;
     }
 
@@ -399,13 +427,15 @@ void SshManager::startConnection(const QString &usernameInput, const QString &ho
 
 void SshManager::disconnectFromHost()
 {
-    if (m_process.state() == QProcess::NotRunning)
+    if (m_process.state() == QProcess::NotRunning || m_disconnectRequested)
         return;
 
     m_disconnectRequested = true;
+    ++m_connectionRevision;
     m_passwordToSave.clear();
     clearPrompt();
     setConnectionText({});
+    emit connectingChanged();
     if (m_secretLookupProcess.state() != QProcess::NotRunning)
         m_secretLookupProcess.kill();
     const auto processId = m_process.processId();
@@ -417,26 +447,46 @@ void SshManager::disconnectFromHost()
     });
 }
 
+void SshManager::retryConnection()
+{
+    if (!m_canRetry || m_running) return;
+    startConnection(m_currentUsername, m_currentHost, m_initialDirectory, {}, {}, {}, false, true);
+}
+
+void SshManager::dismissError()
+{
+    setErrorMessage({});
+}
+
 void SshManager::submitPrompt(const QString &input)
 {
-    submitPromptInternal(input, false);
+    if (m_promptKind != HostTrustPrompt) submitPromptInternal(input, false);
 }
 
 void SshManager::submitPromptAndSave(const QString &input)
 {
-    submitPromptInternal(input, true);
+    if (m_promptKind == PasswordPrompt) submitPromptInternal(input, true);
+}
+
+void SshManager::trustHost()
+{
+    if (m_promptKind == HostTrustPrompt) submitPromptInternal(QStringLiteral("yes"), false);
 }
 
 void SshManager::submitPromptInternal(const QString &input, bool shouldSavePassword)
 {
-    if (!m_running || m_authenticated || m_promptText.isEmpty())
+    if (!m_running || m_authenticated || m_disconnectRequested || m_loadingPassword || m_promptKind == NoPrompt)
         return;
+    if (promptSecret() && !terminalEchoDisabled(m_masterFd)) {
+        setErrorMessage(tr("Could not safely send the SSH credentials. Cancel and reconnect."));
+        return;
+    }
 
     QString response = input.left(4096);
     response.remove(QLatin1Char('\0'));
     response.remove(QLatin1Char('\r'));
     response.remove(QLatin1Char('\n'));
-    if (shouldSavePassword && m_promptPassword && passwordSavingAvailable()) {
+    if (shouldSavePassword && m_promptKind == PasswordPrompt && passwordSavingAvailable()) {
         m_passwordToSave = response;
         m_passwordSaveRevision = SshCredentials::revision();
     }
@@ -535,7 +585,6 @@ void SshManager::readPseudoTerminal()
         setAuthenticated(true);
         if (m_taskMode)
             m_taskOutput.append(authenticatedOutput);
-        m_initialDirectory.clear();
         if (!authenticatedOutput.isEmpty())
             emit terminalData(authenticatedOutput);
         return;
@@ -560,6 +609,7 @@ void SshManager::handleFinished(int exitCode, QProcess::ExitStatus exitStatus)
 {
     readPseudoTerminal();
     const bool disconnected = m_disconnectRequested;
+    const bool wasAuthenticated = m_authenticated;
     m_disconnectRequested = false;
     if (m_transferMode && !disconnected && exitStatus == QProcess::NormalExit && exitCode == 0)
         saveAuthenticatedPassword();
@@ -567,22 +617,26 @@ void SshManager::handleFinished(int exitCode, QProcess::ExitStatus exitStatus)
     setAuthenticated(false);
     clearPrompt();
     setConnectionText({});
-    m_initialDirectory.clear();
     closePseudoTerminal();
     const bool taskMode = std::exchange(m_taskMode, false);
     const QString taskOutput = m_transferMode
         ? (exitCode == 0 ? tr("File transfer completed.") : m_sessionOutput.trimmed())
         : cleanTerminalText(m_taskOutput).trimmed();
-    QString message = m_sessionOutput.trimmed().right(8192);
-    if (message.isEmpty()) message = tr("The SSH connection failed with exit code %1.").arg(exitCode);
-    if (disconnected || (exitStatus == QProcess::NormalExit && exitCode == 0)) setErrorMessage({});
-    else setErrorMessage(message);
+    if (disconnected || (exitStatus == QProcess::NormalExit && exitCode == 0)) {
+        dismissError();
+    } else if (wasAuthenticated) {
+        setErrorMessage(tr("The SSH session ended with exit code %1.").arg(exitCode));
+    } else {
+        const auto details = cleanTerminalText(m_preAuthenticationOutput).trimmed().right(8192);
+        reportConnectionFailure(details, exitCode, !taskMode);
+    }
+    const auto failure = m_errorMessage;
     // Finish all cleanup before observers are allowed to start another session.
     setRunning(false);
 
     if (taskMode) {
         emit taskFinished(disconnected ? -1 : exitCode,
-                          taskOutput.isEmpty() && exitCode != 0 ? message : taskOutput);
+                          taskOutput.isEmpty() && exitCode != 0 ? failure : taskOutput);
     }
 }
 
@@ -590,14 +644,17 @@ void SshManager::setRunning(bool running)
 {
     if (m_running == running)
         return;
+    const bool wasConnecting = connecting();
     m_running = running;
     emit runningChanged();
+    if (wasConnecting != connecting()) emit connectingChanged();
 }
 
 void SshManager::setAuthenticated(bool authenticated)
 {
     if (m_authenticated == authenticated)
         return;
+    const bool wasConnecting = connecting();
     m_authenticated = authenticated;
     if (authenticated) {
         QVariantList connections = QJsonDocument::fromJson(PilonSettings().value("ssh/connections")
@@ -612,6 +669,7 @@ void SshManager::setAuthenticated(bool authenticated)
         }
     }
     emit authenticatedChanged();
+    if (wasConnecting != connecting()) emit connectingChanged();
 }
 
 QVariantList SshManager::savedConnections() const
@@ -642,12 +700,35 @@ void SshManager::transferFile(const QString &username, const QString &host,
     startConnection(username, host, {}, {}, localPath, remotePath, upload);
 }
 
-void SshManager::setErrorMessage(const QString &message)
+void SshManager::setErrorMessage(const QString &message, const QString &details, bool canRetry)
 {
-    if (m_errorMessage == message)
+    if (m_errorMessage == message && m_errorDetails == details && m_canRetry == canRetry)
         return;
     m_errorMessage = message;
+    m_errorDetails = details;
+    m_canRetry = canRetry;
     emit errorMessageChanged();
+}
+
+void SshManager::reportConnectionFailure(const QString &details, int exitCode, bool canRetry)
+{
+    const auto contains = [&](QLatin1String message) { return details.contains(message, Qt::CaseInsensitive); };
+    if (contains(QLatin1String("REMOTE HOST IDENTIFICATION HAS CHANGED")))
+        setErrorMessage(tr("The SSH host key changed. Verify the new key with the device owner."), details);
+    else if (contains(QLatin1String("Host key verification failed")))
+        setErrorMessage(tr("Could not verify the SSH host key."), details);
+    else if (contains(QLatin1String("Could not resolve hostname")))
+        setErrorMessage(tr("Could not find the SSH host."), details, canRetry);
+    else if (contains(QLatin1String("Connection refused")))
+        setErrorMessage(tr("The device refused the SSH connection."), details, canRetry);
+    else if (contains(QLatin1String("timed out")))
+        setErrorMessage(tr("The SSH connection timed out."), details, canRetry);
+    else if (contains(QLatin1String("Permission denied (")) || contains(QLatin1String("Too many authentication failures")))
+        setErrorMessage(tr("SSH authentication failed."), details, canRetry);
+    else if (contains(QLatin1String("Permission denied")))
+        setErrorMessage(tr("Permission denied by SSH."), details);
+    else
+        setErrorMessage(tr("The SSH connection failed with exit code %1.").arg(exitCode), details, canRetry);
 }
 
 void SshManager::setConnectionText(const QString &text)
@@ -662,48 +743,41 @@ void SshManager::updatePrompt()
 {
     const QString output = cleanTerminalText(m_preAuthenticationOutput);
     const QString candidate = output.sliced(output.lastIndexOf(QLatin1Char('\n')) + 1).trimmed();
+    const bool secret = terminalEchoDisabled(m_masterFd);
     const bool inputPrompt = !candidate.isEmpty() && candidate.size() <= 1024
-        && (candidate.endsWith(QLatin1Char(':')) || candidate.endsWith(QLatin1Char('?')));
+        && (secret || candidate.endsWith(QLatin1Char(':')) || candidate.endsWith(QLatin1Char('?')));
     setConnectionText((inputPrompt ? output.left(output.lastIndexOf(QLatin1Char('\n')) + 1)
                                    : output).trimmed().right(8192));
     if (!inputPrompt) {
         return;
     }
 
-    const bool secret = candidate.contains(QStringLiteral("password"), Qt::CaseInsensitive)
-                        || candidate.contains(QStringLiteral("passphrase"), Qt::CaseInsensitive)
-                        || candidate.contains(QStringLiteral("verification"), Qt::CaseInsensitive)
-                        || candidate.contains(QStringLiteral("token"), Qt::CaseInsensitive)
-                        || candidate.contains(QStringLiteral("code"), Qt::CaseInsensitive)
-                        || candidate.contains(QStringLiteral("otp"), Qt::CaseInsensitive);
-    const bool password = candidate.contains(QStringLiteral("password"), Qt::CaseInsensitive);
-    if (m_promptText == candidate && m_promptSecret == secret
-        && m_promptPassword == password)
+    const bool trust = candidate.startsWith(QLatin1String("Are you sure you want to continue connecting (yes/no"))
+        && output.contains(QLatin1String("authenticity of host")) && output.contains(QLatin1String("key fingerprint is"));
+    const bool password = secret && (candidate.compare(QLatin1String("Password:"), Qt::CaseInsensitive) == 0
+        || (candidate.startsWith(m_currentUsername + '@') && candidate.endsWith(QLatin1String(" password:"), Qt::CaseInsensitive)));
+    const PromptKind kind = trust ? HostTrustPrompt : password ? PasswordPrompt : secret ? SecretPrompt : ChallengePrompt;
+    if (m_promptText == candidate && m_promptKind == kind)
         return;
 
     m_promptText = candidate;
-    m_promptSecret = secret;
-    m_promptPassword = password;
+    m_promptKind = kind;
+    m_loadingPassword = false;
     if (password)
         m_passwordToSave.clear();
-#ifdef Q_OS_ANDROID
     ++m_promptRevision;
-#endif
-    if (m_promptPassword && lookupSavedPassword()) return;
+    if (password && lookupSavedPassword()) return;
     emit promptChanged();
 }
 
 void SshManager::clearPrompt()
 {
-#ifdef Q_OS_ANDROID
     ++m_promptRevision;
-#endif
     m_loadingPassword = false;
-    if (m_promptText.isEmpty() && !m_promptSecret && !m_promptPassword)
+    if (m_promptKind == NoPrompt)
         return;
     m_promptText.clear();
-    m_promptSecret = false;
-    m_promptPassword = false;
+    m_promptKind = NoPrompt;
     emit promptChanged();
 }
 
@@ -727,7 +801,7 @@ bool SshManager::lookupSavedPassword()
         auto result = watcher->result();
         watcher->deleteLater();
         // A completed lookup must never answer a later session's prompt.
-        if (revision != m_promptRevision || !m_running || !m_promptPassword) {
+        if (revision != m_promptRevision || !m_running || m_promptKind != PasswordPrompt) {
             result.secret.fill('\0');
             return;
         }
@@ -737,6 +811,7 @@ bool SshManager::lookupSavedPassword()
             SshCredentials::put(host, username, password);
             submitPrompt(password);
         } else {
+            if (!result.ok) setConnectionText(tr("Could not read saved SSH passwords. Enter your password."));
             emit promptChanged();
         }
         result.secret.fill('\0');
@@ -755,6 +830,7 @@ bool SshManager::lookupSavedPassword()
          QStringLiteral("protocol"), QStringLiteral("ssh"), QStringLiteral("host"),
          m_currentHost, QStringLiteral("user"), m_currentUsername});
     m_loadingPassword = true;
+    m_lookupPromptRevision = m_promptRevision;
     m_secretLookupProcess.start();
     return true;
 #endif
@@ -775,9 +851,14 @@ void SshManager::savePassword(const QString &password)
         return;
     }
     SshCredentials::put(m_currentHost, m_currentUsername, password);
+    const auto revision = m_connectionRevision;
+    const auto reportFailure = [this, revision] {
+        if (revision == m_connectionRevision)
+            setErrorMessage(tr("The system keyring could not save the SSH password."));
+    };
 #ifdef Q_OS_ANDROID
-    SshCredentials::saveAndroidPassword(m_currentHost, m_currentUsername, password, this, [this](bool ok) {
-        if (!ok) setErrorMessage(tr("The password is available in this session, but the system keyring could not save it."));
+    SshCredentials::saveAndroidPassword(m_currentHost, m_currentUsername, password, this, [reportFailure](bool ok) {
+        if (!ok) reportFailure();
     });
 #else
     auto *process = new QProcess(QCoreApplication::instance());
@@ -791,7 +872,15 @@ void SshManager::savePassword(const QString &password)
         process->write(password.toUtf8());
         process->closeWriteChannel();
     });
+    connect(process, &QProcess::finished, this, [reportFailure](int code, QProcess::ExitStatus state) {
+        if (state != QProcess::NormalExit || code != 0) reportFailure();
+    });
     connect(process, &QProcess::finished, process, &QObject::deleteLater);
+    connect(process, &QProcess::errorOccurred, this, [process, reportFailure](QProcess::ProcessError error) {
+        if (error != QProcess::FailedToStart) return;
+        reportFailure();
+        process->deleteLater();
+    });
     SshCredentials::trackWrite(process);
     process->start();
 #endif
