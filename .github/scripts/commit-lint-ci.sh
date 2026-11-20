@@ -8,9 +8,6 @@ if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
     python3 "$lint" history "$PR_HEAD" "$PR_BASE"
 elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
     python3 "$lint" tag "$GITHUB_SHA"
-    if [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-        printf 'release=true\n' >> "$GITHUB_OUTPUT"
-    fi
 elif [[ "$BEFORE" != 0000000000000000000000000000000000000000 ]]; then
     # On a force push, the previous tip can be outside the checked-out history.
     git cat-file -e "$BEFORE^{commit}" 2>/dev/null || git fetch --no-tags origin "$BEFORE"

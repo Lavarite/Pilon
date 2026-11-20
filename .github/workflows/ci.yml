@@ -16,33 +16,41 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
-      release: ${{ steps.lint.outputs.release }}
+      scope: ${{ steps.scope.outputs.scope }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
           persist-credentials: false
       - name: Check scoped commit message style
-        id: lint
         env:
           BEFORE: ${{ github.event.before }}
           PR_BASE: ${{ github.event.pull_request.base.sha }}
           PR_HEAD: ${{ github.event.pull_request.head.sha }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: bash .github/scripts/commit-lint-ci.sh
+      - name: Select checks for the changed files or tag
+        id: scope
+        env:
+          BEFORE: ${{ github.event.before }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          python3 .github/scripts/ci_scope_tests.py
+          python3 .github/scripts/ci_scope.py
 
   linux:
     name: Linux build and regression tests
-    if: ${{ !github.event.deleted }}
     needs: commits
+    if: needs.commits.outputs.scope == 'full' || needs.commits.outputs.scope == 'release'
     runs-on: ubuntu-24.04
     container: archlinux:base-devel
     timeout-minutes: 45
     env:
       LC_ALL: C.UTF-8
       TZ: Etc/UTC
-      PILON_GOOGLE_CLIENT_ID: ${{ github.ref_type == 'tag' && needs.commits.outputs.release == 'true' && vars.PILON_GOOGLE_CLIENT_ID || '' }}
-      PILON_MICROSOFT_CLIENT_ID: ${{ github.ref_type == 'tag' && needs.commits.outputs.release == 'true' && vars.PILON_MICROSOFT_CLIENT_ID || '' }}
+      PILON_GOOGLE_CLIENT_ID: ${{ github.ref_type == 'tag' && needs.commits.outputs.scope == 'release' && vars.PILON_GOOGLE_CLIENT_ID || '' }}
+      PILON_MICROSOFT_CLIENT_ID: ${{ github.ref_type == 'tag' && needs.commits.outputs.scope == 'release' && vars.PILON_MICROSOFT_CLIENT_ID || '' }}
     defaults:
       run:
         shell: bash
@@ -92,10 +100,10 @@ jobs:
             ctest --test-dir build --parallel 2 --no-tests=error --output-on-failure
           '
       - name: Verify and package Linux and source archives
-        if: github.ref_type == 'tag' && needs.commits.outputs.release == 'true'
+        if: github.ref_type == 'tag' && needs.commits.outputs.scope == 'release'
         run: runuser -u pilon-ci -- bash .github/scripts/package-linux.sh "$GITHUB_REF_NAME"
       - name: Upload tested release packages
-        if: github.ref_type == 'tag' && needs.commits.outputs.release == 'true'
+        if: github.ref_type == 'tag' && needs.commits.outputs.scope == 'release'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: release-assets
@@ -105,7 +113,8 @@ jobs:
 
   addons:
     name: Add-on checks
-    if: ${{ !github.event.deleted }}
+    needs: commits
+    if: needs.commits.outputs.scope == 'full' || needs.commits.outputs.scope == 'release'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -136,7 +145,8 @@ jobs:
 
   android:
     name: Android host tests
-    if: ${{ !github.event.deleted }}
+    needs: commits
+    if: needs.commits.outputs.scope == 'full' || needs.commits.outputs.scope == 'release'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -156,20 +166,26 @@ jobs:
         run: bash .github/scripts/android-host-checks.sh
 
   passed:
-    name: CI passed
+    name: ${{ github.ref_type == 'tag' && 'Tag checks passed' || 'CI passed' }}
     if: ${{ always() && !github.event.deleted }}
     needs: [commits, linux, addons, android]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - name: Require all checks
+      - name: Require every applicable check
         env:
-          CHECK_RESULTS: ${{ join(needs.*.result, ' ') }}
-        run: test "$CHECK_RESULTS" = "success success success success"
+          CI_SCOPE: ${{ needs.commits.outputs.scope }}
+          CHECK_RESULTS: ${{ format('{0} {1} {2} {3}', needs.commits.result, needs.linux.result, needs.addons.result, needs.android.result) }}
+        run: |
+          case "$CI_SCOPE" in
+            full|release) test "$CHECK_RESULTS" = "success success success success" ;;
+            style) test "$CHECK_RESULTS" = "success skipped skipped skipped" ;;
+            *) exit 1 ;;
+          esac
 
   draft:
     name: Prepare release draft
-    if: github.ref_type == 'tag' && needs.commits.outputs.release == 'true'
+    if: github.ref_type == 'tag' && needs.commits.outputs.scope == 'release'
     needs: [passed, commits]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
