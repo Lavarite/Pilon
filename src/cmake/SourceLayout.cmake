@@ -121,7 +121,7 @@ set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/app/ui/Main.qml" PROPER
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/app/ui/SettingsWindow.qml" PROPERTIES QT_RESOURCE_ALIAS "SettingsWindow.qml")
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/app/ui/SetupOverview.qml" PROPERTIES QT_RESOURCE_ALIAS "SetupOverview.qml")
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/app/ui/SharingConfiguration.qml" PROPERTIES QT_RESOURCE_ALIAS "SharingConfiguration.qml")
-set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/assets/icons/HEROICONS_LICENSE.txt" PROPERTIES QT_RESOURCE_ALIAS "icons/HEROICONS_LICENSE.txt")
+set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/assets/icons/PHOSPHOR_LICENSE.txt" PROPERTIES QT_RESOURCE_ALIAS "icons/PHOSPHOR_LICENSE.txt")
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/../addons/calendar/assets/icons/application-x-pilon-calendar.svg" PROPERTIES QT_RESOURCE_ALIAS "icons/application-x-pilon-calendar.svg")
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/assets/icons/application-x-pilon-extension.svg" PROPERTIES QT_RESOURCE_ALIAS "icons/application-x-pilon-extension.svg")
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/../addons/notes/assets/icons/application-x-pilon-note.svg" PROPERTIES QT_RESOURCE_ALIAS "icons/application-x-pilon-note.svg")

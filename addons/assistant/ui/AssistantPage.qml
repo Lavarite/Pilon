@@ -599,7 +599,8 @@ Control {
                         objectName: "chatActions_" + chatEntry.chatId
                         anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
                         visible: chatEntry.kind === "chat"
-                        text: "…"; width: 32; height: 32; padding: 4
+                        width: 32; height: 32; padding: 4
+                        icon.source: "icons/ellipsis-horizontal.svg"; display: AbstractButton.IconOnly
                         Accessible.name: qsTr("Chat actions")
                         ToolTip.visible: hovered; ToolTip.text: qsTr("Chat actions")
                         onClicked: chatEntry.showContext(Qt.point(chatEntry.width - width, chatEntry.height))

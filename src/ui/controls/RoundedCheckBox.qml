@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Controls.Basic as Basic
+import QtQuick.Controls.impl as ControlsImpl
 
 Basic.CheckBox {
     id: control
@@ -20,11 +21,12 @@ Basic.CheckBox {
         color: control.checked ? control.palette.highlight : "transparent"
         border.width: 1
         border.color: control.checked ? control.palette.highlight : control.palette.windowText
-        Text {
+        ControlsImpl.ColorImage {
             anchors.centerIn: parent
-            text: control.checkState === Qt.PartiallyChecked ? "−" : "✓"
+            width: 18; height: 18
+            source: control.checkState === Qt.PartiallyChecked ? "../icons/minus.svg" : "../icons/check.svg"
             visible: control.checkState !== Qt.Unchecked
-            font.pixelSize: 18; color: control.palette.highlightedText
+            color: control.palette.highlightedText
         }
     }
 }

@@ -337,7 +337,7 @@ qt_add_qml_module(pilon
         assets/icons/document-text.svg
         assets/icons/film.svg
         assets/icons/folder.svg
-        assets/icons/HEROICONS_LICENSE.txt
+        assets/icons/PHOSPHOR_LICENSE.txt
         assets/icons/magnifying-glass.svg
         assets/icons/musical-note.svg
         assets/icons/photo.svg
