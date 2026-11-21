@@ -170,7 +170,12 @@ void NoteElements::setValues(const QVariantList &values) {
 NotesManager::NotesManager(QObject *parent)
     : NotesManager(defaultDirectory(false), parent, true) { m_useDefaultDirectory = true; }
 NotesManager::NotesManager(const QString &directory, QObject *parent, bool asynchronous)
-    : QObject(parent), m_directory(directory), m_defaultPaper(NoteDocument::defaultPaper()) {
+    : QObject(parent), m_directory(directory), m_defaultPaper(NoteDocument::defaultPaper())
+#ifdef Q_OS_ANDROID
+    , m_exportDirectory(QDir(QStandardPaths::writableLocation(QStandardPaths::CacheLocation))
+          .filePath(QStringLiteral("pilon-pdf-export-XXXXXX")))
+#endif
+{
     connect(this, &NotesManager::currentChanged, this, &NotesManager::updateSearchMatches);
     connect(QGuiApplication::clipboard(), &QClipboard::dataChanged, this, &NotesManager::clipboardChanged);
     connect(this, &NotesManager::currentChanged, this, &NotesManager::clipboardChanged);
@@ -1262,7 +1267,7 @@ bool NotesManager::exportToFolder(const QString &folder, const QString &filename
     return exportPdf(QUrl::fromLocalFile(QDir(folder).filePath(filename)), options);
 }
 QUrl NotesManager::preparePdf(const QString &filename, const QVariantMap &options) {
-    if (!m_exportDirectory.isValid()) return {};
+    if (!m_exportDirectory.isValid()) { error(tr("Unable to prepare a PDF file.")); return {}; }
     const auto folder = m_exportDirectory.filePath(identifier());
     if (!QDir().mkpath(folder)) { error(tr("Unable to prepare a PDF file.")); return {}; }
     if (!exportToFolder(folder, filename, options)) { QDir().rmdir(folder); return {}; }
