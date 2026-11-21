@@ -52,6 +52,18 @@ TestCase {
         tryCompare(dialog, "visible", true)
         return dialog
     }
+    function waitForConnectionPrompt(dialog) {
+        const manager = findChild(appWindow, "sshManager")
+        tryVerify(() => dialog.prompting && dialog.lastPromptRevision === manager.promptRevision)
+        return manager
+    }
+    function renderConnectionDialog(dialog) {
+        tryCompare(dialog, "opened", true)
+        const host = dialog.dialogWindow
+        tryCompare(host, "active", true)
+        host.update()
+        verify(waitForRendering(host.contentItem))
+    }
     function contained(dialog, name) {
         const item = findChild(dialog, name), host = dialog.dialogWindow
         verify(item !== null && item.visible, name)
@@ -68,20 +80,24 @@ TestCase {
     function test_hostTrustShowsFingerprintAndKeepsActionsVisible_data() { return sizes() }
     function test_hostTrustShowsFingerprintAndKeepsActionsVisible(data) {
         const dialog = openConnection("host", data)
-        tryVerify(() => dialog.prompting)
+        const manager = waitForConnectionPrompt(dialog)
+        // Exercise synchronous closure during the authentication signal.
+        dialog.exit = null
+        renderConnectionDialog(dialog)
         const details = findChild(dialog, "sshConnectionDetails")
         verify(details.text.indexOf("SHA256:fixtureFingerprint") >= 0)
         verify(details.text.indexOf("192.0.2.1") >= 0)
         verify(!findChild(dialog, "sshPromptInput").visible)
-        waitForPolish(dialog.contentItem)
         const trust = contained(dialog, "sshContinueConnection")
         contained(dialog, "sshCancelConnection")
         verify(trust.highlighted)
         tabletInput.saveWindow(dialog.dialogWindow.contentItem, "/tmp/pilon-ssh-trust-" + data.tag + ".png")
         mouseClick(trust)
-        const manager = findChild(appWindow, "sshManager")
         tryCompare(manager, "authenticated", true)
         tryCompare(dialog, "visible", false)
+        appWindow.update()
+        verify(waitForRendering(appWindow.contentItem))
+        verify(manager.running && manager.authenticated, "Closing the login dialog keeps the authenticated session running")
     }
     function test_browserApprovalIsVisibleWithoutAnInputField() {
         const dialog = openConnection("approval", {width: 800, height: 600, touch: false})
@@ -94,18 +110,22 @@ TestCase {
     }
     function test_passwordActionsRemainReachableInShortWindow() {
         const dialog=openConnection("password",{width:800,height:600,touch:true})
-        tryVerify(()=>dialog.prompting)
-        findChild(dialog,"sshPromptInput").text="test-password"
+        const manager = waitForConnectionPrompt(dialog)
+        const input = findChild(dialog, "sshPromptInput")
+        tryCompare(input, "activeFocus", true)
+        input.text = "test-password"
         dialog.dialogWindow.maximumHeight=170
+        tryVerify(() => dialog.dialogWindow.height <= 170)
         const scroll=findChild(dialog,"sshConnectionFormScroll")
         tryVerify(()=>scroll.contentHeight>scroll.height)
         scroll.contentY=scroll.contentHeight-scroll.height
-        dialog.dialogWindow.update();verify(waitForRendering(dialog.dialogWindow.contentItem))
+        renderConnectionDialog(dialog)
         const submit=contained(dialog,"sshContinueConnection")
+        verify(submit.enabled)
         contained(dialog,"sshCancelConnection")
         verify(tabletInput.saveWindow(dialog.dialogWindow.contentItem,"/tmp/pilon-ssh-short-password.png"))
         mouseClick(submit)
-        tryCompare(findChild(appWindow,"sshManager"),"authenticated",true)
+        tryCompare(manager, "authenticated", true)
         tryCompare(dialog,"visible",false)
     }
     function test_authenticatedTerminalTapRequestsKeyboardAndSendsImeInput_data() {
@@ -116,7 +136,8 @@ TestCase {
     function test_authenticatedTerminalTapRequestsKeyboardAndSendsImeInput(data) {
         const dialog=openConnection("host",{width:800,height:600,touch:true})
         verify(appWindow.selectPage("ssh"))
-        tryVerify(()=>dialog.prompting)
+        waitForConnectionPrompt(dialog)
+        renderConnectionDialog(dialog)
         mouseClick(contained(dialog,"sshContinueConnection"))
         const manager=findChild(appWindow,"sshManager")
         tryCompare(manager,"authenticated",true);tryCompare(dialog,"visible",false)
