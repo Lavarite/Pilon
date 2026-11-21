@@ -14,6 +14,7 @@
 #include <QResource>
 #include <QSaveFile>
 #include <QScopeGuard>
+#include <QSet>
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTemporaryFile>
@@ -720,16 +721,28 @@ QStringList AddonRegistry::requiredOrder(const QString &id) {
     return order;
 }
 QStringList AddonRegistry::dependents(const QString &id) const {
-    QStringList result;
+    QHash<QString, QStringList> consumers;
     for (const auto &row : m_rows) {
-        const auto other = row.value("id").toString();
-        if (other == id || !configured(row) || !row.value("error").toString().isEmpty())
+        if (!row.value("error").toString().isEmpty())
             continue;
-        QString problem;
-        const auto order = dependencyOrder(other, &problem);
-        if (order.contains(id))
-            result << other;
+        const auto consumer = row.value("id").toString();
+        for (const auto &value : row.value("dependencies").toList())
+            consumers[value.toMap().value("id").toString()] << consumer;
     }
+    QStringList result;
+    QSet<QString> visited{id};
+    std::function<void(const QString &)> visit = [&](const QString &provider) {
+        for (const auto &consumer : consumers.value(provider)) {
+            if (visited.contains(consumer))
+                continue;
+            visited.insert(consumer);
+            visit(consumer);
+            const auto row = find(consumer);
+            if (row && configured(*row))
+                result << consumer;
+        }
+    };
+    visit(id);
     return result;
 }
 QVariantList AddonRegistry::addons() const {
@@ -838,19 +851,29 @@ bool AddonRegistry::isEnabled(const QString &id) const {
            });
 }
 bool AddonRegistry::setEnabled(const QString &id, bool enabled) {
+    return changeEnabled(id, enabled, {});
+}
+bool AddonRegistry::disableWithDependents(const QString &id, const QStringList &confirmedDependents) {
+    return changeEnabled(id, false, confirmedDependents);
+}
+bool AddonRegistry::changeEnabled(const QString &id, bool enabled, const QStringList &confirmedDependents) {
     const bool known =
         (builtinIds.contains(id) || packageId(id)) &&
         std::any_of(m_rows.cbegin(), m_rows.cend(), [&](const auto &row) { return row.value("id") == id; });
     if ((!enabled && !known) || (enabled && !find(id)))
         return fail(issue("This add-on is unavailable. Refresh or repair its package first."));
     QString problem;
-    const auto order = enabled ? dependencyOrder(id, &problem) : QStringList{id};
+    auto order = enabled ? dependencyOrder(id, &problem) : QStringList{id};
     if (!problem.isEmpty())
         return fail(problem);
     if (!enabled) {
         const auto requiring = dependents(id);
-        if (!requiring.isEmpty())
+        if (requiring != confirmedDependents) {
+            if (!confirmedDependents.isEmpty())
+                return fail(issue("The dependent add-ons changed. Review them and try again."));
             return fail(issue("Disable these required dependents first: ") + requiring.join(", "));
+        }
+        order = requiring + order;
     }
     PilonSettings settings;
     QHash<QString, QVariant> previous;

@@ -61,8 +61,8 @@ path. Successful removal must remain removed after restart; explicit reimport
 is distinct from reseeding a shipped package.
 
 For registry changes, cover numeric version bounds, missing/incompatible/cyclic
-dependencies, atomic enablement and write failure, and refusal to disable a
-required provider. Optional integrations use their declared default (off when
+dependencies, atomic preference writes, and confirmation and cancellation when
+disabling a required provider and its dependents. Optional integrations use their declared default (off when
 omitted), preserve saved opt-outs, require compatible enabled
 endpoints and unload safely. A missing optional target must not disable its
 contributor. Run `integrations_ui` for context/host lifetimes and explicit first
