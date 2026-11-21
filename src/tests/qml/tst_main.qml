@@ -1180,6 +1180,28 @@ TestCase {
         tryVerify(() => context.notesManager.active && context.calendarManager.active && context.assistantManager.active)
         verify(appWindow.extensionsReady)
     }
+    function test_calendarPhysicalArrowKeysAfterSelectingTab() {
+        appWindow.width = 1100
+        appWindow.height = 700
+        appWindow.requestActivate()
+        tryVerify(() => appWindow.active)
+        waitForWorkspaceIdle()
+        const navigation = () => findControl(appWindow, "calendarNavigation")
+        tryVerify(() => navigation() !== null)
+        tap(navigation(), navigation, false)
+        tryCompare(appWindow, "selectedPage", "calendar")
+        tryVerify(() => appWindow.calendarPane && appWindow.calendarPane.visible)
+        const calendar = appWindow.calendarPane
+        calendar.viewMode = 0
+        calendar.selectedDate = new Date(2026, 9, 14, 12)
+        keyClick(Qt.Key_Right)
+        tryVerify(() => calendar.iso(calendar.selectedDate) === "2026-10-15")
+        tryCompare(calendar, "periodOffset", 0)
+        tap(navigation(), navigation, false)
+        keyClick(Qt.Key_Left)
+        tryVerify(() => calendar.iso(calendar.selectedDate) === "2026-10-14")
+        tryCompare(calendar, "periodOffset", 0)
+    }
     function test_calendarSettingsRoutesAreSeparateAndRetained() {
         const settings=findControl(appWindow,"settingsMenu")
         const tasks=[{id:"calendar",field:"calendarConnectGoogle",section:"accounts"},
@@ -1279,6 +1301,10 @@ TestCase {
         compare(settings.currentSection.title,"Appearance")
         verify(settings.categories.some(section=>section.id==="application" && section.title==="Application"))
         verify(findControl(settings,"applicationColoursSection").visible)
+        const fileTypes = findControl(settings, "fileAppearanceTypeSection")
+        const filePaths = findControl(settings, "fileAppearancePathSection")
+        verify(fileTypes && fileTypes.visible && findControl(fileTypes, "fileAppearanceTypeRule"))
+        verify(filePaths && filePaths.visible && findControl(filePaths, "addFileAppearancePath"))
         const frost=findControl(settings,"glassFrostiness")
         const reset=findControl(settings,"resetGlassFrostiness")
         verify(frost && frost.visible)

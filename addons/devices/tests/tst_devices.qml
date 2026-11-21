@@ -96,8 +96,6 @@ TestCase {
         verify(page !== null); wait(30)
     }
     function cleanup() {
-        const editor = findChild(page, "deviceEditor")
-        if (editor) editor.close()
         page.destroy()
         page = null
     }
@@ -140,24 +138,24 @@ TestCase {
         verify(!control("devicesInstallExternal").visible)
         manager.statusKnown = true
     }
-    function test_savedDeviceFormUsesASeparateWindowAndPreservesInvalidInput() {
+    function test_savedDeviceFormUsesAnInlineRowAndPreservesInvalidInput() {
         manager.externalApplication = false
         fakeAddon.deviceDiscoveryEnabled = false
         showSshSettings()
         click("sshAddDevice")
         const editor = control("deviceEditor")
-        tryCompare(editor, "opened", true)
-        tryCompare(editor.dialogWindow, "visible", true)
-        compare(editor.dialogWindow.transientParent, owner)
+        tryCompare(editor, "visible", true)
         verify(page.prepareDisable() !== true)
         const name = control("deviceName"), address = control("deviceAddress")
+        compare(name.Window.window, owner)
+        compare(name.y, address.y)
         name.text = "Workstation"; name.forceActiveFocus(); keyClick(Qt.Key_End)
         keyClick(Qt.Key_1); compare(name.text, "Workstation1"); keyClick(Qt.Key_Backspace)
         address.forceActiveFocus(); address.text = "https://invalid"
         mouseClick(control("saveDevice")); verify(editor.visible)
         compare(name.text, "Workstation"); compare(address.text, "https://invalid")
         verify(manager.errorMessage.length > 0)
-        capture(editor.contentItem,"saved-host-invalid")
+        capture(page,"saved-host-invalid")
         address.text = "workstation.tailnet.ts.net"
         mouseClick(control("saveDevice")); tryCompare(editor, "visible", false)
         compare(manager.devices.length, 1); compare(page.prepareDisable(), true)
@@ -167,6 +165,22 @@ TestCase {
         page.removeSavedDevice("external:fixture", 0)
         compare(manager.devices.length, 0)
         tryVerify(() => control("sshAddDevice").activeFocus)
+    }
+    function test_editingSavedDeviceKeepsItsDraftWhenPeersRefresh() {
+        manager.devices = [{id: "external:fixture", name: "Workstation", ip: "workstation.example", included: true, saved: true}]
+        showSshSettings()
+        click("sshDeviceActions-external:fixture")
+        keyClick(Qt.Key_Down)
+        keyClick(Qt.Key_Return)
+        tryVerify(() => findChild(page, "deviceEditor") !== null)
+        const name = control("deviceName")
+        name.text = "Updated workstation"
+        name.textEdited()
+        manager.devices = manager.devices.map(device => Object.assign({}, device, {online: true}))
+        tryCompare(control("deviceName"), "text", "Updated workstation")
+        mouseClick(control("saveDevice"))
+        compare(manager.devices[0].name, "Updated workstation")
+        tryVerify(() => control("sshDeviceActions-external:fixture").activeFocus)
     }
     function test_controlsReflowAtCoverScreenWidth() {
         owner.width = 320; wait(30)
@@ -273,8 +287,9 @@ TestCase {
         manager.discoveryConnected=true
         manager.devices=[{id:"api:fixture",name:"Peer <b>literal</b>",ip:"100.64.0.2",included:false,saved:false,onlineKnown:false}]
         showSshSettings()
-        const peer=control("sshDeviceIncluded-api:fixture")
-        compare(peer.contentItem.textFormat,Text.PlainText)
+        const peer=control("sshDeviceHost-api:fixture")
+        compare(peer.text, "Peer <b>literal</b> 100.64.0.2")
+        compare(peer.textFormat, Text.PlainText)
         verify(!control("sshDeviceActions-api:fixture").visible)
         click("sshDeviceIncluded-api:fixture")
         verify(manager.devices[0].included)

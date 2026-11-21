@@ -270,6 +270,7 @@ qt_add_qml_module(pilon
         app/ui/AppNavigation.qml
         ../addons/files/ui/FileWorkspace.qml
         ../addons/files/ui/FileAppearance.qml
+        ../addons/files/ui/FileAppearanceSection.qml
         app/ui/FirstRunSetup.qml
         app/ui/SetupOverview.qml
         app/ui/SharingConfiguration.qml

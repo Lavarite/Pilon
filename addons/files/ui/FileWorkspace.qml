@@ -330,6 +330,7 @@ const entries = destinationDialog.entries.map(entry => Object.assign({}, entry))
         id: exportDialog
         objectName: "noteExportWindow"
         fullWidthFooter: true
+        chooseSaveDestination: true
         Text { visible: false; wrapMode: Text.NoWrap; id: headingMeasure; text: exportFirstPageHeading.text; font: Qt.application.font }
         Text { visible: false; wrapMode: Text.NoWrap; id: numbersMeasure; text: exportPageNumbers.text; font: Qt.application.font }
         readonly property real headingOptionWidth: Math.ceil(headingMeasure.implicitWidth) + exportFirstPageHeading.indicator.implicitWidth
@@ -338,7 +339,7 @@ const entries = destinationDialog.entries.map(entry => Object.assign({}, entry))
             + exportPageNumbers.spacing + exportPageNumbers.leftPadding + exportPageNumbers.rightPadding
         readonly property real optionsImplicitWidth: headingOptionWidth + numbersOptionWidth + 8
         readonly property bool compactOptions: availableWidth < optionsImplicitWidth + footerActionsImplicitWidth + 8
-        footerLeadingWidth: compactOptions ? Math.min(132, availableWidth * .35) : optionsImplicitWidth
+        footerLeadingWidth: compactOptions ? Math.min(132, Math.max(38, availableWidth - footerActionsImplicitWidth - 8)) : optionsImplicitWidth
         closeOnOutside: false
         transientParent: fileWorkspace.ownerWindow
         title: qsTr("Export note as PDF")
@@ -364,6 +365,7 @@ const entries = destinationDialog.entries.map(entry => Object.assign({}, entry))
         readonly property bool validFilename: exportName.text.trim().length > 0 && !/[\\/]/.test(exportName.text)
         readonly property bool canSaveToFolder: validFilename && fileWorkspace.exportManager !== null
             && fileWorkspace.exportManager.currentPath.length > 0 && !fileWorkspace.exportManager.busy && !sharing
+            && !fileWorkspace.exportManager.promptText
             && (!overwritePending || fileWorkspace.exportManager.currentDeviceId === "local")
         readonly property bool canShare: !!note && validFilename && !uploading && !sharing
             && !fileWorkspace.shareManager.busy && !fileWorkspace.shareManager.promptText
@@ -377,7 +379,7 @@ const entries = destinationDialog.entries.map(entry => Object.assign({}, entry))
             fileWorkspace.shareManager.shareFile(source, true)
         }
         function acceptExport() {
-            if (!note || fileWorkspace.exportManager.busy) return
+            if (!note || !canSaveToFolder) return
             if (!overwritePending && fileWorkspace.exportManager.entries.some(entry => entry.name === filename)) {
                 overwritePending = true; return
             }
@@ -393,13 +395,19 @@ const entries = destinationDialog.entries.map(entry => Object.assign({}, entry))
         }
 
 
-        ScrollView {
+        PilonScrollView {
             id: exportOptionsScroll
             objectName: "noteExportOptionsScroll"
             width: parent.width
-            height: Math.min(exportBottom.implicitHeight, Math.max(64, exportDialog.availableHeight - 120))
+            height: Math.min(exportBottom.implicitHeight, Math.max(40, exportDialog.availableHeight - 176))
             contentWidth: availableWidth; clip: true
             ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+            function revealFeedback() {
+                Qt.callLater(() => {
+                    if (exportDialog.opened)
+                        contentItem.contentY = Math.max(0, contentHeight - availableHeight)
+                })
+            }
             Column {
                 id: exportBottom
                 width: exportOptionsScroll.availableWidth
@@ -415,13 +423,6 @@ const entries = destinationDialog.entries.map(entry => Object.assign({}, entry))
                     onTextEdited: { exportDialog.overwritePending = false; exportDialog.shareError = "" }
                     onAccepted: if (exportDialog.acceptEnabled) exportDialog.accepted()
                     background: Rectangle { radius: 8; color: fileWorkspace.secondaryColour; border.color: fileWorkspace.withOpacity(fileWorkspace.textColour, .22) }
-                }
-                PilonButton {
-                    objectName: "shareNotePdf"
-                    text: qsTr("Share…")
-                    icon.source: "icons/share.svg"
-                    enabled: exportDialog.canShare
-                    onClicked: exportDialog.sharePdf()
                 }
                 Item {
                     id: inlineExportOptions
@@ -457,19 +458,23 @@ const entries = destinationDialog.entries.map(entry => Object.assign({}, entry))
                     }
                 }
                 Label {
+                    id: saveFeedback
                     width: parent.width
                     visible: text.length > 0
                     text: exportDialog.overwritePending ? (fileWorkspace.exportManager.currentDeviceId === "local"
                         ? qsTr("A file with this name exists. Choose Save to… again to replace it.")
                         : qsTr("A file with this name exists. Choose a different file name."))
                         : exportDialog.note ? exportDialog.note.errorMessage : ""
+                    onTextChanged: if (saveFeedback.text) exportOptionsScroll.revealFeedback()
                     color: fileWorkspace.warningColour; wrapMode: Text.Wrap
                 }
                 Label {
+                    id: shareFeedback
                     objectName: "notePdfShareError"
                     width: parent.width
                     visible: text.length > 0
                     text: exportDialog.shareError
+                    onTextChanged: if (shareFeedback.text) exportOptionsScroll.revealFeedback()
                     color: fileWorkspace.warningColour; wrapMode: Text.Wrap
                 }
             }
@@ -480,6 +485,7 @@ const entries = destinationDialog.entries.map(entry => Object.assign({}, entry))
             objectName: "noteExportOptionsButton"
             anchors.left: parent.left; anchors.bottom: parent.bottom
             width: exportDialog.footerLeadingWidth; height: 38
+            leftPadding: 6; rightPadding: 6
             visible: exportDialog.compactOptions
             palette.button: fileWorkspace.secondaryColour; palette.buttonText: fileWorkspace.textColour
             palette.highlight: fileWorkspace.accentColour; palette.highlightedText: fileWorkspace.accentTextColour
@@ -534,6 +540,13 @@ const entries = destinationDialog.entries.map(entry => Object.assign({}, entry))
         acceptObjectName: "confirmNoteExport"
         acceptEnabled: canSaveToFolder
         onAccepted: exportDialog.acceptExport()
+        secondaryObjectName: "shareNotePdf"
+        secondaryAction: Action {
+            text: qsTr("Share…")
+            icon.source: "icons/share.svg"
+            enabled: exportDialog.canShare
+            onTriggered: exportDialog.sharePdf()
+        }
     }
 
     Settings {

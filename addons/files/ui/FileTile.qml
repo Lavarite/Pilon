@@ -16,6 +16,7 @@ Item {
     property bool bookmarksOnRight: false
     property bool searchResults: false
     property bool pickerSelectionMode: false
+    property bool chooseSaveDestination: false
     readonly property bool keyboardActive: visible && Window.window && Window.window.visible
         && (pickerSelectionMode || !fileWorkspace.filePickerOpen)
     property bool multipleSelection: false
@@ -485,7 +486,7 @@ Item {
         anchors.right: parent.right
         anchors.rightMargin: filesPage.headerRightInset
         anchors.top: parent.top
-        readonly property bool compact: width < tileButtons.width + 228
+        readonly property bool compact: width < tileButtons.width + (filesPage.chooseSaveDestination ? 90 : 228)
         height: compact ? 50 + tileButtons.height : 42
 
         Item {
@@ -614,7 +615,7 @@ Item {
                     onClicked: filePlacesPopup.opened ? filePlacesPopup.close() : filePlacesPopup.open()
                 }
                 StyledButton {
-                    visible: !filesPage.searchResults
+                    visible: !filesPage.searchResults && (!filesPage.chooseSaveDestination || !filesPage.compactPlaces)
                     width: 42
                     height: 42
                     display: AbstractButton.IconOnly
@@ -990,6 +991,7 @@ Item {
             visible: !filesPage.largeIconView
 
             component SortHeader: AbstractButton {
+                id: sortHeader
                 required property string column
                 required property string title
                 required property real fraction
@@ -999,12 +1001,26 @@ Item {
                 Accessible.name: title + (filesPage.sortColumn !== column ? qsTr(", sorting off")
                     : filesPage.sortDirection < 0 ? qsTr(", descending") : qsTr(", ascending"))
                 onClicked: filesPage.cycleSort(column)
-                contentItem: Label {
-                    text: parent.title + (filesPage.sortColumn !== parent.column ? ""
-                        : filesPage.sortDirection < 0 ? " ↓" : " ↑")
-                    elide: Text.ElideRight
-                    color: filesPage.textColour
-                    verticalAlignment: Text.AlignVCenter
+                contentItem: Row {
+                    spacing: 4
+                    Label {
+                        text: sortHeader.title
+                        width: Math.min(implicitWidth, Math.max(0, parent.width
+                            - (sortIcon.visible ? sortIcon.width + parent.spacing : 0)))
+                        height: parent.height
+                        elide: Text.ElideRight
+                        color: filesPage.textColour
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                    ControlsImpl.ColorImage {
+                        id: sortIcon
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 14; height: 14
+                        visible: filesPage.sortColumn === sortHeader.column
+                        rotation: filesPage.sortDirection < 0 ? 180 : 0
+                        source: "icons/arrow-up.svg"
+                        color: filesPage.textColour
+                    }
                 }
                 background: Item { }
             }
@@ -1047,12 +1063,14 @@ Item {
                     filesPage.activated()
                     fileEntryList.forceActiveFocus()
                     const index = filePointerArea.indexAt(point.position.x, point.position.y)
-                    if (index >= 0) filesPage.selectEntry(filesPage.displayedEntries[index], index, Qt.NoModifier)
-                    else filesPage.clearSelection()
+                    if (index < 0) { filesPage.clearSelection(); return }
+                    const entry = filesPage.displayedEntries[index]
+                    if (filesPage.chooseSaveDestination && entry.directory) filesPage.browseEntry(entry)
+                    else filesPage.selectEntry(entry, index, Qt.NoModifier)
                 }
                 onDoubleTapped: {
                     const index = filePointerArea.indexAt(point.position.x, point.position.y)
-                    if (index >= 0) filesPage.browseEntry(filesPage.displayedEntries[index])
+                    if (index >= 0 && !filesPage.chooseSaveDestination) filesPage.browseEntry(filesPage.displayedEntries[index])
                 }
                 onLongPressed: {
                     filesPage.activated()
@@ -1371,11 +1389,12 @@ Item {
                 if (mouse.button === Qt.RightButton) {
                     const position = mapToItem(filesPage, mouse.x, mouse.y)
                     fileContextMenu.openAt(position.x, position.y)
-                }
+                } else if (filesPage.chooseSaveDestination && pressedEntry?.directory && !itemDragging && !contextHeld)
+                    filesPage.browseEntry(pressedEntry)
             }
             onDoubleClicked: function(mouse) {
                 const index = indexAt(mouse.x, mouse.y)
-                if (mouse.button === Qt.LeftButton && index >= 0)
+                if (mouse.button === Qt.LeftButton && index >= 0 && !filesPage.chooseSaveDestination)
                     filesPage.browseEntry(filesPage.displayedEntries[index])
             }
             onCanceled: {
@@ -1633,7 +1652,6 @@ Item {
             objectName: "shareSelectedFileAction"
             width: parent.width
             text: qsTr("Share…")
-            icon.source: "icons/share.svg"
             shown: fileContextMenu.hasSelection && filesPage.selectedEntry !== null
                 && !filesPage.selectedEntry.directory && !filesPage.pickerSelectionMode
             enabled: shown && !filesPage.remoteFiles.busy && !filesPage.fileWorkspace.shareManager.busy

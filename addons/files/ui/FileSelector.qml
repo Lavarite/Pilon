@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Controls.impl as ControlsImpl
 import "ui"
 
 FilePickerWindow {
@@ -12,13 +13,18 @@ FilePickerWindow {
     property string pickerName: ""
     property string pickerLoaderName: ""
     property bool multipleSelection: false
+    property bool chooseSaveDestination: false
     property string acceptText: qsTr("Select")
     property string cancelText: qsTr("Cancel")
     property string acceptObjectName: ""
     property bool acceptEnabled: true
+    property Action secondaryAction: null
+    property string secondaryObjectName: "cancelFileSelection"
     property bool fullWidthFooter: selectorContents.width < 540
     property real footerLeadingWidth: 0
-    readonly property real footerActionsImplicitWidth: 2 * Math.max(cancelAction.implicitWidth, acceptAction.implicitWidth) + actions.spacing
+    readonly property real footerActionsImplicitWidth: (secondaryAction
+        ? Math.ceil(secondaryButton.implicitWidth) + Math.ceil(acceptAction.implicitWidth)
+        : 2 * Math.max(secondaryButton.implicitWidth, acceptAction.implicitWidth)) + actions.spacing
     readonly property Item footerItem: footer
     signal accepted()
     signal selectionChanged()
@@ -74,8 +80,9 @@ FilePickerWindow {
                     remoteFiles: selector.remoteFiles
                     multipleSelection: selector.multipleSelection
                     pickerSelectionMode: true
+                    chooseSaveDestination: selector.chooseSaveDestination
                     headerRightInset: selector.closeButtonInset
-                    minimumPlacesWidth: selector.fullWidthFooter ? Math.max(100, Math.min(170, width * .38)) : Math.max(100, Math.max(cancelAction.implicitWidth, acceptAction.implicitWidth) + 20)
+                    minimumPlacesWidth: selector.fullWidthFooter ? Math.max(100, Math.min(170, width * .38)) : Math.max(100, Math.max(secondaryButton.implicitWidth, acceptAction.implicitWidth) + 20)
                     placesBottomInset: selector.fullWidthFooter ? 0 : sidebar.implicitHeight + actions.implicitHeight + 18
                     onSelectedEntryChanged: selector.selectionChanged()
                     onCloseRequested: selector.close()
@@ -97,9 +104,22 @@ FilePickerWindow {
                 id: actions
                 x: selector.fullWidthFooter ? parent.width - width : 10
                 anchors.bottom: parent.bottom
-                width: selector.fullWidthFooter ? Math.min(Math.max(0, parent.width - selector.footerLeadingWidth - (selector.footerLeadingWidth ? 8 : 0)), 2 * Math.max(cancelAction.implicitWidth, acceptAction.implicitWidth) + spacing) : sidebar.width - 20
+                width: selector.fullWidthFooter ? Math.min(Math.max(0, parent.width - selector.footerLeadingWidth - (selector.footerLeadingWidth ? 8 : 0)), selector.footerActionsImplicitWidth) : sidebar.width - 20
                 spacing: 8
-                SelectorButton { id: cancelAction; text: selector.cancelText; objectName: "cancelFileSelection"; onClicked: selector.close() }
+                SelectorButton {
+                    id: secondaryButton
+                    objectName: selector.secondaryObjectName
+                    text: selector.secondaryAction ? selector.secondaryAction.text : selector.cancelText
+                    enabled: !selector.secondaryAction || selector.secondaryAction.enabled
+                    icon.source: selector.secondaryAction ? selector.secondaryAction.icon.source : ""
+                    icon.width: 20; icon.height: 20
+                    display: selector.secondaryAction && selector.availableWidth >= 430
+                        ? AbstractButton.TextBesideIcon : AbstractButton.TextOnly
+                    onClicked: {
+                        if (selector.secondaryAction) selector.secondaryAction.trigger()
+                        else selector.close()
+                    }
+                }
                 SelectorButton {
                     id: acceptAction
                     text: selector.acceptText; objectName: selector.acceptObjectName
@@ -113,14 +133,18 @@ FilePickerWindow {
     component SelectorButton: PilonButton {
         id: button
         property bool accented: false
-        width: actions.width < Math.max(cancelAction.implicitWidth, acceptAction.implicitWidth) * 2 + actions.spacing
-               ? actions.width : (actions.width - actions.spacing) / 2
+        readonly property color foreground: accented ? selector.workspace.accentTextColour : selector.workspace.textColour
+        width: actions.width < selector.footerActionsImplicitWidth ? actions.width
+            : selector.secondaryAction ? Math.ceil(implicitWidth) : (actions.width - actions.spacing) / 2
         height: 38
-        leftPadding: 6; rightPadding: 6
-        contentItem: Label {
+        leftPadding: selector.secondaryAction ? 4 : 6; rightPadding: leftPadding
+        contentItem: ControlsImpl.IconLabel {
             text: button.text
-            color: button.accented ? selector.workspace.accentTextColour : selector.workspace.textColour
-            horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; elide: Text.ElideRight
+            display: button.display; icon: button.icon; spacing: button.spacing
+            font: button.font; mirrored: button.mirrored
+            color: button.foreground
+            defaultIconColor: button.foreground
+            alignment: Qt.AlignCenter
         }
         background: Rectangle {
             radius: 8; opacity: button.enabled ? 1 : .45
