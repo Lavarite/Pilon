@@ -1817,7 +1817,7 @@ Window {
         focus: modal
         closePolicy: Popup.CloseOnEscape
         onClosed: {
-            if (connecting || prompting) sshManager.disconnectFromHost()
+            if (sshManager.connecting) sshManager.disconnectFromHost()
             else if (failed) sshManager.dismissError()
         }
         palette: window.palette
