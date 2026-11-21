@@ -139,6 +139,7 @@
   "CalendarSharesDialog.qml": "addons/calendar/ui/CalendarSharesDialog.qml",
   "FileWorkspace.qml": "addons/files/ui/FileWorkspace.qml",
   "FileAppearance.qml": "addons/files/ui/FileAppearance.qml",
+  "FileAppearanceSection.qml": "addons/files/ui/FileAppearanceSection.qml",
   "CalendarTimePicker.qml": "addons/calendar/ui/CalendarTimePicker.qml",
   "AddonCleanup.qml": "src/core/addons/ui/AddonCleanup.qml",
   "NotePaperDialog.qml": "addons/notes/ui/NotePaperDialog.qml",

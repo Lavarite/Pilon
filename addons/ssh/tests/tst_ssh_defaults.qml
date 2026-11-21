@@ -406,8 +406,12 @@ TestCase {
             const username=findChild(settings,"sshDeviceUsername-google")
             const device=findChild(settings,"sshDeviceHost-google")
             const at=findChild(settings,"sshDeviceAt-google")
-            verify(username && device && at,"Each override is username @ read-only host")
-            compare(at.text,"@");compare(device.text,"test-server")
+            const included=findChild(settings,"sshDeviceIncluded-google")
+            verify(username && device && at && included,"Each override includes a checkbox, username and address")
+            compare(at.text,"@");compare(device.text,"test-server 192.0.2.1")
+            const checkboxEnd=included.mapToItem(host,included.width,0)
+            const fieldStart=username.mapToItem(host,0,0)
+            verify(checkboxEnd.x <= fieldStart.x && checkboxEnd.y >= fieldStart.y - 5)
             verify(device.readOnly===undefined,"The host is a label, not an editable field")
             username.forceActiveFocus();username.text="tester";keyClick(Qt.Key_Tab)
             compare(workspace.deviceUsernames.google,"tester")
@@ -431,6 +435,7 @@ TestCase {
                     verify(start.x>=0 && end.x<=host.width+1,"The complete connection row fits its form")
                 }
                 verify(label.height>=label.contentHeight)
+                verify(!label.truncated, "The device name and address remain readable")
             }
             verify(tabletInput.saveWindow(test.Window.window.contentItem,"/tmp/pilon-ssh-user-host-"+data.tag+".png"))
         } finally { tabletInput.setApplicationFont(originalFont) }

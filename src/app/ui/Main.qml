@@ -333,6 +333,7 @@ Window {
         selectedPage = id
         if (id === "assistant") assistantManager.prepareRuntime()
         if (fromNavigation && id === "notes" && host.page) host.page.showLibrary()
+        if (fromNavigation && id === "calendar" && host.page) host.page.forceActiveFocus()
         pageRevision++
         return true
     }
@@ -1416,12 +1417,21 @@ Window {
                         }
                     }
                 }
-                PilonButton {
-                    objectName: "fileAppearanceSettings"
+                FileAppearanceSection {
+                    objectName: "fileAppearanceTypeSection"
                     width: parent.width
-                    text: qsTr("File and folder appearance…")
-                    enabled: window.addonEnabled("files")
-                    onClicked: sharedFiles.appearance.open(settingsMenu)
+                    visible: window.addonEnabled("files")
+                    appearanceModel: sharedFiles.appearance
+                    ownerWindow: settingsMenu
+                    paths: false
+                }
+                FileAppearanceSection {
+                    objectName: "fileAppearancePathSection"
+                    width: parent.width
+                    visible: window.addonEnabled("files")
+                    appearanceModel: sharedFiles.appearance
+                    ownerWindow: settingsMenu
+                    paths: true
                 }
                 PilonSectionHeader { objectName: "applicationColoursSection"; width: parent.width; text: qsTr("Colours") }
                 Item {

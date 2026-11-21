@@ -268,6 +268,77 @@ TestCase {
         verify(positions.some(([date, x]) => date === "2097-03-06" && x > 0), "The outgoing day moves right")
         verify(positions.some(([date, x]) => date === "2097-03-05" && x < 0), "The incoming day enters from the left")
     }
+    function test_keyboardMovesToAdjacentPeriod_data() { return test_swipeChangesOnePeriod_data() }
+    function test_keyboardMovesToAdjacentPeriod(data) {
+        const owner = createTemporaryObject(ownerComponent, test, {width: data.width})
+        verify(owner)
+        const page = owner.page
+        page.viewMode = data.mode
+        if (data.date) page.selectedDate = data.date
+        page.visible = false
+        owner.contentItem.forceActiveFocus()
+        page.visible = true
+        owner.requestActivate(); verify(waitForRendering(owner.contentItem))
+        keyClick(Qt.Key_Right)
+        tryVerify(() => page.iso(page.selectedDate) === data.next)
+        tryCompare(page, "periodOffset", 0)
+        const view = findChild(page, data.mode === 2 ? "calendarMonth" : "calendarTimeline")
+        view.forceActiveFocus(); tryVerify(() => view.activeFocus)
+        keyClick(Qt.Key_Left)
+        tryVerify(() => page.iso(page.selectedDate) === data.previous)
+        tryCompare(page, "periodOffset", 0)
+    }
+    function test_keyboardRespectsDatePickerAndEventEditor() {
+        const owner = createTemporaryObject(ownerComponent, test)
+        verify(owner)
+        const page = owner.page
+        page.viewMode = 0
+        const selected = page.iso(page.selectedDate)
+        owner.requestActivate(); verify(waitForRendering(owner.contentItem))
+        const picker = findChild(page, "calendarDatePicker")
+        mouseClick(findChild(page, "calendarPickDate")); tryCompare(picker, "opened", true)
+        const current = () => owner.activeFocusItem
+        tryVerify(() => current() && current().date instanceof Date && page.iso(current().date) === selected)
+        keyClick(Qt.Key_Right)
+        tryVerify(() => page.iso(picker.selectedDate) === "2097-03-06")
+        compare(page.iso(page.selectedDate), selected)
+        keyClick(Qt.Key_Escape); tryCompare(picker, "opened", false)
+
+        page.create(page.selectedDate, 600)
+        const editor = page.eventEditor
+        tryCompare(editor, "opened", true)
+        const title = findChild(editor.contentItem, "calendarEventTitle")
+        editor.dialogWindow.requestActivate(); title.forceActiveFocus(); tryVerify(() => title.activeFocus)
+        title.text = "Draft"; title.cursorPosition = title.text.length
+        keyClick(Qt.Key_Left)
+        compare(title.cursorPosition, title.text.length - 1)
+        compare(page.iso(page.selectedDate), selected)
+        editor.close()
+    }
+    function test_scrolledHourGutterSharesBackground_data() {
+        return [{tag: "dark", main: "#241e1a", secondary: "#1e1916", backdrop: "#3c2a17", text: "#e9dccf", muted: "#bdaa9b"},
+                {tag: "light", main: "#ece8e4", secondary: "#f2e8dd", backdrop: "#fff7ea", text: "#30251d", muted: "#69584b"}]
+    }
+    function test_scrolledHourGutterSharesBackground(data) {
+        const owner = createTemporaryObject(ownerComponent, test)
+        verify(owner)
+        const page = owner.page
+        page.viewMode = 1
+        page.mainColour = data.main; page.secondaryColour = data.secondary
+        page.textColour = data.text; page.mutedTextColour = data.muted
+        page.background.color = data.backdrop
+        owner.update(); verify(waitForRendering(owner.contentItem))
+        const view = findChild(page, "calendarTimeline"), gutter = findChild(page, "calendarTimeGutter")
+        verify(view.contentWidth - view.width >= 70)
+        view.contentX = 70; view.contentY = 480
+        owner.update(); verify(waitForRendering(owner.contentItem))
+        const origin = gutter.mapToItem(page, 0, 0)
+        const capture = grabImage(page)
+        compare(capture.pixel(Math.round(origin.x + gutter.width / 2), Math.round(origin.y + 78)),
+                page.background.color, "The ruler shows the page background even where a scrolled event would overlap it")
+        mouseClick(gutter, gutter.width / 2, 78)
+        verify(!page.eventEditor.opened, "A clipped event cannot receive clicks through the ruler")
+    }
     function test_readableDaysScrollInsteadOfCompress(data) {
         const owner = createTemporaryObject(ownerComponent, test, {width: data.width, uiScale: data.scale, textSize: data.textSize || 16})
         verify(owner !== null)
@@ -319,10 +390,10 @@ TestCase {
         verify(!page.eventEditor.opened, "Dragging over an event does not open the editor")
         compare(testCalendar.event(ids[0]).start, originalStart)
         owner.requestActivate(); view.forceActiveFocus(); tryVerify(() => view.activeFocus)
-        view.contentX = 0; keyClick(Qt.Key_Right)
-        verify(view.contentX > 0, "Right arrow scrolls to later days")
+        view.contentX = 0; keyClick(Qt.Key_Right, Qt.ShiftModifier)
+        verify(view.contentX > 0, "Shift+Right scrolls to later visible days")
         compare(header.contentX, view.contentX)
-        keyClick(Qt.Key_Left); compare(view.contentX, 0)
+        keyClick(Qt.Key_Left, Qt.ShiftModifier); compare(view.contentX, 0)
     }
     function test_resizingKeepsScrolledDaysInsideBounds_data() { return [{tag: "week", mode: 1}, {tag: "month", mode: 2}] }
     function test_resizingKeepsScrolledDaysInsideBounds(data) {

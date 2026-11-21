@@ -13,13 +13,34 @@ PilonScrollView {
     contentWidth: availableWidth
     clip: true
     ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-    function prepareDisable() { return deviceEditor.visible ? qsTr("Close the device form before disabling SSH.") : true }
+    property var deviceDraft: null
+    property string deviceError: ""
+    readonly property bool editing: deviceDraft !== null
+    readonly property bool addingDevice: editing && deviceDraft.id === ""
+    readonly property string editingDeviceId: deviceDraft?.id || ""
+    function prepareDisable() { return editing ? qsTr("Save or cancel the device edit before disabling SSH.") : true }
+
+    function editDevice(device) {
+        deviceError = ""
+        deviceDraft = device ? {id: device.id, name: device.name, ip: device.ip} : {id: "", name: "", ip: ""}
+    }
+
+    function finishDeviceEdit() {
+        const id = editingDeviceId
+        deviceDraft = null
+        Qt.callLater(() => {
+            const index = addon.fileWorkspace.sshDeviceOptions.findIndex(device => device.id === id)
+            const row = devices.itemAt(index)
+            if (row) row.actionButton.forceActiveFocus()
+            else addDevice.forceActiveFocus()
+        })
+    }
 
     function removeSavedDevice(id, position) {
         if (!manager.removeDevice(id)) return
         Qt.callLater(function() {
             const next = devices.itemAt(Math.min(position, devices.count - 1))
-            if (next) next.forceActiveFocus()
+            if (next) next.includeButton.forceActiveFocus()
             else addDevice.forceActiveFocus()
         })
     }
@@ -42,6 +63,116 @@ PilonScrollView {
             }
         }
         PilonSectionHeader { Layout.fillWidth: true; text: qsTr("Devices") }
+        Repeater {
+            id: devices
+            model: page.addon.fileWorkspace.sshDeviceOptions
+            delegate: ColumnLayout {
+                id: deviceRow
+                required property var modelData
+                required property int index
+                readonly property alias actionButton: actions
+                readonly property alias includeButton: included
+                objectName: "sshDeviceUsernameRow-" + modelData.id
+                Layout.fillWidth: true; Layout.minimumWidth: 0
+                GridLayout {
+                    id: row
+                    visible: page.editingDeviceId !== deviceRow.modelData.id
+                    Layout.fillWidth: true; Layout.minimumWidth: 0
+                    readonly property real usernameWidth: width - Math.ceil(hostMetrics.advanceWidth) - atLabel.implicitWidth
+                        - 28 - (deviceRow.modelData.saved ? actions.implicitWidth + columnSpacing : 0) - columnSpacing * 3
+                    readonly property bool compact: usernameWidth < Math.max(100, username.implicitHeight * 2.5)
+                    columns: compact ? 3 : 5
+                    columnSpacing: 8; rowSpacing: 4
+                    RoundedCheckBox {
+                        id: included
+                        objectName: "sshDeviceIncluded-" + deviceRow.modelData.id
+                        Layout.preferredWidth: 28
+                        leftPadding: 2
+                        Accessible.name: qsTr("Include %1").arg(deviceRow.modelData.name)
+                        checked: deviceRow.modelData.included === true
+                        enabled: !page.manager.busy
+                        onToggled: {
+                            if (deviceRow.modelData.saved || !page.discovery) page.manager.setDeviceIncluded(deviceRow.modelData.id, checked)
+                            else page.discovery.setIncluded(deviceRow.modelData.id, checked)
+                        }
+                    }
+                    PilonTextField {
+                        id: username
+                        objectName: "sshDeviceUsername-" + deviceRow.modelData.id
+                        Layout.fillWidth: true; Layout.minimumWidth: 0
+                        Layout.preferredWidth: 120; Layout.maximumWidth: row.compact ? Infinity : Math.min(160, row.usernameWidth)
+                        Layout.columnSpan: row.compact ? 2 : 1
+                        text: page.addon.fileWorkspace.deviceUsernames[deviceRow.modelData.id] || ""
+                        placeholderText: page.addon.fileWorkspace.username
+                        Accessible.name: qsTr("%1 SSH username").arg(deviceRow.modelData.name)
+                        selectByMouse: true
+                        onEditingFinished: page.addon.fileWorkspace.setDeviceUsername(deviceRow.modelData.id, text)
+                    }
+                    Label {
+                        id: atLabel
+                        objectName: "sshDeviceAt-" + deviceRow.modelData.id
+                        text: "@"; color: page.addon.selectedTextColour
+                    }
+                    Label {
+                        id: hostLabel
+                        objectName: "sshDeviceHost-" + deviceRow.modelData.id
+                        Layout.fillWidth: true
+                        Layout.minimumWidth: row.compact ? 0 : Math.ceil(hostMetrics.advanceWidth)
+                        Layout.columnSpan: row.compact && !deviceRow.modelData.saved ? 2 : 1
+                        readonly property string deviceName: deviceRow.modelData.name || ""
+                        readonly property string address: deviceRow.modelData.ip || ""
+                        text: deviceName && address && deviceName !== address ? deviceName + " " + address
+                            : deviceName || address || deviceRow.modelData.id
+                        color: page.addon.selectedTextColour
+                        textFormat: Text.PlainText
+                        wrapMode: row.compact ? Text.WrapAnywhere : Text.NoWrap
+                        elide: row.compact ? Text.ElideNone : Text.ElideRight
+                        HoverHandler { id: addressHover }
+                        ToolTip.visible: addressHover.hovered && truncated
+                        ToolTip.text: text
+                    }
+                    TextMetrics { id: hostMetrics; text: hostLabel.text; font: hostLabel.font }
+                    PilonButton {
+                        id: actions
+                        objectName: "sshDeviceActions-" + deviceRow.modelData.id
+                        visible: deviceRow.modelData.saved === true
+                        enabled: !page.editing && !page.manager.busy
+                        display: AbstractButton.IconOnly
+                        icon.source: "qrc:/qt/qml/Pilon/icons/ellipsis-horizontal.svg"
+                        icon.width: 20; icon.height: 20
+                        leftPadding: 8; rightPadding: 8
+                        Accessible.name: qsTr("Actions for %1").arg(deviceRow.modelData.name)
+                        ToolTip.visible: hovered
+                        ToolTip.text: Accessible.name
+                        onClicked: deviceActions.popup(actions, 0, actions.height)
+                        PilonMenu {
+                            id: deviceActions
+                            PilonMenuItem { text: qsTr("Edit"); onTriggered: page.editDevice(deviceRow.modelData) }
+                            PilonMenuItem { text: qsTr("Remove"); onTriggered: page.removeSavedDevice(deviceRow.modelData.id, deviceRow.index) }
+                        }
+                    }
+                }
+                Loader {
+                    Layout.fillWidth: true; Layout.minimumWidth: 0
+                    active: page.editingDeviceId === deviceRow.modelData.id
+                    visible: active
+                    sourceComponent: DeviceForm {}
+                }
+            }
+        }
+        Label {
+            objectName: "sshNoDevices"
+            Layout.fillWidth: true; wrapMode: Text.Wrap
+            visible: devices.count === 0 && !page.addingDevice
+            text: qsTr("No devices")
+            color: page.addon.selectedTextColour
+        }
+        Loader {
+            Layout.fillWidth: true; Layout.minimumWidth: 0
+            active: page.addingDevice
+            visible: active
+            sourceComponent: DeviceForm {}
+        }
         Flow {
             Layout.fillWidth: true
             spacing: 8
@@ -49,78 +180,17 @@ PilonScrollView {
                 id: addDevice
                 objectName: "sshAddDevice"
                 text: qsTr("Add device")
-                onClicked: deviceEditor.edit(null)
+                visible: !page.addingDevice
+                enabled: !page.editing && !page.manager.busy
+                onClicked: page.editDevice(null)
             }
             PilonWrapButton {
                 objectName: "sshRefreshDevices"
                 text: qsTr("Refresh Tailscale peers")
                 visible: !!page.discovery
-                enabled: !page.manager.busy
+                enabled: !page.editing && !page.manager.busy
                 onClicked: page.discovery.refresh()
             }
-        }
-        Repeater {
-            id: devices
-            model: page.addon.fileWorkspace.sshDeviceOptions
-            delegate: GridLayout {
-                id: row
-                required property var modelData
-                required property int index
-                readonly property bool compact: width < 440
-                objectName: "sshDeviceUsernameRow-" + modelData.id
-                Layout.fillWidth: true; Layout.minimumWidth: 0
-                columns: compact ? 2 : 3
-                columnSpacing: 8; rowSpacing: 8
-                RoundedCheckBox {
-                    id: included
-                    objectName: "sshDeviceIncluded-" + row.modelData.id
-                    Layout.columnSpan: row.compact ? 2 : 3
-                    Layout.fillWidth: true; Layout.minimumWidth: 0
-                    text: row.modelData.name + (row.modelData.ip ? "\n" + row.modelData.ip : "")
-                    Binding { target: included.contentItem; property: "textFormat"; value: Text.PlainText }
-                    checked: row.modelData.included === true
-                    enabled: !page.manager.busy
-                    onToggled: {
-                        if (row.modelData.saved || !page.discovery) page.manager.setDeviceIncluded(row.modelData.id, checked)
-                        else page.discovery.setIncluded(row.modelData.id, checked)
-                    }
-                }
-                PilonTextField {
-                    objectName: "sshDeviceUsername-" + row.modelData.id
-                    Layout.fillWidth: true; Layout.minimumWidth: 0
-                    Layout.preferredWidth: 200; Layout.maximumWidth: row.compact ? Infinity : 240
-                    Layout.columnSpan: row.compact ? 2 : 1
-                    text: page.addon.fileWorkspace.deviceUsernames[row.modelData.id] || ""
-                    placeholderText: page.addon.fileWorkspace.username
-                    Accessible.name: qsTr("%1 SSH username").arg(row.modelData.name)
-                    selectByMouse: true
-                    onEditingFinished: page.addon.fileWorkspace.setDeviceUsername(row.modelData.id, text)
-                }
-                Label { objectName: "sshDeviceAt-" + row.modelData.id; text: "@"; color: page.addon.selectedTextColour }
-                Label {
-                    objectName: "sshDeviceHost-" + row.modelData.id
-                    Layout.fillWidth: true; Layout.minimumWidth: 0
-                    text: row.modelData.name || row.modelData.ip || row.modelData.id
-                    color: page.addon.selectedTextColour
-                    textFormat: Text.PlainText; wrapMode: Text.WrapAnywhere
-                }
-                Flow {
-                    objectName: "sshDeviceActions-" + row.modelData.id
-                    visible: row.modelData.saved === true
-                    Layout.columnSpan: row.compact ? 2 : 3
-                    Layout.fillWidth: true
-                    spacing: 8
-                    PilonWrapButton { text: qsTr("Edit"); onClicked: deviceEditor.edit(row.modelData) }
-                    PilonWrapButton { text: qsTr("Remove"); onClicked: page.removeSavedDevice(row.modelData.id, row.index) }
-                }
-            }
-        }
-        Label {
-            objectName: "sshNoDevices"
-            Layout.fillWidth: true; wrapMode: Text.Wrap
-            visible: devices.count === 0
-            text: qsTr("No devices")
-            color: page.addon.selectedTextColour
         }
         PilonSectionHeader { Layout.fillWidth:true; text:qsTr("Saved passwords") }
         PilonWrapButton {
@@ -136,53 +206,57 @@ PilonScrollView {
         }
     }
 
-    PilonDialog {
-        id: deviceEditor
+    component DeviceForm: GridLayout {
+        id: form
         objectName: "deviceEditor"
-        parent: page.Overlay.overlay
-        width: Math.min(480, parent.width - 32)
-        height: Math.min(implicitHeight, parent.height - 32)
-        x: (parent.width - width) / 2
-        y: (parent.height - height) / 2
-        modal: true
-        palette: page.palette
-        property string deviceId: ""
-        function edit(device) {
-            deviceId = device ? device.id : ""
-            deviceName.text = device ? device.name : ""
-            deviceAddress.text = device ? device.ip : ""
-            open()
-            deviceName.forceActiveFocus()
+        columns: width >= saveButton.implicitWidth + cancelButton.implicitWidth + 184 ? 4 : 2
+        columnSpacing: 8; rowSpacing: 8
+        readonly property bool canSave: !page.manager.busy && !!deviceName.text.trim() && !!deviceAddress.text.trim()
+        Component.onCompleted: deviceName.forceActiveFocus()
+        function save() {
+            if (!canSave) return
+            if (page.manager.saveDevice(page.editingDeviceId, deviceName.text, deviceAddress.text)) page.finishDeviceEdit()
+            else page.deviceError = page.manager.errorMessage
         }
-        contentItem: PilonScrollView {
-            implicitHeight: editorFields.implicitHeight
-            contentWidth: availableWidth
-            clip: true
-            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-            ColumnLayout {
-                id: editorFields
-                width: parent.width
-                spacing: 8
-                Label { text: qsTr("Name"); color: page.addon.selectedTextColour }
-                PilonTextField { id: deviceName; objectName: "deviceName"; Layout.fillWidth: true; Accessible.name: qsTr("Device name") }
-                Label { text: qsTr("Address"); color: page.addon.selectedTextColour }
-                PilonTextField { id: deviceAddress; objectName: "deviceAddress"; Layout.fillWidth: true; placeholderText: qsTr("IP address or MagicDNS name"); Accessible.name: qsTr("Device address") }
-                Label {
-                    Layout.fillWidth: true; wrapMode: Text.Wrap; textFormat: Text.PlainText
-                    visible: text.length > 0; text: page.manager.errorMessage; color: page.addon.selectedWarningColour
-                }
-                Flow {
-                    Layout.fillWidth: true
-                    spacing: 8
-                    PilonButton {
-                        objectName: "saveDevice"
-                        text: qsTr("Save")
-                        enabled: !page.manager.busy && !!deviceName.text.trim() && !!deviceAddress.text.trim()
-                        onClicked: if (page.manager.saveDevice(deviceEditor.deviceId, deviceName.text, deviceAddress.text)) deviceEditor.close()
-                    }
-                    PilonButton { text: qsTr("Cancel"); onClicked: deviceEditor.close() }
-                }
-            }
+        PilonTextField {
+            id: deviceName
+            objectName: "deviceName"
+            Layout.fillWidth: true; Layout.minimumWidth: 0; Layout.preferredWidth: 140
+            text: page.deviceDraft?.name || ""
+            placeholderText: qsTr("Name")
+            Accessible.name: qsTr("Device name")
+            onTextEdited: page.deviceDraft.name = text
+            onAccepted: deviceAddress.forceActiveFocus()
+        }
+        PilonTextField {
+            id: deviceAddress
+            objectName: "deviceAddress"
+            Layout.fillWidth: true; Layout.minimumWidth: 0; Layout.preferredWidth: 140
+            text: page.deviceDraft?.ip || ""
+            placeholderText: qsTr("IP address or hostname")
+            Accessible.name: qsTr("Device address")
+            onTextEdited: page.deviceDraft.ip = text
+            onAccepted: form.save()
+        }
+        PilonWrapButton {
+            id: saveButton
+            objectName: "saveDevice"
+            text: qsTr("Save")
+            enabled: form.canSave
+            onClicked: form.save()
+        }
+        PilonWrapButton {
+            id: cancelButton
+            text: qsTr("Cancel")
+            onClicked: page.finishDeviceEdit()
+        }
+        Label {
+            Layout.columnSpan: form.columns
+            Layout.fillWidth: true; Layout.minimumWidth: 0
+            wrapMode: Text.Wrap; textFormat: Text.PlainText
+            visible: text.length > 0
+            text: page.deviceError
+            color: page.addon.selectedWarningColour
         }
     }
 }

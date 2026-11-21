@@ -13,6 +13,21 @@ Item {
     readonly property var manager: workspace.remoteFiles
     readonly property var iconNames: typeof manager.appearanceIconNames === "function" ? manager.appearanceIconNames() : []
     readonly property var suggestedTypes: ["pdf", "png", "py", "zip"]
+    readonly property var typeRows: {
+        const types = Object.keys(rules.types).concat(suggestedTypes)
+        return [...new Set(types)].sort().map(type => ({name: "file." + type, text: "." + type, type}))
+    }
+    readonly property var pathRows: Object.keys(rules.paths).sort().map(key => {
+        try {
+            const [deviceId, username, path, directory] = JSON.parse(key)
+            const device = workspace.devices.find(candidate => candidate.id === deviceId)
+            if (!device) return null
+            return {name: path.split("/").pop(), deviceId, username, path, directory,
+                    text: deviceId === "local" ? path : username + "@" + device.name + " " + path}
+        } catch (error) {
+            return null
+        }
+    }).filter(row => row !== null)
     readonly property var defaultIcons: {
         const defaults = Object.create(null)
         const groups = {
@@ -133,12 +148,21 @@ Item {
         return true
     }
 
-    function open(owner) {
+    function openType(owner, type) {
         reload()
         editor.owner = owner || workspace.ownerWindow
         editor.onlyPath = false
         editor.mode = 0
-        editor.editType("")
+        editor.editType(type)
+        editor.open()
+    }
+
+    function openNewPath(owner) {
+        reload()
+        editor.owner = owner || workspace.ownerWindow
+        editor.onlyPath = false
+        editor.mode = 1
+        editor.editPath({})
         editor.open()
     }
 
@@ -171,24 +195,10 @@ Item {
             username: onlyPath ? pathDraft.username : accountInput.text.trim(),
             directory: onlyPath ? pathDraft.directory === true : kindInput.currentIndex === 0
         })
-        readonly property var listedRules: {
-            if (mode === 0) {
-                const types = Object.keys(appearance.rules.types).concat(appearance.suggestedTypes)
-                return [...new Set(types)].sort().map(type => ({text: "." + type, type}))
-            }
-            return Object.keys(appearance.rules.paths).sort().map(key => {
-                try {
-                    const [deviceId, username, path, directory] = JSON.parse(key)
-                    const device = devices.find(candidate => candidate.id === deviceId)
-                    if (!device) return null
-                    return {deviceId, username, path, directory,
-                            text: deviceId === "local" ? path : username + "@" + device.name + " " + path}
-                } catch (error) {
-                    return null
-                }
-            }).filter(rule => rule !== null)
+        readonly property var filteredIcons: {
+            const query = iconSearch.text.trim().toLowerCase().split(/[\s-]+/)
+            return appearance.iconNames.filter(name => query.every(word => name.includes(word)))
         }
-        readonly property var filteredIcons: appearance.iconNames.filter(name => name.includes(iconSearch.text.trim().toLowerCase()))
         readonly property string type: appearance.normalizedType(identity.text)
         readonly property url preview: appearance.sourceForIcon(choice) || (mode === 0
             ? appearance.fallbackIconForEntry({name: "file." + type}, type)
@@ -196,7 +206,7 @@ Item {
 
         parent: owner ? owner.contentItem : null
         width: Math.min(560, owner && owner.width > 0 ? owner.width : 560)
-        height: Math.min(600, owner && owner.height > 0 ? owner.height : 600)
+        height: Math.min(500, owner && owner.height > 0 ? owner.height : 500)
         palette.window: appearance.workspace.mainColour
         palette.button: appearance.workspace.secondaryColour
         palette.windowText: appearance.workspace.textColour
@@ -211,7 +221,13 @@ Item {
             tint = colour || ""
             importSource = ""
             iconSearch.clear()
-            iconPicker.currentIndex = -1
+            iconPicker.currentIndex = Math.max(0, filteredIcons.indexOf(choice))
+            errorText = ""
+        }
+
+        function chooseIcon(icon) {
+            importSource = ""
+            choice = icon
             errorText = ""
         }
 
@@ -232,8 +248,8 @@ Item {
         }
 
         function save() {
-            if (mode === 0 && editingType !== type && listedRules.some(rule => rule.type === type)) {
-                errorText = qsTr("Choose the existing rule to edit this extension.")
+            if (mode === 0 && editingType !== type && appearance.typeRows.some(rule => rule.type === type)) {
+                errorText = qsTr("Edit the existing rule for this extension in Appearance.")
                 return
             }
             let icon = choice
@@ -258,56 +274,11 @@ Item {
                 width: editorScroll.availableWidth
                 spacing: 8
 
-                PilonComboBox {
-                    objectName: "fileAppearanceRuleScope"
-                    width: parent.width
-                    visible: !editor.onlyPath
-                    Accessible.name: qsTr("Rule scope")
-                    model: [qsTr("File types"), qsTr("Files and folders")]
-                    currentIndex: editor.mode
-                    onActivated: index => {
-                        editor.mode = index
-                        savedRules.currentIndex = -1
-                        if (editor.mode === 0) editor.editType("")
-                        else editor.editPath({})
-                    }
-                }
-                PilonComboBox {
-                    id: savedRules
-                    objectName: "fileAppearanceExistingRules"
-                    width: parent.width
-                    visible: !editor.onlyPath && count > 0
-                    Accessible.name: qsTr("Existing rules")
-                    model: editor.listedRules
-                    textRole: "text"
-                    currentIndex: -1
-                    displayText: currentIndex < 0 ? qsTr("Edit existing rule") : currentText
-                    delegate: PilonMenuItem {
-                        required property int index
-                        readonly property var rule: editor.listedRules[index]
-                        readonly property var entry: editor.mode === 0 ? {name: "file." + rule.type}
-                            : Object.assign({name: rule.path.split("/").pop()}, rule)
-                        width: savedRules.popup.availableWidth
-                        text: rule.text
-                        highlighted: savedRules.highlightedIndex === index
-                        icon.source: appearance.iconForEntry(entry)
-                        icon.color: appearance.tintForEntry(entry) || (icon.source.toString().startsWith("file:")
-                            ? "transparent" : editor.palette.windowText)
-                        icon.width: 18
-                        icon.height: 18
-                    }
-                    onActivated: index => {
-                        const rule = editor.listedRules[index]
-                        if (editor.mode === 0) editor.editType(rule.type)
-                        else editor.editPath(rule)
-                        currentIndex = -1
-                    }
-                }
                 PilonTextField {
                     id: identity
                     objectName: "fileAppearanceRuleIdentity"
                     width: parent.width
-                    readOnly: editor.onlyPath
+                    readOnly: editor.onlyPath || (editor.mode === 0 && editor.editingType !== "")
                     placeholderText: editor.mode === 0 ? qsTr("File extension") : qsTr("Absolute path")
                     Accessible.name: placeholderText
                 }
@@ -344,18 +315,50 @@ Item {
                     placeholderText: qsTr("Search bundled icons")
                     Accessible.name: placeholderText
                 }
-                PilonComboBox {
+                GridView {
                     id: iconPicker
                     objectName: "fileAppearanceIconPicker"
                     width: parent.width
-                    model: editor.filteredIcons
-                    currentIndex: -1
-                    displayText: currentIndex >= 0 ? currentText : count ? qsTr("Choose icon") : qsTr("No matching icons")
+                    height: Math.min(contentHeight, cellHeight * 3)
+                    readonly property int columns: Math.max(1, Math.floor(width / 104))
+                    cellWidth: width / columns
+                    cellHeight: 68
+                    clip: true
+                    activeFocusOnTab: count > 0
+                    keyNavigationEnabled: true
                     Accessible.name: qsTr("Bundled icons")
-                    onActivated: index => {
-                        editor.importSource = ""
-                        editor.choice = editor.filteredIcons[index]
+                    ScrollBar.vertical: ScrollBar {}
+                    model: editor.filteredIcons
+                    Keys.onReturnPressed: if (currentItem) editor.chooseIcon(currentItem.modelData)
+                    Keys.onSpacePressed: if (currentItem) editor.chooseIcon(currentItem.modelData)
+                    delegate: PilonButton {
+                        required property string modelData
+                        required property int index
+                        width: iconPicker.cellWidth - 8
+                        height: iconPicker.cellHeight - 8
+                        flat: true
+                        activeFocusOnTab: false
+                        highlighted: editor.choice === modelData || (iconPicker.activeFocus && GridView.isCurrentItem)
+                        leftPadding: 4; rightPadding: 4; topPadding: 4; bottomPadding: 4; spacing: 4
+                        display: AbstractButton.TextUnderIcon
+                        text: modelData.replace(/^application-x-pilon-/, "pilon-").replace(/-/g, " ")
+                        Accessible.name: text
+                        ToolTip.visible: hovered
+                        ToolTip.text: text
+                        icon.source: appearance.sourceForIcon(modelData)
+                        icon.width: 28; icon.height: 28
+                        onClicked: {
+                            iconPicker.currentIndex = index
+                            editor.chooseIcon(modelData)
+                        }
                     }
+                }
+                Label {
+                    width: parent.width
+                    visible: iconPicker.count === 0
+                    text: qsTr("No matching icons")
+                    wrapMode: Text.Wrap
+                    color: editor.palette.windowText
                 }
                 Row {
                     width: parent.width
@@ -394,7 +397,6 @@ Item {
                         onClicked: {
                             editor.choice = ""
                             editor.importSource = ""
-                            iconPicker.currentIndex = -1
                         }
                     }
                     PilonButton {
@@ -438,7 +440,7 @@ Item {
             nameFilters: [qsTr("Icons (*.png *.svg)")]
             onAccepted: {
                 editor.importSource = selectedFile
-                iconPicker.currentIndex = -1
+                editor.choice = ""
                 editor.errorText = ""
             }
         }

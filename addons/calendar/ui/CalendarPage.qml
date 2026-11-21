@@ -7,6 +7,7 @@ import "ui"
 
 Control {
     id: page
+    focus: true
     palette.highlightedText: accentTextColour
     palette.window: mainColour
     palette.placeholderText: mutedTextColour
@@ -66,7 +67,8 @@ Control {
     onVisibleChanged: {
         gesture = null
         currentDate = new Date()
-        if (!visible) resetPeriodSlide()
+        if (visible) forceActiveFocus()
+        else resetPeriodSlide()
     }
     Timer { interval: 60000; running: page.visible; repeat: true; onTriggered: page.currentDate = new Date() }
     readonly property bool overlapEvents: calendar.preferences.eventLayout === "overlap"
@@ -224,6 +226,23 @@ Control {
         if (!changed && calendar.error) { operationIssue.message = calendar.error; operationIssue.open() }
     }
     Keys.onEscapePressed: gesture = null
+    Keys.onLeftPressed: event => handlePeriodArrow(event, -1)
+    Keys.onRightPressed: event => handlePeriodArrow(event, 1)
+    function handlePeriodArrow(event, direction) {
+        const modifiers = event.modifiers & ~Qt.KeypadModifier
+        if (!visible || gesture || editor.opened || datePicker.opened || viewSelector.popup.opened) {
+            event.accepted = false
+        } else if (modifiers === Qt.NoModifier) {
+            if (!event.isAutoRepeat) navigate(direction)
+        } else if (modifiers === Qt.ShiftModifier) {
+            const view = viewMode === 2 ? month : timeline
+            view.cancelFlick()
+            view.contentX = Math.max(0, Math.min(view.contentWidth - view.width,
+                view.contentX + direction * minimumEventWidth))
+        } else {
+            event.accepted = false
+        }
+    }
     property real periodOffset: 0
     property int periodDirection: 0
     property var periodTarget: null
@@ -406,8 +425,6 @@ Control {
                 flickableDirection: Flickable.HorizontalAndVerticalFlick; boundsBehavior: Flickable.StopAtBounds
                 activeFocusOnTab: true
                 onContentWidthChanged: contentX = Math.min(contentX, Math.max(0, contentWidth - width))
-                Keys.onLeftPressed: contentX = Math.max(0, contentX - page.minimumEventWidth)
-                Keys.onRightPressed: contentX = Math.min(contentWidth - width, contentX + page.minimumEventWidth)
                 Keys.onUpPressed: contentY = Math.max(0, contentY - monthGrid.height / 6)
                 Keys.onDownPressed: contentY = Math.min(Math.max(0, contentHeight - height), contentY + monthGrid.height / 6)
                 ScrollBar.vertical: ScrollBar {}
@@ -490,8 +507,6 @@ Control {
                 flickableDirection: Flickable.HorizontalAndVerticalFlick
                 activeFocusOnTab: true
                 onContentWidthChanged: contentX = Math.min(contentX, Math.max(0, contentWidth - width))
-                Keys.onLeftPressed: contentX = Math.max(0, contentX - page.minimumEventWidth)
-                Keys.onRightPressed: contentX = Math.min(contentWidth - width, contentX + page.minimumEventWidth)
                 Keys.onUpPressed: contentY = Math.max(0, contentY - 60)
                 Keys.onDownPressed: contentY = Math.min(Math.max(0, contentHeight - height), contentY + 60)
                 interactive: !page.gesture
@@ -499,7 +514,16 @@ Control {
                 ScrollBar.horizontal: ScrollBar { id: timelineHorizontal; visible: timeline.contentWidth > timeline.width + .5; z: 3 }
                 Component.onCompleted: contentY=8*60
                 Item {
+                    id: timelineClip
+                    // The visible columns start after the fixed hour labels.
+                    x: timeline.contentX + page.timeGutterWidth; y: timeline.contentY
+                    width: Math.max(0, timeline.width - page.timeGutterWidth); height: timeline.height
+                    clip: true
+                }
+                Item {
                     id: timeGrid
+                    parent: timelineClip
+                    x: -timelineClip.x; y: -timelineClip.y
                     width: timeline.contentWidth; height: timeline.contentHeight
                     Repeater { model: 24; delegate: Rectangle { required property int index; x: page.timeGutterWidth; y: index*60; width: timeGrid.width - x; height: 1; color: Qt.alpha(page.textColour,.07) } }
                     Row {
@@ -692,12 +716,10 @@ Control {
                         }
                     }
                 }
-                Rectangle {
+                Item {
                     objectName: "calendarTimeGutter"
                     parent: timeline
-                    width: page.timeGutterWidth; height: timeline.height
-                    // Cover events only when columns scroll behind the fixed labels.
-                    color: timeline.atXBeginning ? "transparent" : page.mainColour; z: 2
+                    width: page.timeGutterWidth; height: timeline.height; z: 2
                     Column {
                         y: -timeline.contentY
                         Repeater { model: 24; delegate: Label { required property int index; height: 60; width: page.timeGutterWidth - 8; text: String(index).padStart(2,"0")+":00"; color: page.mutedTextColour; font.pixelSize: 11; horizontalAlignment: Text.AlignRight } }

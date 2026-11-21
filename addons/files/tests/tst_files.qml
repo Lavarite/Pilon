@@ -247,29 +247,38 @@ TestCase {
         const picker = findChild(editor, "fileAppearanceIconPicker")
         search.text = "PENC"
         tryCompare(picker, "count", 1)
-        picker.activated(0)
+        tryVerify(() => picker.itemAtIndex(0) !== null)
+        const pencil = picker.itemAtIndex(0)
+        verify(pencil.icon.source.toString().endsWith("/pencil.svg"))
+        mouseClick(pencil)
         findChild(editor, "saveFileAppearance").clicked()
         tryCompare(editor, "opened", false)
         compare(page.iconForFile(entry.name, true, entry.path, "local"), "icons/pencil.svg")
         verify(sharedFiles.appearance.savePath(entry, "", ""))
     }
-    Window { id: compactAppearanceOwner; width: 320; height: 360 }
-    function test_fileAppearanceSettingsEditTheSameRuleOnNarrowWindows() {
+    Window {
+        id: compactAppearanceOwner
+        width: 320; height: 360
+        App.FileAppearanceSection {
+            id: compactAppearancePaths
+            width: compactAppearanceOwner.width
+            paths: true
+            ownerWindow: compactAppearanceOwner
+            appearanceModel: sharedFiles.appearance
+        }
+    }
+    function test_inlinePathRulesOpenTheSameEditorOnNarrowWindows() {
         const folder = {name: "Folder", path: "/tmp/Folder", deviceId: "local", directory: true}
         verify(sharedFiles.appearance.savePath(folder, "pencil", "#193e94"))
         compactAppearanceOwner.show()
-        sharedFiles.appearance.open(compactAppearanceOwner)
+        const rule = findChild(compactAppearancePaths, "fileAppearancePathRule")
+        verify(rule && rule.visible)
+        compare(rule.text, folder.path)
+        mouseClick(rule)
         const editor = findChild(sharedFiles, "fileAppearanceEditor")
         tryCompare(editor, "opened", true)
         compare(editor.dialogWindow.transientParent, compactAppearanceOwner)
         verify(editor.width <= compactAppearanceOwner.width)
-        const scope = findChild(editor, "fileAppearanceRuleScope")
-        scope.activated(1)
-        const rules = findChild(editor, "fileAppearanceExistingRules")
-        compare(rules.count, 1)
-        rules.popup.open()
-        tryVerify(() => rules.popup.contentItem.itemAtIndex(0) !== null)
-        mouseClick(rules.popup.contentItem.itemAtIndex(0))
         compare(findChild(editor, "fileAppearanceRuleIdentity").text, folder.path)
         compare(editor.tint, "#193e94")
         compare(editor.choice, "pencil")
@@ -877,6 +886,7 @@ TestCase {
         const menu = findChild(tile, "fileContextMenu")
         const action = findChild(menu, "shareSelectedFileAction")
         verify(action !== null)
+        compare(action.icon.source.toString(), "")
         const manager = sharedFiles.shareManager
         manager.shared = ({})
         const local = {name: "File.pdf", directory: false, deviceId: "local", path: "/example/File.pdf"}
@@ -1721,6 +1731,61 @@ TestCase {
         compare(exportNote.exported.filename, "Export fixture.pdf")
         compare(exportNote.exported.options.firstPageHeadingOnly, true)
         compare(exportNote.exported.options.pageNumbers, true)
+    }
+    function test_exportFolderAndShareAreReachable_data() {
+        return [{tag: "laptop", width: 1000, height: 760, scale: 1, touch: false},
+            {tag: "phone", width: 360, height: 740, scale: 1.4, touch: true},
+            {tag: "tiny_window", width: 320, height: 360, scale: 1.4, touch: true},
+            {tag: "short_landscape", width: 560, height: 360, scale: 1.4, touch: true}]
+    }
+    function test_exportFolderAndShareAreReachable(data) {
+        const dialog = findWorkspaceChild("noteExportWindow"), owner = dialog.transientParent
+        const screen = tabletInput.screenGeometry(), manager = sharedFiles.exportManager
+        try {
+            tabletInput.setScreenGeometry(Qt.rect(0, 0, data.width + 40, data.height + 80))
+            scaledViewerHost.uiScale = data.scale; scaledViewerHost.show()
+            dialog.transientParent = scaledViewerHost
+            sharedFiles.exportNote(exportNote)
+            dialog.width = data.width; dialog.height = data.height
+            manager.currentDeviceId = "local"; manager.currentPath = "/source"
+            manager.entries = [{name: "Destination", path: "/source/Destination", directory: true,
+                deviceId: "local", deviceName: "This device"}]
+            waitForPolish(dialog.contentItem)
+            verify(waitForRendering(dialog.contentItem))
+            const viewport = findChild(dialog, "fileSelectorViewport")
+            const pointer = findChild(dialog, "filePointerArea")
+            const list = findChild(dialog, "fileEntriesView")
+            const point = pointer.mapToItem(viewport, pointer.width / 2, list.cellHeight / 2)
+            verify(point.y >= 0 && point.y < viewport.height, "The first folder is reachable above the actions")
+            const share = findChild(dialog, "shareNotePdf"), save = findChild(dialog, "confirmNoteExport")
+            verify(share.visible && share.enabled && save.visible && save.enabled)
+            fuzzyCompare(share.mapToItem(dialog.contentItem, 0, share.height / 2).y,
+                save.mapToItem(dialog.contentItem, 0, save.height / 2).y, 1)
+            if (data.touch) {
+                const tap = touchEvent(pointer)
+                tap.press(0, pointer, pointer.width / 2, list.cellHeight / 2).commit()
+                tap.release(0, pointer, pointer.width / 2, list.cellHeight / 2).commit()
+            } else mouseClick(pointer, pointer.width / 2, list.cellHeight / 2)
+            tryVerify(() => manager.lastBrowse.path === "/source/Destination")
+            manager.currentPath = manager.lastBrowse.path; manager.entries = []
+            const shareManager = sharedFiles.shareManager
+            shareManager.shareSucceeds = false
+            if (data.touch) {
+                const tap = touchEvent(share)
+                tap.press(0, share).commit(); tap.release(0, share).commit()
+            } else mouseClick(share)
+            tryCompare(findChild(dialog, "notePdfShareError"), "visible", true)
+            compare(shareManager.shared.file, "file:///tmp/Export fixture.pdf")
+            verify(dialog.opened)
+            mouseClick(save)
+            tryCompare(dialog, "visible", false)
+            compare(exportNote.exported.folder, "/source/Destination")
+        } finally {
+            sharedFiles.shareManager.shareSucceeds = true
+            dialog.close(); dialog.transientParent = owner
+            scaledViewerHost.close(); scaledViewerHost.uiScale = 1.4
+            tabletInput.setScreenGeometry(screen)
+        }
     }
     function test_exportOptionsStayReachableAtSmallAndTouchSizes_data() {
         return [{tag: "desktop", screenWidth: 1440, screenHeight: 900, width: 1000, height: 760, scale: 1},
