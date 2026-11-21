@@ -65,7 +65,7 @@ class DesktopInstallerTests(unittest.TestCase):
             self.assertIn(entry.attrib["type"] + ";", text)
             name = entry.find("mime:icon", ns).attrib["name"]
             icon = self.data / "icons/hicolor/scalable/mimetypes" / (name + ".svg")
-            self.assertEqual(ET.parse(icon).getroot().attrib["viewBox"], "0 0 24 24")
+            self.assertEqual(ET.parse(icon).getroot().attrib["viewBox"], "0 0 256 256")
             icons.append(icon.read_bytes())
         self.assertEqual(len(set(icons)), 3)
 
