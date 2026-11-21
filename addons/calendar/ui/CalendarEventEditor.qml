@@ -377,10 +377,13 @@ PilonPopup {
                                     border.width: swatch.activeFocus || swatch.checked ? 2 : 1
                                     border.color: Qt.alpha(eventPalette.onColour(swatch.modelData), swatch.checked ? .9 : .3)
                                 }
-                                contentItem: Label {
-                                    text: swatch.checked ? "✓" : ""
-                                    color: eventPalette.onColour(swatch.modelData)
-                                    horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+                                contentItem: Item {
+                                    ControlsImpl.ColorImage {
+                                        anchors.centerIn: parent
+                                        width: 18; height: 18; source: "icons/check.svg"
+                                        visible: swatch.checked
+                                        color: eventPalette.onColour(swatch.modelData)
+                                    }
                                 }
                                 onClicked: editor.selectedColour = "theme:" + index
                             }

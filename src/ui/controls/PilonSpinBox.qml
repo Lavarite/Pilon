@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls.Basic as Basic
+import QtQuick.Controls.impl as ControlsImpl
 
 Basic.SpinBox {
     id: control
@@ -17,12 +18,20 @@ Basic.SpinBox {
     up.indicator: Rectangle {
         x: control.width - width; width: 32; height: control.height; radius: 8
         color: control.up.pressed ? Qt.alpha(control.palette.text, .12) : control.up.hovered ? Qt.alpha(control.palette.text, .06) : "transparent"
-        Text { anchors.centerIn: parent; text: "+"; font.pixelSize: 20; color: control.palette.buttonText; opacity: parent.enabled ? 1 : .4 }
+        ControlsImpl.ColorImage {
+            anchors.centerIn: parent
+            width: 18; height: 18; source: "../icons/plus.svg"
+            color: control.palette.buttonText; opacity: parent.enabled ? 1 : .4
+        }
     }
     down.indicator: Rectangle {
         width: 32; height: control.height; radius: 8
         color: control.down.pressed ? Qt.alpha(control.palette.text, .12) : control.down.hovered ? Qt.alpha(control.palette.text, .06) : "transparent"
-        Text { anchors.centerIn: parent; text: "−"; font.pixelSize: 20; color: control.palette.buttonText; opacity: parent.enabled ? 1 : .4 }
+        ControlsImpl.ColorImage {
+            anchors.centerIn: parent
+            width: 18; height: 18; source: "../icons/minus.svg"
+            color: control.palette.buttonText; opacity: parent.enabled ? 1 : .4
+        }
     }
     background: Rectangle {
         radius: 8; color: control.palette.button
