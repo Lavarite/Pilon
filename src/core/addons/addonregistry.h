@@ -29,6 +29,7 @@ class AddonRegistry : public QObject {
     }
     Q_INVOKABLE bool isEnabled(const QString &id) const;
     Q_INVOKABLE bool setEnabled(const QString &id, bool enabled);
+    Q_INVOKABLE bool disableWithDependents(const QString &id, const QStringList &confirmedDependents);
     Q_INVOKABLE bool setSidebarOrder(const QStringList &ids);
     Q_INVOKABLE bool setPageVisible(const QString &id, bool visible);
     Q_INVOKABLE QStringList requiredOrder(const QString &id);
@@ -56,6 +57,7 @@ class AddonRegistry : public QObject {
     };
     const QVariantMap *find(const QString &id) const;
     QStringList dependencyOrder(const QString &id, QString *error) const;
+    bool changeEnabled(const QString &id, bool enabled, const QStringList &confirmedDependents);
     bool configured(const QVariantMap &row) const;
     bool loadState();
     bool saveState();

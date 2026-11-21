@@ -67,10 +67,11 @@ manifest version can load, but cannot be a compatible dependency target.
 
 The registry validates the entire installed dependency closure, rejecting
 missing/incompatible packages and cycles before enablement. It saves the required
-enable set together and rolls back failed preference writes. It does not install
-missing packages. A required provider cannot be disabled/removed while enabled
-dependents require it; there is no automatic disable cascade. Optional integrations
-are separate from this required closure.
+enable set together and rolls back failed preference writes. Install missing
+packages before enabling their dependents. When a user disables a required
+provider, Pilon lists the enabled direct and transitive dependents for
+confirmation and disables the whole group together. Disable the group before
+removing the provider. Optional integrations remain separate from this closure.
 
 ## Entry context
 

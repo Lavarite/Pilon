@@ -229,7 +229,7 @@ Window {
     function prepareOwners(ids, freezeActivity) {
         if (sharedFiles.filePickerOpen || sharedFiles.sharedManagers().some(item => item && item.busy))
             return Promise.resolve(qsTr("Finish file transfers and close file pickers first."))
-        const hosts = Object.values(addonHosts).filter(host => ids.indexOf(host.descriptor.id) >= 0)
+        const hosts = ids.map(id => addonHosts[id]).filter(host => !!host)
         const integrations = integrationHosts.filter(host => ids.some(id => host.affects(id)))
         for (const host of hosts.concat(integrations)) host.preparing = true
         let preparation = Promise.resolve(true)
@@ -282,7 +282,14 @@ Window {
             }
             if (host) host.descriptor = entry
         }
-        for (const entry of addonRegistry.addons.slice().sort((a, b) => addonRegistry.requiredOrder(a.id).length - addonRegistry.requiredOrder(b.id).length)) {
+        const ordered = addonRegistry.addons.slice()
+            .sort((a, b) => addonRegistry.requiredOrder(a.id).length - addonRegistry.requiredOrder(b.id).length)
+        // Stop dependent runtimes before stopping their required providers.
+        for (const entry of ordered.slice().reverse()) {
+            const host = addonHosts[entry.id]
+            if (host && (!entry.enabled || entry.error || !workspaceActive)) host.enabled = false
+        }
+        for (const entry of ordered) {
             const host = addonHosts[entry.id]
             if (host) {
                 host.settingsEnabled = entry.enabled && !entry.error
@@ -334,37 +341,56 @@ Window {
         const row = addonRegistry.addons.find(entry => entry.id === id)
         if (addonCleanup.busy) return qsTr("Wait for account cleanup to finish.")
         if (window.resetBlocked) return qsTr("Finish the current update before changing add-ons.")
-        if (changingAddons[id] || preparingWorkspace) return qsTr("An add-on change is already in progress.")
+        if (Object.keys(changingAddons).length || preparingWorkspace || disableDependentsConfirmation.response)
+            return qsTr("An add-on change is already in progress.")
         if (row && (row.configuredEnabled === undefined ? row.enabled : row.configuredEnabled) === enabled) return true
         if (enabled) return addonRegistry.setEnabled(id, true) || addonRegistry.error
-        const host = addonHosts[id]
-        const manager = id === "notes" ? notesManager : id === "calendar" ? calendarManager : id === "assistant" ? assistantManager : null
+        const dependents = addonRegistry.dependents(id)
+        if (!dependents.length) return disableAddons(id, dependents)
+        const names = dependents.map(member => addonRegistry.addons.find(entry => entry.id === member)?.name || member)
+        return disableDependentsConfirmation.ask(row?.name || id, names)
+            .then(accepted => accepted ? disableAddons(id, dependents) : true)
+    }
+    function disableAddons(id, dependents) {
+        const members = dependents.concat([id])
+        if (members.some(member => ownerLocked(member)))
+            return qsTr("Finish the current update before changing these add-ons.")
+        if (addonCleanup.busy || resetBlocked || preparingWorkspace || Object.keys(changingAddons).length)
+            return qsTr("An add-on change is already in progress.")
+        if (addonRegistry.dependents(id).join("\n") !== dependents.join("\n"))
+            return qsTr("The dependent add-ons changed. Review them and try again.")
         // shortcut: shared foreground pickers/transfers block disable until their APIs carry request owners.
         if (sharedFiles.filePickerOpen || sharedFiles.sharedManagers().some(item => item && item.busy))
             return qsTr("Finish the open file operation before disabling the add-on.")
-        if (manager) {
+        const managers = members.map(member => ({notes: notesManager, calendar: calendarManager,
+                                                  assistant: assistantManager})[member]).filter(manager => !!manager)
+        for (const manager of managers) {
             const reason = manager.disableBlockedReason()
             if (reason) return reason
         }
-        if (id === "files" && filesPane && filesPane.tiles.some(tile => tile.remoteFiles.busy))
+        if (members.includes("files") && filesPane && filesPane.tiles.some(tile => tile.remoteFiles.busy))
             return qsTr("Finish the file transfer before disabling Files.")
-        if (host) host.preparing = true
-        const changing = Object.assign({}, changingAddons); changing[id] = true; changingAddons = changing
-        return prepareOwners([id]).then(result => {
+        const pending = {}
+        for (const member of members) pending[member] = true
+        changingAddons = pending
+        return prepareOwners(members.slice().reverse()).then(result => {
             if (result !== true) return typeof result === "string" ? result : qsTr("Save or finish the add-on's current work first.")
-            if (id === "notes" && notesPane && !notesPane.saveCurrentNote()) return notesManager.errorMessage
-            if (manager && !manager.prepareDisable()) return manager.disableBlockedReason() || qsTr("Unable to save the current work.")
-            if (host && host.runtime && host.runtime.disableNotice)
-                addonNotices = Object.assign({}, addonNotices, {[id]: host.runtime.disableNotice})
-            if (!syncWidgetCatalogue([id])) return addonError
-            if (!addonRegistry.setEnabled(id, false)) { syncWidgetCatalogue(); return addonRegistry.error }
+            if (members.includes("notes") && notesPane && !notesPane.saveCurrentNote()) return notesManager.errorMessage
+            for (const manager of managers) {
+                if (!manager.prepareDisable()) return manager.disableBlockedReason() || qsTr("Unable to save the current work.")
+            }
+            const notices = Object.assign({}, addonNotices)
+            for (const member of members) {
+                const notice = addonHosts[member]?.runtime?.disableNotice
+                if (notice) notices[member] = notice
+            }
+            if (!syncWidgetCatalogue(members)) return addonError
+            if (!addonRegistry.disableWithDependents(id, dependents)) return addonRegistry.error
+            addonNotices = notices
             return true
         }).catch(error => String(error)).then(result => {
-            for (const entry of integrationHosts.filter(item => item.affects(id))) entry.preparing = false
-            if (host) { host.preparing = false; host.quiesced = false }
-            const pending = Object.assign({}, changingAddons); delete pending[id]; changingAddons = pending
-            updateWorkspaceLocks()
-            Qt.callLater(requestWidgetPublications)
+            changingAddons = ({})
+            releaseOwners()
             return result
         })
     }
@@ -1616,6 +1642,81 @@ Window {
                 if (result !== true) window.addonError = String(result)
                 if (!window.resetAccepted) window.releaseOwners()
             })
+        }
+    }
+
+    PilonDialog {
+        id: disableDependentsConfirmation
+        objectName: "disableDependentsConfirmation"
+        parent: settingsMenu.visible ? settingsMenu.contentItem
+            : window.setupActive ? firstRunSetup.contentItem : window.contentItem
+        width: Math.max(1, Math.min(480, parent.width - 32))
+        height: Math.max(1, Math.min(implicitHeight, parent.height - 32))
+        modal: true
+        palette: window.palette
+        property var response: null
+        property string addonName: ""
+        property var dependentNames: []
+        function ask(name, dependents) {
+            addonName = name
+            dependentNames = dependents
+            return new Promise(resolve => {
+                response = resolve
+                open()
+            })
+        }
+        function answer(accepted) {
+            if (!response) return
+            const resolve = response
+            response = null
+            resolve(accepted)
+        }
+        onOpened: cancelDisableDependents.forceActiveFocus(Qt.PopupFocusReason)
+        onClosed: answer(false)
+
+        contentItem: PilonScrollView {
+            implicitHeight: cascadeContent.implicitHeight
+            contentWidth: availableWidth
+            clip: true
+            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+            ColumnLayout {
+                id: cascadeContent
+                width: parent.width
+                spacing: 12
+                Label {
+                    Layout.fillWidth: true
+                    wrapMode: Text.Wrap
+                    textFormat: Text.PlainText
+                    text: qsTr("Disabling %1 will also disable these add-ons.").arg(disableDependentsConfirmation.addonName)
+                }
+                Label {
+                    objectName: "dependentAddonNames"
+                    Layout.fillWidth: true
+                    wrapMode: Text.WrapAnywhere
+                    textFormat: Text.PlainText
+                    text: disableDependentsConfirmation.dependentNames.join("\n")
+                }
+                Flow {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    PilonWrapButton {
+                        id: cancelDisableDependents
+                        objectName: "cancelDisableDependents"
+                        width: Math.min(implicitWidth, parent.width)
+                        text: qsTr("Cancel")
+                        onClicked: disableDependentsConfirmation.reject()
+                    }
+                    PilonWrapButton {
+                        objectName: "confirmDisableDependents"
+                        width: Math.min(implicitWidth, parent.width)
+                        text: qsTr("Disable add-ons")
+                        onClicked: {
+                            disableDependentsConfirmation.answer(true)
+                            disableDependentsConfirmation.close()
+                        }
+                    }
+                }
+            }
         }
     }
 
