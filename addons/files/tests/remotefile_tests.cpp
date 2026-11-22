@@ -943,6 +943,30 @@ private slots:
         QVERIFY(!manager.errorMessage().isEmpty());
         QCOMPARE(manager.currentPath(), directory.path());
     }
+    void confirmedDeletionRunsAfterAnInFlightFolderRefresh()
+    {
+        QTemporaryDir folder;
+        const auto path = folder.filePath("disposable.txt");
+        QVERIFY(touch(path));
+        RemoteFileManager manager;
+        manager.setAutomaticRefreshEnabled(false);
+        manager.browse(manager.localDevice(), {}, folder.path());
+        QTRY_VERIFY(!manager.busy());
+        const auto selected = manager.entries();
+        QCOMPARE(selected.size(), 1);
+        QPromise<QVariantMap> pendingRefresh;
+        pendingRefresh.start();
+        manager.m_pendingRequest = manager.m_listingRequest;
+        manager.m_pendingRequest["refresh"] = true;
+        manager.setBusy(true);
+        manager.m_operationWatcher.setFuture(pendingRefresh.future());
+        manager.deleteEntries(selected, {});
+        pendingRefresh.addResult({{"status", "ok"}, {"device", manager.localDevice()},
+            {"path", folder.path()}, {"entries", selected}});
+        pendingRefresh.finish();
+        QTRY_VERIFY(!manager.busy());
+        QVERIFY2(!QFileInfo::exists(path), "Confirming Delete during a folder refresh must reach the filesystem");
+    }
 
     void externalLocalEditsAndAtomicReplacementRefreshEntries()
     {
