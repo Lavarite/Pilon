@@ -66,6 +66,7 @@ TestCase {
         id: connectionFixture
         property var account: ({})
         property var usage: []
+        property bool refreshingUsage: false
         property var serverUsage: ({})
         function refreshUsage() {}
         property var servers: []
@@ -223,8 +224,25 @@ TestCase {
         verify(!findChild(settings, "chatgptSignIn").visible)
         const bar = findChild(settings, "accountUsageBar")
         verify(bar.visible); compare(bar.value, 75)
+        connectionFixture.refreshingUsage = true
+        const refresh = findChild(settings, "chatgptRefreshUsage")
+        verify(refresh.visible); verify(!refresh.enabled); compare(refresh.text, qsTr("Refreshing usage…"))
+        compare(bar.value, 75)
+        connectionFixture.refreshingUsage = false
+        verify(refresh.enabled)
         grabImage(test).save("/tmp/pilon-model-quota.png")
         connectionFixture.account = {}; connectionFixture.usage = []
+    }
+    function test_apiQuotaShowsWhenItWasObserved() {
+        assistant.connections = connectionFixture
+        connectionFixture.servers = [{id: "fixture", name: "Fixture", remoteModel: "model"}]
+        connectionFixture.serverUsage = {fixture: {text: "42 requests remaining", updatedAt: 1800000000}}
+        const timestamp = findChild(settings, "serverUsageTimestamp")
+        verify(timestamp.visible)
+        verify(timestamp.text.includes(new Date(1800000000 * 1000).toLocaleString(Qt.locale(), Locale.ShortFormat)))
+        connectionFixture.serverUsage = {}
+        verify(!timestamp.visible)
+        connectionFixture.servers = []
     }
     function test_providerOptionsExposeTheirAccessibleNames() {
         assistant.connections=connectionFixture

@@ -2,6 +2,7 @@
 #include <QDateTime>
 #include <QJsonDocument>
 #include <QNetworkReply>
+#include <QRegularExpression>
 #include <QTcpSocket>
 #include <QUuid>
 #include <memory>
@@ -57,10 +58,12 @@ void CodexProvider::configure(quint16 port, const QByteArray &key, const QJsonOb
     m_liteRt = liteRt;
 }
 
-void CodexProvider::configureRemote(const QUrl &baseUrl, const QByteArray &key, const QString &model)
+void CodexProvider::configureRemote(const QVariantMap &profile, const QByteArray &key)
 {
+    const QUrl baseUrl(profile.value("baseUrl").toString());
+    m_remoteProfile = profile;
     m_backendUrl = baseUrl; m_backendUrl.setPath(baseUrl.path() + "/chat/completions");
-    m_backendKey = key; m_parameters = {{"model", model}}; m_liteRt = false; m_remote = true;
+    m_backendKey = key; m_parameters = {{"model", profile.value("remoteModel").toString()}}; m_liteRt = false; m_remote = true;
 }
 
 QJsonObject CodexProvider::chatRequest(const QJsonObject &response, QString *error)
@@ -300,8 +303,11 @@ void CodexProvider::complete(const QJsonObject &body)
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
     if (!m_backendKey.isEmpty()) request.setRawHeader("Authorization", "Bearer " + m_backendKey);
     m_reply = m_network.post(request, QJsonDocument(body).toJson(QJsonDocument::Compact));
-    connect(m_reply, &QNetworkReply::metaDataChanged, this, [this] {
-        if (!m_remote || !m_reply) return;
+    connect(m_reply, &QNetworkReply::metaDataChanged, this, [this, reply = m_reply, profile = m_remote ? m_remoteProfile : QVariantMap{}] {
+        if (profile.isEmpty() || !reply || reply != m_reply) return;
+        const auto status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (status == 401 || status == 403) { emit rateLimits(profile, {}); return; }
+        if ((status < 200 || status >= 300) && status != 429) return;
         QStringList details;
         QVariantList windows;
         for (const QByteArray kind : {QByteArray("requests"), QByteArray("tokens")}) {
@@ -313,10 +319,13 @@ void CodexProvider::complete(const QJsonObject &body)
             if (hasLimit && limit > 0) windows.append(QVariantMap{{"label", QString::fromLatin1(kind)}, {"remaining", qBound(0.0, 100.0 * count / limit, 100.0)}});
             auto detail = tr("%1 %2 remaining").arg(count).arg(QString::fromLatin1(kind));
             const auto reset = m_reply->rawHeader("x-ratelimit-reset-" + kind);
-            if (!reset.isEmpty()) detail += tr(", resets %1").arg(QString::fromUtf8(reset));
+            static const QRegularExpression duration(QStringLiteral("^(?:[0-9]+(?:\\.[0-9]+)?(?:ms|s|m|h|d)?)+$"));
+            if (!reset.isEmpty() && reset.size() <= 40 && (duration.match(QString::fromLatin1(reset)).hasMatch()
+                    || QDateTime::fromString(QString::fromLatin1(reset), Qt::ISODate).isValid()))
+                detail += tr(", resets %1").arg(QString::fromLatin1(reset));
             details.append(detail);
         }
-        emit rateLimits({{"windows", windows}, {"text", details.join(", ")}, {"updatedAt", QDateTime::currentSecsSinceEpoch()}});
+        if (!details.isEmpty()) emit rateLimits(profile, {{"windows", windows}, {"text", details.join(", ")}, {"updatedAt", QDateTime::currentSecsSinceEpoch()}});
     });
     connect(m_reply, &QNetworkReply::readyRead, this, &CodexProvider::consume);
     connect(m_reply, &QNetworkReply::finished, this, &CodexProvider::finish);

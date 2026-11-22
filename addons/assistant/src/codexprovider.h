@@ -22,7 +22,7 @@ public:
     quint16 port() const { return m_server.serverPort(); }
     QByteArray token() const { return m_token; }
     void configure(quint16 backendPort, const QByteArray &backendKey, const QJsonObject &parameters, bool liteRt = false);
-    void configureRemote(const QUrl &baseUrl, const QByteArray &key, const QString &model);
+    void configureRemote(const QVariantMap &profile, const QByteArray &key);
     void complete(const QJsonObject &body);
     void cancel();
     void pauseForRetry();
@@ -35,7 +35,7 @@ signals:
     void requested(const QJsonObject &body);
     void progress(int cached, int processed, int total);
     void activity();
-    void rateLimits(const QVariantMap &limits);
+    void rateLimits(const QVariantMap &profile, const QVariantMap &limits);
     void tokensUsed(int cached, int input, int output);
     void toolDelta(int index, const QJsonObject &call);
     void cancelled();
@@ -55,6 +55,7 @@ private:
     QByteArray m_token;
     QByteArray m_backendKey;
     QUrl m_backendUrl;
+    QVariantMap m_remoteProfile;
     bool m_remote = false;
     QJsonObject m_parameters;
     QJsonObject m_pendingBody;
