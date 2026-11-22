@@ -173,7 +173,8 @@ TestCase {
         property var lastMove: ({})
         function renameEntry(entry, username, name) { lastRename = {entry: entry, username: username, name: name} }
         function moveEntry(entry, username, path) { lastMove = {entry: entry, username: username, path: path} }
-        function refresh() { }
+        property var lastVerifySizeEstimates: null
+        function refresh(verifySizeEstimates) { lastVerifySizeEstimates = verifySizeEstimates }
     }
     MockFiles { id: files }
     MockFiles { id: accessFiles }
@@ -183,6 +184,23 @@ TestCase {
         function setting(id, key, fallback) { return savedAppearance || fallback }
         function setSetting(id, key, value) { savedAppearance = value; return true }
     }
+    function test_reopeningFilesReusesSizeEstimatesAndRefreshVerifies() {
+        workspace.visible = false
+        files.lastVerifySizeEstimates = null
+        workspace.visible = true
+        tryCompare(files, "lastVerifySizeEstimates", false)
+        page.clearSelection()
+        const menu = findChild(page, "fileContextMenu")
+        menu.openAt(20, 20)
+        tryCompare(menu, "opened", true)
+        const refresh = findChild(menu, "refreshFilesAction")
+        verify(refresh.visible)
+        refresh.clicked()
+        compare(files.lastVerifySizeEstimates, true)
+        compare(page.formatSize(2048, true, false, true), "~2.0 KB")
+        compare(page.formatSize(2048, true, false, false), "2.0 KB")
+    }
+
     function test_fileAppearanceRules() {
         const appearance = sharedFiles.appearance
         const local = {name: "script.PY", path: "/tmp/script.PY", deviceId: "local", directory: false}

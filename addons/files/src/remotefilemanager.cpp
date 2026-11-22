@@ -1,6 +1,8 @@
 #include "remotefilemanager.h"
+#include "foldersizecache.h"
 #include "../../../src/platform/android/androidcredentials.h"
 #include "../../../src/core/network/localdevice.h"
+#include "../../../src/core/network/networksnapshot.h"
 #include "../../../src/core/documents/noteimport.h"
 #include "../../../src/core/workspace/pilonworkspace.h"
 #include <QBuffer>
@@ -70,6 +72,7 @@
 #include <cstdio>
 #include <cstring>
 #include <functional>
+#include <limits>
 #include <mutex>
 #include <utility>
 
@@ -257,6 +260,115 @@ QVariantMap deviceFromEntry(const QVariantMap &entry)
     return device;
 }
 
+QString listingPrefix(const QVariantMap &device, const QString &username)
+{
+    const auto host = QJsonArray{device.value("id").toString(), device.value("ip").toString()};
+    auto prefix = NetworkSnapshot::digest(QJsonDocument(host).toJson(QJsonDocument::Compact)) + '-';
+    if (!username.isEmpty()) prefix += NetworkSnapshot::digest(username.toUtf8()) + '-';
+    return prefix;
+}
+
+QString listingSnapshot(const QVariantMap &device, const QString &username,
+                        const QString &path, const QByteArray &trustedKey)
+{
+    const auto id = device.value("id").toString();
+    if (id == "local" || id.isEmpty() || username.isEmpty() || trustedKey.isEmpty()) return {};
+    const auto entry = QJsonArray{QString::fromLatin1(trustedKey.toBase64()), path};
+    return NetworkSnapshot::directory("sftp").filePath(listingPrefix(device, username)
+        + NetworkSnapshot::digest(QJsonDocument(entry).toJson(QJsonDocument::Compact)) + ".json");
+}
+
+SftpAccessChanges &sftpAccessChanges()
+{
+    static SftpAccessChanges changes;
+    return changes;
+}
+
+// A parent mtime does not change when a nested file grows on SFTP or FUSE.
+constexpr qint64 sizeEstimateLifetime = 60;
+QMutex sizeSnapshotMutex;
+std::atomic<quint64> localSizeEpoch{0}, remoteSizeEpoch{0};
+
+quint64 sizeEpoch(const QVariantMap &device)
+{
+    return device.value("id") == "local" ? localSizeEpoch.load() : remoteSizeEpoch.load();
+}
+
+QString sizeSnapshotPath(const QVariantMap &device, const QString &user, const QString &path, const QByteArray &key)
+{
+    if (device.value("id") == "local") return NetworkSnapshot::path("local-sizes", {path});
+    const auto listing = listingSnapshot(device, user, path, key);
+    return listing.isEmpty() ? QString{} : NetworkSnapshot::directory("sftp-sizes").filePath(QFileInfo(listing).fileName());
+}
+
+bool directoryContains(const QString &directory, const QString &path)
+{
+    return path == directory || path.startsWith(directory.endsWith('/') ? directory : directory + '/');
+}
+
+// The empty prefix identifies local storage. Remote prefixes include the host
+// and account. A write to /a/b clears b in /a and a in /, preserving siblings.
+void invalidateSizeSnapshots(const QString &prefix, const QSet<QString> &changes)
+{
+    QMutexLocker lock(&sizeSnapshotMutex);
+    const bool local = prefix.isEmpty();
+    ++(local ? localSizeEpoch : remoteSizeEpoch);
+    auto dir = NetworkSnapshot::directory(local ? "local-sizes" : "sftp-sizes");
+    const auto files = dir.entryList({prefix + "*.json"}, QDir::Files);
+    for (const auto &file : files) {
+        if (changes.isEmpty()) { dir.remove(file); continue; }
+        const auto snapshotPath = dir.filePath(file);
+        auto snapshot = NetworkSnapshot::read(snapshotPath);
+        const auto folder = snapshot.value("path").toString();
+        auto rows = snapshot.value("folders").toObject();
+        const auto before = rows.size();
+        for (const auto &path : changes) {
+            if (directoryContains(path, folder)) { rows = {}; break; }
+            if (directoryContains(folder, path)) {
+                const auto offset = folder.size() + (folder == "/" ? 0 : 1);
+                rows.remove(path.mid(offset).section('/', 0, 0));
+            }
+        }
+        if (rows.isEmpty()) dir.remove(file);
+        else if (rows.size() != before) {
+            snapshot.insert("folders", rows);
+            NetworkSnapshot::write(snapshotPath, snapshot);
+        }
+    }
+}
+
+QVariantMap rejectSftpAccess(const QVariantMap &device, const QString &account, const QVariantMap &result)
+{
+    auto directory = NetworkSnapshot::directory("sftp");
+    const auto files = directory.entryList({listingPrefix(device, account) + "*.json"}, QDir::Files);
+    for (const auto &file : files) directory.remove(file);
+    invalidateSizeSnapshots(listingPrefix(device, account), {});
+    emit sftpAccessChanges().accessRejected(device.value("id").toString(), device.value("ip").toString(), account, {});
+    return result;
+}
+
+bool reusableSizeEstimate(const QJsonObject &record, const QVariantMap &entry, qint64 now, bool force)
+{
+    const auto measured = record.value("measured").toInteger();
+    return !force && !record.value("watched").toBool() && record.value("bytes").toInteger(-1) >= 0
+        && measured > 0 && now >= measured && now - measured < sizeEstimateLifetime
+        && record.value("modified") == QJsonValue::fromVariant(entry.value("modified"));
+}
+
+void restoreFolderSizes(QVariantList &entries, const QJsonObject &sizes)
+{
+    for (auto &value : entries) {
+        auto row = value.toMap();
+        if (!row.value("directory").toBool() || row.value("symlink").toBool()) continue;
+        const auto record = sizes.value(row.value("name").toString()).toObject();
+        const auto bytes = record.value("bytes").toInteger(-1);
+        if (bytes < 0) continue;
+        row.insert("size", bytes);
+        row.insert("sizeCached", true);
+        value = row;
+    }
+}
+
 bool sameFileLocation(const QVariantMap &left, const QVariantMap &right)
 {
     return left.value("deviceId") == right.value("deviceId")
@@ -273,6 +385,7 @@ QVariantMap failure(const QString &message)
 struct SftpConnection
 {
     bool local = false;
+    QString sizeCachePrefix;
     FileTransferProgress *progress = nullptr;
     qintptr registeredSocket = -1;
     void registerSocket() {
@@ -376,6 +489,23 @@ QString storedCredential(const QVariantMap &device, const QString &username,
 
 using CredentialAccepted = std::function<void(const QString &, const QString &)>;
 
+QVariantMap verifySftpHostKey(const QVariantMap &device, const QByteArray &trusted, const QByteArray &received)
+{
+    const auto name = device.value("name").toString();
+    if (received.isEmpty())
+        return rejectSftpAccess(device, {}, failure(QObject::tr("%1 did not provide an SSH host key.").arg(name)));
+    if (trusted.isEmpty()) {
+        const auto fingerprint = QCryptographicHash::hash(received, QCryptographicHash::Sha256)
+            .toBase64(QByteArray::OmitTrailingEquals);
+        return rejectSftpAccess(device, {}, {{"status", "hostKey"}, {"deviceId", device.value("id")},
+            {"deviceName", name}, {"hostKey", received},
+            {"prompt", QObject::tr("Trust %1? SSH host key: SHA256:%2").arg(name, QString::fromLatin1(fingerprint))}});
+    }
+    if (trusted != received)
+        return rejectSftpAccess(device, {}, failure(QObject::tr("The SSH host key for %1 has changed. Verify it with the server administrator before connecting.").arg(name)));
+    return {};
+}
+
 QVariantMap authenticate(SftpConnection &connection, const QVariantMap &device,
                          const QString &username, const QString &credential,
                          bool credentialProvided, const QByteArray &trustedHostKey,
@@ -391,6 +521,7 @@ QVariantMap authenticate(SftpConnection &connection, const QVariantMap &device,
     }
     const QString deviceId = device.value(QStringLiteral("id")).toString();
     const QString deviceName = device.value(QStringLiteral("name")).toString();
+    connection.sizeCachePrefix = listingPrefix(device, username);
     const QString host = device.value(QStringLiteral("ip")).toString().trimmed();
     if (device.value(QStringLiteral("onlineKnown"), true).toBool()
         && device.contains(QStringLiteral("online"))
@@ -441,25 +572,9 @@ QVariantMap authenticate(SftpConnection &connection, const QVariantMap &device,
     int hostKeyType = 0;
     const char *hostKey = libssh2_session_hostkey(connection.session, &hostKeyLength,
                                                   &hostKeyType);
-    if (!hostKey || hostKeyLength == 0)
-        return failure(QObject::tr("%1 did not provide an SSH host key.").arg(deviceName));
-
-    const QByteArray receivedHostKey(hostKey, static_cast<qsizetype>(hostKeyLength));
-    if (trustedHostKey.isEmpty()) {
-        const QByteArray fingerprint = QCryptographicHash::hash(receivedHostKey,
-                                                                QCryptographicHash::Sha256)
-                                           .toBase64(QByteArray::OmitTrailingEquals);
-        return {{QStringLiteral("status"), QStringLiteral("hostKey")},
-                {QStringLiteral("deviceId"), deviceId},
-                {QStringLiteral("deviceName"), deviceName},
-                {QStringLiteral("hostKey"), receivedHostKey},
-                {QStringLiteral("prompt"),
-                 QObject::tr("Trust %1? SSH host key: SHA256:%2")
-                     .arg(deviceName, QString::fromLatin1(fingerprint))}};
-    }
-    if (trustedHostKey != receivedHostKey) {
-        return failure(QObject::tr("The SSH host key for %1 has changed. Verify it with the server administrator before connecting.").arg(deviceName));
-    }
+    const auto hostKeyResult = verifySftpHostKey(device, trustedHostKey,
+        QByteArray(hostKey, static_cast<qsizetype>(hostKeyLength)));
+    if (!hostKeyResult.isEmpty()) return hostKeyResult;
 
     const QByteArray user = username.toUtf8();
     const auto authenticationFailure = [&] {
@@ -483,11 +598,14 @@ QVariantMap authenticate(SftpConnection &connection, const QVariantMap &device,
             ? 0 : libssh2_session_last_errno(connection.session);
     });
     if (cancelled()) return cancelledResult;
-    if (authenticationResult != 0 || (!methodList && !libssh2_userauth_authenticated(connection.session)))
-        return authenticationFailure();
+    if (authenticationResult != 0 || (!methodList && !libssh2_userauth_authenticated(connection.session))) {
+        const auto result = authenticationFailure();
+        return authenticationResult == LIBSSH2_ERROR_AUTHENTICATION_FAILED
+            ? rejectSftpAccess(device, username, result) : result;
+    }
     const QByteArray methods = methodList ? QByteArray(methodList) : QByteArray{};
     if (methods.isEmpty() && !libssh2_userauth_authenticated(connection.session))
-        return authenticationFailure();
+        return rejectSftpAccess(device, username, authenticationFailure());
     if (!libssh2_userauth_authenticated(connection.session)) {
         LIBSSH2_AGENT *agent = libssh2_agent_init(connection.session);
         if (agent) {
@@ -559,7 +677,7 @@ QVariantMap authenticate(SftpConnection &connection, const QVariantMap &device,
         keyboardInteractiveCredential.fill('\0');
         keyboardInteractiveCredential.clear();
         if (unsupportedKeyboardChallenge && !libssh2_userauth_authenticated(connection.session))
-            return failure(QObject::tr("%1 requires an interactive SSH challenge. Use the SSH terminal for this connection.").arg(deviceName));
+            return rejectSftpAccess(device, username, failure(QObject::tr("%1 requires an interactive SSH challenge. Use the SSH terminal for this connection.").arg(deviceName)));
         usedPassword = keyboardPasswordRequested && !unsupportedKeyboardChallenge
             && libssh2_userauth_authenticated(connection.session);
     }
@@ -567,7 +685,7 @@ QVariantMap authenticate(SftpConnection &connection, const QVariantMap &device,
 
     if (!libssh2_userauth_authenticated(connection.session)) {
         if (!credentialProvided) SshCredentials::put(host, username, {});
-        return {{QStringLiteral("status"), QStringLiteral("credential")},
+        return rejectSftpAccess(device, username, {{QStringLiteral("status"), QStringLiteral("credential")},
                 {QStringLiteral("deviceId"), deviceId},
                 {QStringLiteral("username"), username},
                 {QStringLiteral("invalidCredential"), !effectiveCredential.isEmpty()},
@@ -576,7 +694,7 @@ QVariantMap authenticate(SftpConnection &connection, const QVariantMap &device,
                      ? QObject::tr("Enter the SSH password or key passphrase for %1.")
                            .arg(deviceName)
                      : QObject::tr("Authentication failed for %1. Try again.")
-                           .arg(deviceName)}};
+                           .arg(deviceName)}});
     }
 
     if (usedPassword && credentialProvided && credentialAccepted) credentialAccepted(deviceId, username);
@@ -646,9 +764,35 @@ QString canonicalPath(SftpConnection &connection, const QString &path)
     return QString::fromUtf8(buffer.constData(), length);
 }
 
+bool sftpFolderUnavailable(int sessionError, unsigned long sftpError)
+{
+    return sessionError == LIBSSH2_ERROR_SFTP_PROTOCOL && (sftpError == LIBSSH2_FX_PERMISSION_DENIED
+        || sftpError == LIBSSH2_FX_NO_SUCH_FILE || sftpError == LIBSSH2_FX_NO_SUCH_PATH);
+}
+
+void rejectSftpDirectory(const QVariantMap &device, const QString &account, const QString &requestedPath,
+                         const QString &resolvedPath, const QByteArray &key)
+{
+    const auto alias = listingSnapshot(device, account, requestedPath, key);
+    QString path = resolvedPath;
+    if (path.isEmpty()) path = NetworkSnapshot::read(alias).value("path").toString(requestedPath);
+    if (!alias.isEmpty()) QFile::remove(alias);
+    invalidateSizeSnapshots(listingPrefix(device, account), path.startsWith('/') ? QSet<QString>{path} : QSet<QString>{});
+    if (!path.startsWith('/') || !validRemotePath(path)) return;
+    auto dir = NetworkSnapshot::directory("sftp");
+    const auto files = dir.entryList({listingPrefix(device, account) + "*.json"}, QDir::Files);
+    for (const auto &file : files) {
+        const auto canonical = NetworkSnapshot::read(dir.filePath(file)).value("path").toString();
+        if (directoryContains(path, canonical)) dir.remove(file);
+    }
+    emit sftpAccessChanges().accessRejected(device.value("id").toString(), device.value("ip").toString(), account, path);
+}
+
 QString sftpErrorText(SftpConnection &connection)
 {
-    const auto code = libssh2_sftp_last_error(connection.sftp);
+    const auto sessionError = libssh2_session_last_errno(connection.session);
+    const auto code = sessionError == LIBSSH2_ERROR_SFTP_PROTOCOL
+        ? static_cast<qint64>(libssh2_sftp_last_error(connection.sftp)) : sessionError;
     switch (code) {
     case LIBSSH2_FX_PERMISSION_DENIED: return QObject::tr("permission denied");
     case LIBSSH2_FX_NO_SUCH_FILE:
@@ -698,9 +842,14 @@ QVariantMap listDirectory(SftpConnection &connection, const QVariantMap &device,
     const QByteArray encodedPath = path.toUtf8();
     LIBSSH2_SFTP_HANDLE *directory = libssh2_sftp_opendir(connection.sftp,
                                                           encodedPath.constData());
+    const auto readError = [&](const QString &message) {
+        auto result = failure(message.arg(path, device.value("name").toString(), sftpErrorText(connection)));
+        result.insert("folderUnavailable", sftpFolderUnavailable(libssh2_session_last_errno(connection.session),
+            libssh2_sftp_last_error(connection.sftp)));
+        return result;
+    };
     if (!directory)
-        return failure(QObject::tr("Unable to open %1 on %2: %3.")
-                           .arg(path, device.value(QStringLiteral("name")).toString(), sftpErrorText(connection)));
+        return readError(QObject::tr("Unable to open %1 on %2: %3."));
 
     QVariantList entries;
     char nameBuffer[4096];
@@ -713,8 +862,7 @@ QVariantMap listDirectory(SftpConnection &connection, const QVariantMap &device,
         if (length == 0)
             break;
         if (length < 0) {
-            auto result = failure(QObject::tr("Unable to read %1 on %2: %3.")
-                                      .arg(path, device.value(QStringLiteral("name")).toString(), sftpErrorText(connection)));
+            auto result = readError(QObject::tr("Unable to read %1 on %2: %3."));
             libssh2_sftp_closedir(directory);
             result.insert("entries", entries);
             return result;
@@ -729,6 +877,7 @@ QVariantMap listDirectory(SftpConnection &connection, const QVariantMap &device,
             {QStringLiteral("name"), name},
             {QStringLiteral("path"), joinedPath(path, name)},
             {QStringLiteral("directory"), directoryEntry},
+            {QStringLiteral("typeKnown"), bool(attributes.flags & LIBSSH2_SFTP_ATTR_PERMISSIONS)},
             {QStringLiteral("symlink"), (attributes.flags & LIBSSH2_SFTP_ATTR_PERMISSIONS)
                                          && LIBSSH2_SFTP_S_ISLNK(attributes.permissions)},
             {QStringLiteral("size"),
@@ -1117,20 +1266,33 @@ qint64 transferSize(SftpConnection &connection, const QString &path, bool direct
                    const std::shared_ptr<std::atomic_bool> &cancel, int depth = 0)
 {
     if (cancel->load() || depth > 512) return -1;
-    if (connection.local && QFileInfo(path).isSymLink()) return 0;
-    if (!connection.local) {
+    if (connection.local) {
+        const QFileInfo file(path);
+        if (file.isSymLink()) return 0;
+        if (!directory) return file.size();
+        qint64 bytes = -1;
+        FolderSizeCache::shared().measure(path, *cancel, nullptr, &bytes);
+        return bytes;
+    } else {
         LIBSSH2_SFTP_ATTRIBUTES attributes{};
         if (libssh2_sftp_lstat(connection.sftp, path.toUtf8().constData(), &attributes) != 0) return -1;
         if (LIBSSH2_SFTP_S_ISLNK(attributes.permissions)) return 0;
-        if (!directory) return attributes.filesize;
-    } else if (!directory) return QFileInfo(path).size();
-    const auto listing = listDirectory(connection, {}, path);
+        if (attributes.flags & LIBSSH2_SFTP_ATTR_PERMISSIONS)
+            directory = LIBSSH2_SFTP_S_ISDIR(attributes.permissions);
+        if (!directory) return attributes.flags & LIBSSH2_SFTP_ATTR_SIZE ? qint64(attributes.filesize) : -1;
+    }
+    const auto listing = listDirectory(connection, {}, path, cancel);
     if (listing.value("status") != "ok") return -1;
     qint64 bytes = 0;
     for (const auto &value : listing.value("entries").toList()) {
         const auto entry = value.toMap();
-        const auto size = transferSize(connection, entry.value("path").toString(), entry.value("directory").toBool(), cancel, depth + 1);
-        if (size < 0) return -1;
+        if (cancel->load()) return -1;
+        if (entry.value("symlink").toBool()) continue;
+        // SFTP READDIR already returns the size and type on normal servers.
+        const auto size = entry.value("typeKnown").toBool() && entry.value("size").isValid()
+            ? entry.value("size").toLongLong()
+            : transferSize(connection, entry.value("path").toString(), entry.value("directory").toBool(), cancel, depth + 1);
+        if (size < 0 || size > std::numeric_limits<qint64>::max() - bytes) return -1;
         bytes += size;
     }
     return bytes;
@@ -1474,6 +1636,16 @@ QVariantMap executeRequest(const QVariantMap &request,
         }))
         return failure(QObject::tr("Enter a valid SSH username."));
 
+    // Each affected account is invalidated once, including on partial failure.
+    QHash<QString, QSet<QString>> sizeChanges;
+    const auto changing = [&](const QString &prefix, const QString &path) {
+        if (path.startsWith('/')) sizeChanges[prefix].insert(QDir::cleanPath(path));
+    };
+    const auto updateSizes = qScopeGuard([&] {
+        for (auto it = sizeChanges.cbegin(); it != sizeChanges.cend(); ++it)
+            invalidateSizeSnapshots(it.key(), it.value());
+    });
+
     const QVariantMap credentials = request.value(QStringLiteral("credentials")).toMap();
     const QVariantMap trustedKeys = request.value(QStringLiteral("trustedKeys")).toMap();
     if (kind == QLatin1String("browse")) {
@@ -1491,11 +1663,12 @@ QVariantMap executeRequest(const QVariantMap &request,
 
         const QString requestedPath = normalizedPath(request.value(QStringLiteral("path")).toString());
         const QString path = canonicalPath(connection, requestedPath);
-        if (path.isEmpty())
-            return failure(QObject::tr("Unable to resolve %1 on %2.")
-                               .arg(requestedPath,
-                                    device.value(QStringLiteral("name")).toString()));
-        QVariantMap result = listDirectory(connection, device, path);
+        QVariantMap result = path.isEmpty()
+            ? failure(QObject::tr("Unable to resolve %1 on %2.").arg(requestedPath, device.value("name").toString()))
+            : listDirectory(connection, device, path);
+        if (!connection.local && (result.value("folderUnavailable").toBool() || (path.isEmpty()
+            && sftpFolderUnavailable(libssh2_session_last_errno(connection.session), libssh2_sftp_last_error(connection.sftp)))))
+            rejectSftpDirectory(device, username, request.value("path").toString(), path, trustedKeys.value(deviceId).toByteArray());
         if (result.value(QStringLiteral("status")) == QLatin1String("ok")) {
             result.insert(QStringLiteral("device"), device);
             result.insert(QStringLiteral("username"), username);
@@ -1579,6 +1752,7 @@ QVariantMap executeRequest(const QVariantMap &request,
                 const auto connection = connections.value(deviceId);
                 if (!connection)
                     return failure(QObject::tr("A selected device is unavailable."));
+                changing(connection->sizeCachePrefix, entry.value("path").toString());
                 const QVariantMap deletion = deleteRemotePath(
                     *connection, entry.value(QStringLiteral("path")).toString(),
                     entry.value(QStringLiteral("directory")).toBool(), cancelRequested);
@@ -1658,6 +1832,8 @@ QVariantMap executeRequest(const QVariantMap &request,
 
                 QVariantMap transfer;
                 if (move) {
+                    changing(sourceConnection->sizeCachePrefix, sourcePath);
+                    changing(destinationConnection->sizeCachePrefix, destinationPath);
                     transfer = renameRemotePath(*sourceConnection, sourcePath, destinationPath, cancelRequested);
                     if (transfer.value(QStringLiteral("status")) == QLatin1String("ok")) {
                         undoRecords.prepend(QVariantMap{
@@ -1669,6 +1845,7 @@ QVariantMap executeRequest(const QVariantMap &request,
                 } else {
                     if (remotePathExists(*destinationConnection, destinationPath))
                         return failure(QObject::tr("%1 already exists.").arg(destinationPath));
+                    changing(destinationConnection->sizeCachePrefix, destinationPath);
                     transfer = copyRemotePath(*sourceConnection, *destinationConnection,
                                               sourcePath, destinationPath, directory,
                                               cancelRequested);
@@ -1720,12 +1897,14 @@ QVariantMap executeRequest(const QVariantMap &request,
 
             QVariantMap undoResult;
             if (recordKind == QLatin1String("delete")) {
+                changing(connection->sizeCachePrefix, record.value("path").toString());
                 undoResult = deleteRemotePath(*connection,
                                               record.value(QStringLiteral("path")).toString(),
                                               record.value(QStringLiteral("directory")).toBool(),
                                               cancelRequested);
             } else if (recordKind == QLatin1String("rmdir")) {
                 const QString path = record.value(QStringLiteral("path")).toString();
+                changing(connection->sizeCachePrefix, path);
                 if (!validRemotePath(path) || path == QLatin1String("/")
                     || !removeDirectory(*connection, path)) {
                     undoResult = failure(
@@ -1735,6 +1914,8 @@ QVariantMap executeRequest(const QVariantMap &request,
                     undoResult = {{QStringLiteral("status"), QStringLiteral("ok")}};
                 }
             } else if (recordKind == QLatin1String("rename")) {
+                changing(connection->sizeCachePrefix, record.value("sourcePath").toString());
+                changing(connection->sizeCachePrefix, record.value("destinationPath").toString());
                 undoResult = renameRemotePath(
                     *connection, record.value(QStringLiteral("sourcePath")).toString(),
                     record.value(QStringLiteral("destinationPath")).toString(), cancelRequested);
@@ -1747,9 +1928,11 @@ QVariantMap executeRequest(const QVariantMap &request,
                 const QString destinationPath = record.value(
                     QStringLiteral("destinationPath")).toString();
                 const bool directory = record.value(QStringLiteral("directory")).toBool();
+                changing(originalConnection->sizeCachePrefix, destinationPath);
                 undoResult = copyRemotePath(*connection, *originalConnection, sourcePath,
                                             destinationPath, directory, cancelRequested);
                 if (undoResult.value(QStringLiteral("status")) == QLatin1String("ok")) {
+                    changing(connection->sizeCachePrefix, sourcePath);
                     undoResult = deleteRemotePath(*connection, sourcePath, directory,
                                                   cancelRequested);
                 }
@@ -1788,6 +1971,7 @@ QVariantMap executeRequest(const QVariantMap &request,
             if (!validRemotePath(remotePath) || localPath.isEmpty())
                 return failure(QObject::tr("The file path is invalid."));
             prepareTransfer(transferSize(connection, remotePath, false, cancelRequested), remotePath);
+            if (kind == "download") changing({}, localPath);
             result = connection.local && (kind == "view" || kind == "openPilon") ? QVariantMap{{"status", "ok"}}
                 : downloadRemoteFile(connection, remotePath, localPath, cancelRequested);
             if (kind == "view" && result.value("status") == "ok") {
@@ -1797,6 +1981,7 @@ QVariantMap executeRequest(const QVariantMap &request,
             if (kind == "openPilon" && result.value("status") == "ok") result["file"] = QUrl::fromLocalFile(localPath);
         } else if (kind == "archive" || kind == "extract") {
             if (!validRemotePath(remotePath) || !validRemotePath(request.value("destinationPath").toString())) return failure(QObject::tr("The archive path is invalid."));
+            changing(connection.sizeCachePrefix, request.value("destinationPath").toString());
             result = archiveFile(connection, kind, remotePath, request.value("destinationPath").toString(), cancelRequested);
         } else if (kind == QLatin1String("uploadMany")) {
             const QVariantList localPaths = request.value(QStringLiteral("localPaths")).toList();
@@ -1816,6 +2001,7 @@ QVariantMap executeRequest(const QVariantMap &request,
                     break;
                 }
                 const QString uploadedPath = joinedPath(refreshPath, fileName);
+                changing(connection.sizeCachePrefix, uploadedPath);
                 result = uploadLocalFile(connection, localPath, uploadedPath, cancelRequested);
                 if (result.value(QStringLiteral("status")) != QLatin1String("ok"))
                     break;
@@ -1845,6 +2031,7 @@ QVariantMap executeRequest(const QVariantMap &request,
             if (!validRemotePath(refreshPath) || !validEntryName(fileName))
                 return failure(QObject::tr("The upload path is invalid."));
             const QString uploadedPath = joinedPath(refreshPath, fileName);
+            changing(connection.sizeCachePrefix, uploadedPath);
             result = uploadLocalFile(connection, localPath, uploadedPath, cancelRequested);
             if (result.value(QStringLiteral("status")) == QLatin1String("ok")) {
                 undoRequest = {
@@ -1860,6 +2047,7 @@ QVariantMap executeRequest(const QVariantMap &request,
                     {QStringLiteral("refreshPath"), refreshPath}};
             }
         } else if (kind == QLatin1String("delete")) {
+            changing(connection.sizeCachePrefix, remotePath);
             result = deleteRemotePath(connection, remotePath,
                                       request.value(QStringLiteral("directory")).toBool(),
                                       cancelRequested);
@@ -1867,6 +2055,8 @@ QVariantMap executeRequest(const QVariantMap &request,
             QString destination = request.value(QStringLiteral("destination")).toString().trimmed();
             if (!destination.startsWith(QLatin1Char('/')))
                 destination = joinedPath(parentPath(remotePath), destination);
+            changing(connection.sizeCachePrefix, remotePath);
+            changing(connection.sizeCachePrefix, destination);
             result = renameRemotePath(connection, remotePath, destination, cancelRequested);
             if (result.value(QStringLiteral("status")) == QLatin1String("ok")) {
                 undoRequest = {
@@ -1886,6 +2076,7 @@ QVariantMap executeRequest(const QVariantMap &request,
             if (!validRemotePath(refreshPath) || !validEntryName(name))
                 return failure(QObject::tr("Enter a valid directory name."));
             const QString directoryPath = joinedPath(refreshPath, name);
+            changing(connection.sizeCachePrefix, directoryPath);
             if (!makeDirectory(connection, directoryPath))
                 return failure(QObject::tr("Unable to create %1.").arg(directoryPath));
             result = {{QStringLiteral("status"), QStringLiteral("ok")}};
@@ -2074,6 +2265,21 @@ RemoteFileManager::RemoteFileManager(QObject *parent)
     , m_secretToolExecutable(QStandardPaths::findExecutable(QStringLiteral("secret-tool")))
     , m_fileOpenerExecutable(QStandardPaths::findExecutable(QStringLiteral("xdg-open")))
 {
+    connect(&sftpAccessChanges(), &SftpAccessChanges::accessRejected, this,
+            [this](const QString &id, const QString &host, const QString &account, const QString &path) {
+        if (m_currentDeviceId != id || m_currentHost != host
+            || (!account.isEmpty() && m_currentUsername != account)
+            || (!path.isEmpty() && !directoryContains(path, m_currentPath))) return;
+        m_entries.clear();
+        m_currentDeviceId.clear();
+        m_currentDeviceName.clear();
+        m_currentHost.clear();
+        m_currentUsername.clear();
+        m_currentPath.clear();
+        m_cachedListing = false;
+        emit entriesChanged();
+        emit locationChanged();
+    });
     connect(&m_sizeWatcher, &QFutureWatcher<void>::finished, this, &RemoteFileManager::startFolderSizes);
     m_transferTimer.setInterval(150);
     connect(&m_transferTimer, &QTimer::timeout, this, &RemoteFileManager::transferChanged);
@@ -2086,7 +2292,7 @@ RemoteFileManager::RemoteFileManager(QObject *parent)
             this, &RemoteFileManager::handleOperationFinished);
     m_fileRefreshTimer.setSingleShot(true);
     m_fileRefreshTimer.setInterval(150);
-    connect(&m_fileRefreshTimer, &QTimer::timeout, this, &RemoteFileManager::refresh);
+    connect(&m_fileRefreshTimer, &QTimer::timeout, this, [this] { refresh(false); });
     const auto scheduleRefresh = [this] { if (m_automaticRefreshEnabled) m_fileRefreshTimer.start(); };
     connect(&m_fileWatcher, &QFileSystemWatcher::directoryChanged, this, scheduleRefresh);
     connect(&m_fileWatcher, &QFileSystemWatcher::fileChanged, this, scheduleRefresh);
@@ -2125,7 +2331,9 @@ void RemoteFileManager::setAutomaticRefreshEnabled(bool enabled)
     if (m_automaticRefreshEnabled == enabled) return;
     m_automaticRefreshEnabled = enabled;
     if (!enabled) {
-        m_fileRefreshTimer.stop(); m_refreshPending = false;
+        m_fileRefreshTimer.stop();
+        m_refreshPending = false;
+        m_verifySizeEstimatesPending = false;
         if (m_sizeCancel) m_sizeCancel->store(true);
         m_sizeRequest.clear();
     }
@@ -2190,6 +2398,14 @@ private:
 };
 }
 
+void RemoteFileManager::clearRemoteSnapshots()
+{
+    NetworkSnapshot::clear("sftp");
+    QMutexLocker lock(&sizeSnapshotMutex);
+    ++remoteSizeEpoch;
+    NetworkSnapshot::clear("sftp-sizes");
+}
+
 void RemoteFileManager::setRemoteEnabled(bool enabled)
 {
     if (m_remoteEnabled == enabled) return;
@@ -2212,6 +2428,7 @@ void RemoteFileManager::setRemoteEnabled(bool enabled)
             m_listingRequest.clear();
             m_entries.clear();
             m_currentDeviceId.clear();
+            m_cachedListing = false;
             m_currentDeviceName.clear();
             m_currentHost.clear();
             m_currentUsername.clear();
@@ -2907,6 +3124,7 @@ void RemoteFileManager::cancel()
     m_sizeRequest.clear();
     m_fileRefreshTimer.stop();
     m_refreshPending = false;
+    m_verifySizeEstimatesPending = false;
     if (m_searchMode && !m_promptKind.isEmpty()) {
         m_pendingRequest.clear();
         clearPrompt();
@@ -3057,13 +3275,15 @@ void RemoteFileManager::clearPreview()
     emit previewChanged();
 }
 
-void RemoteFileManager::refresh()
+void RemoteFileManager::refresh(bool verifySizeEstimates)
 {
     if (m_listingRequest.isEmpty()) return;
     m_refreshPending = true;
+    m_verifySizeEstimatesPending |= verifySizeEstimates;
     if (m_busy || m_searching || m_operationWatcher.isRunning() || !m_promptKind.isEmpty()) return;
     auto request = m_listingRequest;
     request.insert("refresh", true);
+    request.insert("verifySizeEstimates", m_verifySizeEstimatesPending);
     startRequest(request);
 }
 
@@ -3101,6 +3321,10 @@ void RemoteFileManager::startRequest(const QVariantMap &request, const Credentia
     }
     const QString kind = request.value(QStringLiteral("kind")).toString();
     const bool searchRequest = kind == QLatin1String("search");
+    if (m_cachedListing && !searchRequest && kind != "browse" && usesRemoteFiles(request)) {
+        setErrorMessage(tr("Refresh this folder before using its files."));
+        return;
+    }
     if (m_operationWatcher.isRunning()) {
         if (kind == "deleteMany" && !m_searching) {
             if (m_pendingRequest.value("refresh").toBool() && m_queuedRequest.isEmpty()) m_queuedRequest = request;
@@ -3128,6 +3352,7 @@ void RemoteFileManager::startRequest(const QVariantMap &request, const Credentia
     const bool refreshing = request.value("refresh").toBool();
     if (refreshing) {
         m_refreshPending = false;
+        m_verifySizeEstimatesPending = false;
         m_fileRefreshTimer.stop();
     } else if (!resumeSearch && (searchRequest || kind == "browse")) {
         m_listingRequest = request;
@@ -3139,6 +3364,7 @@ void RemoteFileManager::startRequest(const QVariantMap &request, const Credentia
 
     if (searchRequest && !resumeSearch && !refreshing) {
         m_entries.clear();
+        m_cachedListing = false;
         m_searchMode = true;
         m_currentDeviceId.clear();
         m_currentDeviceName.clear();
@@ -3168,7 +3394,25 @@ void RemoteFileManager::startRequest(const QVariantMap &request, const Credentia
         else if (credentials.contains(key)) credentials.insert(id, credentials.value(key));
     }
     preparedRequest.insert(QStringLiteral("credentials"), credentials);
-    preparedRequest.insert(QStringLiteral("trustedKeys"), trustedHostKeys(devices));
+    const auto trustedKeys = trustedHostKeys(devices);
+    preparedRequest.insert(QStringLiteral("trustedKeys"), trustedKeys);
+    const auto device = devices.value(0).toMap();
+    if (kind == "browse" && !m_currentDeviceId.isEmpty() && m_currentDeviceId != "local"
+        && (device.value("id") != m_currentDeviceId || device.value("ip") != m_currentHost
+            || request.value("username") != m_currentUsername || request.value("path") != m_currentPath)) {
+        m_entries.clear();
+        m_currentDeviceId.clear();
+        m_currentDeviceName.clear();
+        m_currentUsername.clear();
+        m_currentHost.clear();
+        m_currentPath.clear();
+        m_cachedListing = false;
+        emit entriesChanged();
+        emit locationChanged();
+    }
+    const auto snapshotPath = kind == "browse" ? listingSnapshot(device, request.value("username").toString(),
+        request.value("path").toString(), trustedKeys.value(device.value("id").toString()).toByteArray()) : QString{};
+    if (!snapshotPath.isEmpty()) m_pendingRequest.insert("snapshotPath", snapshotPath);
 
     m_transfer = std::make_shared<FileTransferProgress>();
     m_transferTimer.start();
@@ -3181,7 +3425,7 @@ void RemoteFileManager::startRequest(const QVariantMap &request, const Credentia
         setBusy(true);
     QPointer<RemoteFileManager> manager(this);
     m_operationWatcher.setFuture(QtConcurrent::run(
-        [preparedRequest, cancellation = m_cancelRequested, progress = m_transfer, manager, generation,
+        [preparedRequest, snapshotPath, device, cancellation = m_cancelRequested, progress = m_transfer, manager, generation,
          credentialId = m_activeCredential.deviceId, credentialUsername = m_activeCredential.username] {
             auto *previousProgress = std::exchange(transferProgress, progress.get());
             auto resetProgress = qScopeGuard([&] { transferProgress = previousProgress; });
@@ -3196,6 +3440,22 @@ void RemoteFileManager::startRequest(const QVariantMap &request, const Credentia
                     },
                     Qt::QueuedConnection);
             };
+            if (!snapshotPath.isEmpty() && !preparedRequest.value("refresh").toBool()) {
+                const auto snapshot = NetworkSnapshot::read(snapshotPath);
+                const auto path = snapshot.value("path").toString();
+                if (validRemotePath(path) && path.startsWith('/') && snapshot.value("entries").isArray() && manager) {
+                    const auto username = preparedRequest.value("username").toString();
+                    auto rows = snapshot.value("entries").toArray().toVariantList();
+                    const auto key = preparedRequest.value("trustedKeys").toMap().value(device.value("id").toString()).toByteArray();
+                    restoreFolderSizes(rows, NetworkSnapshot::read(sizeSnapshotPath(device, username, path, key)).value("folders").toObject());
+                    QMetaObject::invokeMethod(manager, [manager, generation, device, username, path, rows, snapshotPath] {
+                        if (manager && manager->m_remoteEnabled && manager->m_busy
+                            && generation == manager->m_requestGeneration && !manager->m_cancelRequested->load()
+                            && QFileInfo::exists(snapshotPath))
+                            manager->showListing(device, username, path, rows, true);
+                    }, Qt::QueuedConnection);
+                }
+            }
             std::atomic_bool accepted{false};
             auto result = executeRequest(preparedRequest, cancellation, searchResult,
                 [&](const QString &id, const QString &username) {
@@ -3204,8 +3464,14 @@ void RemoteFileManager::startRequest(const QVariantMap &request, const Credentia
             if (cancellation->load()) {
                 result.insert("status", "cancelled");
                 result.remove("error");
-            } else if (accepted.load()) {
-                result.insert("credentialAccepted", true);
+            } else {
+                if (accepted.load()) result.insert("credentialAccepted", true);
+                if (preparedRequest.value("kind") == "browse" && result.value("status") == "ok") {
+                    const auto key = preparedRequest.value("trustedKeys").toMap().value(device.value("id").toString()).toByteArray();
+                    result.insert("sizeEpoch", QVariant::fromValue(sizeEpoch(device)));
+                    result.insert("sizeSnapshot", NetworkSnapshot::read(sizeSnapshotPath(device,
+                        preparedRequest.value("username").toString(), result.value("path").toString(), key)).value("folders").toObject());
+                }
             }
             return result;
         }));
@@ -3313,6 +3579,10 @@ void RemoteFileManager::handleOperationFinished()
         return;
     }
     if (status != QLatin1String("ok")) {
+        if (kind == "browse" && !m_cachedListing && !m_currentDeviceId.isEmpty() && m_currentDeviceId != "local") {
+            m_cachedListing = true;
+            emit locationChanged();
+        }
         m_pendingRequest.clear();
         setErrorMessage(error);
         if (mutation) refreshListing(error);
@@ -3361,35 +3631,68 @@ void RemoteFileManager::handleOperationFinished()
         return;
     }
 
-    auto entries = result.value("entries").toList();
+    const auto entries = result.value("entries").toList();
     const auto device = result.value("device").toMap();
-    const QString deviceId = device.value("id").toString();
+    const auto deviceId = device.value("id").toString();
     const QString username = deviceId == "local" ? localDevice().value("username").toString()
         : result.value("username").toString();
-    for (QVariant &value : entries) {
-        auto entry = value.toMap();
-        entry.insert("username", username);
-        value = entry;
-    }
     const QString path = result.value("path").toString();
-    const bool locationChanged = m_searchMode || m_currentDeviceId != deviceId
-        || m_currentUsername != username || m_currentPath != path;
+    const auto snapshotPath = finishedRequest.value("snapshotPath").toString();
+    if (!snapshotPath.isEmpty() && entries.size() > 4096) {
+        QFile::remove(snapshotPath);
+    } else if (m_remoteEnabled && !snapshotPath.isEmpty()) {
+        const QJsonObject snapshot{{"path", path}, {"entries", QJsonArray::fromVariantList(entries)}};
+        NetworkSnapshot::write(snapshotPath, snapshot);
+        if (finishedRequest.value("path").toString() != path)
+            NetworkSnapshot::write(listingSnapshot(device, username, path, trustedHostKeys({device}).value(deviceId).toByteArray()), snapshot);
+    }
+    const auto epoch = sizeEpoch(device);
+    const auto savedSizes = result.value("sizeEpoch").toULongLong() == epoch
+        ? result.value("sizeSnapshot").toJsonObject() : QJsonObject{};
+    auto displayedEntries = entries;
+    restoreFolderSizes(displayedEntries, savedSizes);
+    showListing(device, username, path, displayedEntries);
+    updateFileWatches();
+    setErrorMessage(error);
+    m_pendingRequest.clear();
+    m_sizeRequest = {{"device", device}, {"username", username}, {"entries", entries}, {"path", path},
+        {"sizeSnapshot", savedSizes}, {"verifySizeEstimates", finishedRequest.value("verifySizeEstimates")},
+        {"sizeEpoch", QVariant::fromValue(epoch)},
+        {"generation", QVariant::fromValue(m_requestGeneration)},
+        {"trustedKey", trustedHostKeys({device}).value(deviceId)}};
+    startFolderSizes();
+}
+
+void RemoteFileManager::showListing(const QVariantMap &device, const QString &username,
+                                    const QString &path, QVariantList entries, bool cached)
+{
+    const auto deviceId = device.value("id").toString();
+    for (auto &value : entries) {
+        auto row = value.toMap();
+        if (cached) {
+            const auto name = row.value("name").toString();
+            if (!validEntryName(name) || row.value("path").toString() != joinedPath(path, name)) return;
+            row.insert("deviceId", deviceId);
+            row.insert("deviceName", device.value("name"));
+            row.insert("ip", device.value("ip"));
+            row.insert("online", device.value("online"));
+            row.insert("onlineKnown", device.value("onlineKnown", true));
+        }
+        row.insert("username", username);
+        value = row;
+    }
+    const bool locationChanged = m_searchMode || m_currentDeviceId != deviceId || m_cachedListing != cached
+        || m_currentUsername != username || m_currentPath != path || m_currentHost != device.value("ip").toString();
+    m_cachedListing = cached;
+    m_listingRequest = {{"kind", "browse"}, {"devices", QVariantList{device}}, {"username", username}, {"path", path}};
     m_searchMode = false;
     m_currentDeviceId = deviceId;
     m_currentDeviceName = device.value("name").toString();
     m_currentHost = device.value("ip").toString();
     m_currentUsername = username;
     m_currentPath = path;
-    m_listingRequest = {{"kind", "browse"}, {"devices", QVariantList{device}}, {"username", username}, {"path", path}};
     if (m_entries != entries) { m_entries = entries; emit entriesChanged(); }
-    updateFileWatches();
-    setErrorMessage(error);
     if (locationChanged) emit this->locationChanged();
-    m_pendingRequest.clear();
-    m_sizeRequest = {{"device", device}, {"username", username}, {"entries", entries},
-        {"generation", QVariant::fromValue(m_requestGeneration)},
-        {"trustedKey", trustedHostKeys({device}).value(deviceId)}};
-    startFolderSizes();
 }
 
 void RemoteFileManager::startFolderSizes()
@@ -3399,44 +3702,94 @@ void RemoteFileManager::startFolderSizes()
     m_sizeCancel = std::make_shared<std::atomic_bool>(false);
     QPointer<RemoteFileManager> manager(this);
     m_sizeWatcher.setFuture(QtConcurrent::run([request, manager, cancel = m_sizeCancel] {
-        SftpConnection connection;
         const auto device = request.value("device").toMap();
-        if (!authenticate(connection, device, request.value("username").toString(), {}, false,
-            request.value("trustedKey").toByteArray(), cancel).isEmpty()) return;
-        for (const auto &value : request.value("entries").toList()) {
-            if (cancel->load()) return;
-            const auto entry = value.toMap();
-            if (!entry.value("directory").toBool() || entry.value("symlink").toBool()) continue;
-            const auto path = entry.value("path").toString();
-            qint64 size = 0; bool valid = true;
-            if (connection.local) {
-                struct stat metadata{};
-                if (::lstat(QFile::encodeName(path).constData(), &metadata) != 0) continue;
-                size = metadata.st_size;
-                QDirIterator files(path, QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden | QDir::System, QDirIterator::Subdirectories);
-                while (!cancel->load() && files.hasNext()) {
-                    files.next();
-                    if (::lstat(QFile::encodeName(files.filePath()).constData(), &metadata) != 0
-                        || (files.fileInfo().isDir() && !files.fileInfo().isReadable())) { valid = false; break; }
-                    size += metadata.st_size;
+        const bool local = device.value("id") == "local";
+        const auto username = request.value("username").toString();
+        const auto key = request.value("trustedKey").toByteArray();
+        const auto saved = request.value("sizeSnapshot").toJsonObject();
+        const auto epoch = request.value("sizeEpoch").toULongLong();
+        const auto generation = request.value("generation").toULongLong();
+        QJsonObject updated;
+        bool finished = false;
+        // Keep completed folders when navigation cancels the rest of a large
+        // walk. A concurrent pane may have stored newer measurements meanwhile.
+        const auto save = qScopeGuard([&] {
+            if ((finished && updated == saved) || (!finished && updated.isEmpty())) return;
+            const auto path = request.value("path").toString();
+            const auto file = sizeSnapshotPath(device, username, path, key);
+            QMutexLocker lock(&sizeSnapshotMutex);
+            if (epoch != sizeEpoch(device) || file.isEmpty()) return;
+            const auto disk = NetworkSnapshot::read(file).value("folders").toObject();
+            auto merged = disk;
+            if (finished) {
+                for (auto it = saved.begin(); it != saved.end(); ++it) {
+                    if (!updated.contains(it.key()) && disk.value(it.key()) == it.value())
+                        merged.remove(it.key());
                 }
-            } else {
-                const auto output = remoteCommand(connection, "du -sb -- " + shellQuote(path), cancel);
-                size = output.left(output.indexOf('\t')).toLongLong(&valid);
             }
-            if (cancel->load()) return;
-            if (!manager) return;
-            QMetaObject::invokeMethod(manager, [manager, generation = request.value("generation").toULongLong(), path, size, valid] {
-                if (!manager || !manager->m_automaticRefreshEnabled || manager->m_requestGeneration != generation) return;
-                for (auto &value : manager->m_entries) {
-                    auto entry = value.toMap();
-                    if (entry.value("path") != path) continue;
-                    entry.insert("size", valid ? QVariant(size) : QVariant{});
-                    entry.insert("sizeUnavailable", !valid); value = entry;
-                    manager->m_searchUpdateTimer.start(); break;
+            for (auto it = updated.begin(); it != updated.end(); ++it) {
+                if (disk.value(it.key()) == saved.value(it.key())) merged.insert(it.key(), it.value());
+            }
+            if (merged != disk) NetworkSnapshot::write(file, {{"path", path}, {"folders", merged}});
+        });
+        SftpConnection connection;
+        bool authenticationAttempted = false;
+        bool authenticated = false;
+        const auto rows = request.value("entries").toList();
+        for (qsizetype row = 0; row < rows.size(); ++row) {
+            if (cancel->load() || !manager) return;
+            const auto entry = rows.at(row).toMap();
+            if (!entry.value("directory").toBool() || entry.value("symlink").toBool()) continue;
+            const auto name = entry.value("name").toString();
+            const auto path = entry.value("path").toString();
+            const auto record = saved.value(name).toObject();
+            const auto now = QDateTime::currentSecsSinceEpoch();
+            if (reusableSizeEstimate(record, entry, now, request.value("verifySizeEstimates").toBool())) {
+                updated.insert(name, record);
+                continue;
+            }
+
+            std::optional<qint64> size;
+            bool watched = false;
+            if (local) {
+                size = FolderSizeCache::shared().measure(path, *cancel, &watched);
+            } else {
+                // Browsing a directory of cached sizes or ordinary files needs no second SSH session.
+                if (!authenticationAttempted) {
+                    authenticated = authenticate(connection, device, username, {}, false, key, cancel).isEmpty();
+                    authenticationAttempted = true;
                 }
+                if (authenticated) {
+                    const auto output = remoteCommand(connection, "du -sb -- " + shellQuote(path), cancel);
+                    bool valid = false;
+                    const auto bytes = output.left(output.indexOf('\t')).toLongLong(&valid);
+                    if (valid && bytes >= 0) size = bytes;
+                } else if (record.value("bytes").toInteger(-1) >= 0) {
+                    updated.insert(name, record);
+                    continue;
+                }
+            }
+            if (cancel->load() || !manager) return;
+            if (size && watched && record.value("watched").toBool() && record.value("bytes").toInteger(-1) == *size
+                && record.value("modified") == QJsonValue::fromVariant(entry.value("modified"))) {
+                updated.insert(name, record);
+            } else if (size) {
+                updated.insert(name, QJsonObject{{"bytes", *size}, {"modified", QJsonValue::fromVariant(entry.value("modified"))},
+                    {"measured", now}, {"watched", watched}});
+            }
+            QMetaObject::invokeMethod(manager, [manager, generation, row, path, size] {
+                if (!manager || !manager->m_automaticRefreshEnabled || manager->m_requestGeneration != generation
+                    || row >= manager->m_entries.size()) return;
+                auto entry = manager->m_entries.at(row).toMap();
+                if (entry.value("path") != path) return;
+                entry.insert("size", size ? QVariant(*size) : QVariant{});
+                entry.remove("sizeCached");
+                entry.insert("sizeUnavailable", !size);
+                manager->m_entries[row] = entry;
+                manager->m_searchUpdateTimer.start();
             }, Qt::QueuedConnection);
         }
+        finished = true;
     }));
 }
 

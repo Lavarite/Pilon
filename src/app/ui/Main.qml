@@ -406,6 +406,8 @@ Window {
             }
             if (!syncWidgetCatalogue(members)) return addonError
             if (!addonRegistry.disableWithDependents(id, dependents)) return addonRegistry.error
+            if (members.includes("devices")) tailscaleManager.clearPeerSnapshots()
+            if (members.includes("ssh")) remoteFiles.clearRemoteSnapshots()
             addonNotices = notices
             return true
         }).catch(error => String(error)).then(result => {

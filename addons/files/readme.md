@@ -7,6 +7,12 @@ Upload uses the same separate file-browser window as export. Select several
 files with Ctrl-click, Shift-click, or Ctrl+A, then choose Upload below the
 bookmarks sidebar. Transfers between devices copy the selected files.
 Refreshing a location after edits or deletions retains its scroll position.
+Previously visited SFTP folders show their last listing while reconnecting.
+File actions become available when the server confirms the listing.
+
+In Settings → Appearance, edit a file type or path to choose from the full
+[Phosphor catalogue](https://phosphoricons.com/). Search by name, keyword or
+category, choose a weight, and save. The catalogue works offline.
 
 Click Name, Device, Size, or Modified to sort that file pane. Repeated clicks
 cycle descending, ascending, then off; sorting starts off. Off restores the
@@ -28,7 +34,10 @@ Note import, assistant attachments, downloads, uploads, and note export use the
 connected-device picker. Remote imports are staged locally for the consuming tool.
 Long transfers show the current file's bytes, speed, remaining time, elapsed time,
 and total bytes copied, with cancellation. Folder sizes are apparent sizes,
-calculated in the background without following symbolic links.
+calculated in the background without following symbolic links. Pilon reuses
+unchanged local subtrees on filesystems with reliable change notifications.
+A tilde marks the last measured size. On SFTP and shared Android storage,
+Pilon reuses it for up to a minute between visits. Refresh checks it immediately.
 
 ## Manual Git synchronization
 

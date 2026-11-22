@@ -20,11 +20,19 @@
 
 struct FileTransferProgress;
 
+class SftpAccessChanges : public QObject
+{
+    Q_OBJECT
+signals:
+    void accessRejected(const QString &deviceId, const QString &host, const QString &account, const QString &path);
+};
+
 class RemoteFileManager : public QObject
 {
     Q_OBJECT
     QML_ELEMENT
 
+    Q_PROPERTY(bool cachedListing READ cachedListing NOTIFY locationChanged)
     Q_PROPERTY(QVariantList entries READ entries NOTIFY entriesChanged)
     Q_PROPERTY(bool showHidden READ showHidden WRITE setShowHidden NOTIFY showHiddenChanged)
     Q_PROPERTY(bool automaticRefreshEnabled READ automaticRefreshEnabled WRITE setAutomaticRefreshEnabled NOTIFY automaticRefreshEnabledChanged)
@@ -57,6 +65,8 @@ class RemoteFileManager : public QObject
     Q_PROPERTY(bool credentialSavingAvailable READ credentialSavingAvailable CONSTANT)
 
 public:
+    bool cachedListing() const { return m_cachedListing; }
+    Q_INVOKABLE void clearRemoteSnapshots();
     bool remoteEnabled() const { return m_remoteEnabled; }
     void setRemoteEnabled(bool enabled);
     explicit RemoteFileManager(QObject *parent = nullptr);
@@ -124,7 +134,7 @@ public:
     Q_INVOKABLE void reloadBookmarks();
     Q_INVOKABLE void startDrag(const QVariantList &entries, const QUrl &iconSource,
                                const QColor &iconColour, const QColor &textColour, const QPointF &grabOffset);
-    Q_INVOKABLE void refresh();
+    Q_INVOKABLE void refresh(bool verifySizeEstimates = true);
     Q_INVOKABLE void submitCredential(const QString &credential);
     Q_INVOKABLE void submitCredentialAndSave(const QString &credential);
     Q_INVOKABLE void acceptHostKey();
@@ -177,6 +187,7 @@ private:
     };
     void startRequest(const QVariantMap &request, const CredentialAttempt *credential = nullptr);
     void handleOperationFinished();
+    void showListing(const QVariantMap &device, const QString &username, const QString &path, QVariantList entries, bool cached = false);
     void updateFileWatches();
     void startFolderSizes();
     void setBusy(bool busy);
@@ -196,6 +207,7 @@ private:
     void saveCredential(const QString &deviceId, const QString &username,
                         const QString &credential);
 
+    bool m_cachedListing = false;
     QVariantList m_entries;
     bool m_showHidden = true;
     bool m_automaticRefreshEnabled = true;
@@ -229,6 +241,7 @@ private:
     QFileSystemWatcher m_fileWatcher;
     QTimer m_fileRefreshTimer;
     bool m_refreshPending = false;
+    bool m_verifySizeEstimatesPending = false;
     QHash<QString, QString> m_credentials;
     CredentialAttempt m_activeCredential;
     QString m_secretToolExecutable;

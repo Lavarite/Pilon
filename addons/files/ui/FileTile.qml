@@ -19,6 +19,7 @@ Item {
     property bool chooseSaveDestination: false
     readonly property bool keyboardActive: visible && Window.window && Window.window.visible
         && (pickerSelectionMode || !fileWorkspace.filePickerOpen)
+    readonly property bool cachedListing: remoteFiles.cachedListing === true
     property bool multipleSelection: false
     property real placesBottomInset: 0
     property real minimumPlacesWidth: 100
@@ -92,7 +93,7 @@ Item {
         return separator <= 0 ? "/" : trimmed.slice(0, separator)
     }
 
-    function formatSize(size, directory, unavailable) {
+    function formatSize(size, directory, unavailable, cached) {
         if (unavailable) return qsTr("Unavailable")
         if (size === undefined || size === null)
             return directory ? qsTr("Calculating…") : ""
@@ -103,7 +104,8 @@ Item {
             value /= 1024
             ++unit
         }
-        return (unit === 0 ? value.toFixed(0) : value.toFixed(1)) + " " + units[unit]
+        const text = (unit === 0 ? value.toFixed(0) : value.toFixed(1)) + " " + units[unit]
+        return cached ? qsTr("~%1").arg(text) : text
     }
 
     function iconForFile(name, directory, path, deviceId, account) {
@@ -147,7 +149,7 @@ Item {
     }
 
     function browseEntry(entry) {
-        if (remoteFiles.busy)
+        if (remoteFiles.busy || (cachedListing && !entry.directory))
             return
         if (searchResults && entry.directory) {
             workspace.openSearchLocation(entry)
@@ -265,6 +267,7 @@ Item {
     }
 
     function dropIntoDirectory(drop, directory) {
+        if (cachedListing) { drop.accepted = false; return }
         const destination = filesPage.deviceForId(
                               filesPage.remoteFiles.currentDeviceId)
         if (destination === null || !fileWorkspace.deviceAvailable(destination.id))
@@ -441,39 +444,11 @@ Item {
         }
     }
 
-    component StyledButton: PilonButton {
-        id: styledButton
-
-        property color fillColour: filesPage.secondaryColour
-        property color foregroundColour: filesPage.textColour
-        icon.color: foregroundColour
-
-        implicitHeight: 40
+    component StyledButton: PilonPanelButton {
+        fillColour: filesPage.secondaryColour
+        foregroundColour: filesPage.textColour
         leftPadding: display === AbstractButton.IconOnly ? 6 : 12
         rightPadding: leftPadding
-
-        contentItem: ControlsImpl.IconLabel {
-            spacing: styledButton.spacing
-            mirrored: styledButton.mirrored
-            display: styledButton.display
-            icon: styledButton.icon
-            defaultIconColor: styledButton.foregroundColour
-            text: styledButton.text
-            font: styledButton.font
-            color: styledButton.foregroundColour
-            alignment: Qt.AlignCenter
-        }
-
-        background: Rectangle {
-            radius: 8
-            color: styledButton.down
-                   ? Qt.darker(styledButton.fillColour, 1.12)
-                   : styledButton.hovered
-                     ? Qt.lighter(styledButton.fillColour, 1.08)
-                     : styledButton.fillColour
-            border.color: filesPage.withOpacity(styledButton.foregroundColour,
-                                                 styledButton.activeFocus ? 0.48 : 0.2)
-        }
     }
 
     component StyledMenuItem: PilonMenuItem {}
@@ -979,12 +954,22 @@ Item {
         color: filesPage.withOpacity(filesPage.secondaryColour, 0.42)
         border.color: filesPage.withOpacity(filesPage.textColour, 0.18)
 
+        Label {
+            id: savedListingStatus
+            anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
+            leftPadding: 12; rightPadding: 12; topPadding: 4
+            visible: filesPage.cachedListing
+            height: visible ? implicitHeight : 0
+            text: filesPage.remoteFiles.busy ? qsTr("Refreshing saved listing…") : qsTr("Saved listing (read-only)")
+            wrapMode: Text.Wrap
+            color: filesPage.mutedTextColour
+        }
         Row {
             id: fileColumns
 
             anchors.left: parent.left
             anchors.right: parent.right
-            anchors.top: parent.top
+            anchors.top: savedListingStatus.bottom
             anchors.leftMargin: 12
             anchors.rightMargin: 12
             height: filesPage.largeIconView ? 0 : 34
@@ -1189,7 +1174,9 @@ Item {
                         width: parent.width * 0.14
                         height: parent.height
                         text: filesPage.formatSize(fileEntryDelegate.modelData.size,
-                                                   fileEntryDelegate.modelData.directory, fileEntryDelegate.modelData.sizeUnavailable)
+                                                   fileEntryDelegate.modelData.directory, fileEntryDelegate.modelData.sizeUnavailable,
+                                                   fileEntryDelegate.modelData.sizeCached)
+                        Accessible.name: fileEntryDelegate.modelData.sizeCached ? qsTr("Last measured size %1").arg(text) : text
                         color: filesPage.textColour
                         font.pixelSize: 14 + filesPage.fileZoomLevel
                         verticalAlignment: Text.AlignVCenter
@@ -1243,7 +1230,7 @@ Item {
 
             }
 
-            ScrollBar.vertical: ScrollBar { }
+            ScrollBar.vertical: PilonScrollBar { }
         }
 
         MouseArea {
@@ -1344,7 +1331,7 @@ Item {
                 if (!rubberBandSelection.visible && distance < Qt.styleHints.startDragDistance)
                     return
                 if (pressedIndex >= 0) {
-                    if (filesPage.remoteFiles.busy)
+                    if (filesPage.cachedListing || filesPage.remoteFiles.busy)
                         return
                     const index = filesPage.displayedEntries.findIndex(function(candidate) {
                         return filesPage.sameEntry(candidate, pressedEntry)
@@ -1475,7 +1462,7 @@ Item {
         BusyIndicator {
             objectName: "fileLocationLoadingIndicator"
             anchors.centerIn: parent
-            running: filesPage.remoteFiles.busy && !filesPage.remoteFiles.previewLoading
+            running: filesPage.remoteFiles.busy && !filesPage.remoteFiles.previewLoading && !filesPage.cachedListing
             visible: running
             palette.highlight: filesPage.accentColour
         }
@@ -1619,6 +1606,7 @@ Item {
         }
 
         function openAt(horizontalPosition, verticalPosition) {
+            if (filesPage.cachedListing) return
             hasSelection = filesPage.selectedEntries.length > 0
             popup(filesPage, horizontalPosition, verticalPosition)
         }
@@ -1783,13 +1771,15 @@ Item {
 
         StyledMenuItem {
             width: parent.width
+            objectName: "fileDeleteAction"
             text: qsTr("Delete")
             shortcutText: qsTr("Delete")
             shown: fileContextMenu.hasSelection
             enabled: filesPage.selectedEntries.length > 0 && !filesPage.remoteFiles.busy
             onClicked: {
+                const selected = filesPage.selectedEntries.slice()
                 fileContextMenu.close()
-                fileActionPopup.showDelete(filesPage.selectedEntries)
+                fileActionPopup.showDelete(selected)
             }
         }
 
@@ -1828,6 +1818,18 @@ Item {
             onClicked: {
                 fileContextMenu.close()
                 filesPage.openTerminalHere()
+            }
+        }
+
+        StyledMenuItem {
+            objectName: "refreshFilesAction"
+            width: parent.width
+            text: qsTr("Refresh")
+            shown: !fileContextMenu.hasSelection && !filesPage.searchResults && !filesPage.pickerSelectionMode
+            enabled: !filesPage.remoteFiles.busy
+            onClicked: {
+                fileContextMenu.close()
+                filesPage.remoteFiles.refresh(true)
             }
         }
 
@@ -1926,7 +1928,7 @@ Item {
                                                 : filesPage.textColour, 0.42)
         }
 
-        contentItem: ScrollView {
+        contentItem: PilonScrollView {
             id: actionScroller
             contentWidth: availableWidth; clip: true
             Column {
@@ -2011,7 +2013,7 @@ Item {
     FileTransferPopup { parent: filesPage.workspace.Overlay.overlay; workspace: filesPage.workspace; remoteFiles: filesPage.remoteFiles }
 
     FileAccessPopup {
-        parent: filesPage.workspace.Overlay.overlay
+        parent: filesPage.Overlay.overlay
         workspace: filesPage.workspace
         remoteFiles: filesPage.remoteFiles
     }
@@ -2020,67 +2022,67 @@ Item {
 
     AppShortcut {
         action: "zoomIn"
-        active: filesPage.keyboardActive && fileEntryList.activeFocus
+        active: filesPage.keyboardActive && !filesPage.cachedListing && fileEntryList.activeFocus
         onActivated: filesPage.zoomFiles(1)
     }
 
     AppShortcut {
         action: "zoomOut"
-        active: filesPage.keyboardActive && fileEntryList.activeFocus
+        active: filesPage.keyboardActive && !filesPage.cachedListing && fileEntryList.activeFocus
         onActivated: filesPage.zoomFiles(-1)
     }
 
     AppShortcut {
         action: "copy"
-        active: filesPage.keyboardActive && fileEntryList.activeFocus
+        active: filesPage.keyboardActive && !filesPage.cachedListing && fileEntryList.activeFocus
                  && filesPage.selectedEntries.length > 0
         onActivated: filesPage.copySelection(false)
     }
 
     AppShortcut {
         action: "cut"
-        active: filesPage.keyboardActive && fileEntryList.activeFocus
+        active: filesPage.keyboardActive && !filesPage.cachedListing && fileEntryList.activeFocus
                  && filesPage.selectedEntries.length > 0
         onActivated: filesPage.copySelection(true)
     }
 
     AppShortcut {
         action: "paste"
-        active: filesPage.keyboardActive && fileEntryList.activeFocus
+        active: filesPage.keyboardActive && !filesPage.cachedListing && fileEntryList.activeFocus
                  && filesPage.remoteFiles.clipboardAvailable
         onActivated: filesPage.pasteClipboard()
     }
 
     AppShortcut {
         action: "undo"
-        active: filesPage.keyboardActive && fileEntryList.activeFocus
+        active: filesPage.keyboardActive && !filesPage.cachedListing && fileEntryList.activeFocus
                  && filesPage.remoteFiles.canUndo && !filesPage.remoteFiles.busy
         onActivated: filesPage.remoteFiles.undo()
     }
 
     AppShortcut {
         action: "selectAll"
-        active: filesPage.keyboardActive && fileEntryList.activeFocus
+        active: filesPage.keyboardActive && !filesPage.cachedListing && fileEntryList.activeFocus
         onActivated: filesPage.selectAllEntries()
     }
 
     AppShortcut {
         action: "delete"
-        active: filesPage.keyboardActive && fileEntryList.activeFocus
+        active: filesPage.keyboardActive && !filesPage.cachedListing && fileEntryList.activeFocus
                  && filesPage.selectedEntries.length > 0 && !filesPage.remoteFiles.busy
         onActivated: fileActionPopup.showDelete(filesPage.selectedEntries)
     }
 
     AppShortcut {
         action: "rename"
-        active: filesPage.keyboardActive && fileEntryList.activeFocus
+        active: filesPage.keyboardActive && !filesPage.cachedListing && fileEntryList.activeFocus
                  && filesPage.selectedEntry !== null && !filesPage.remoteFiles.busy
         onActivated: fileActionPopup.showRename(filesPage.selectedEntry)
     }
 
     AppShortcut {
         action: "open"
-        active: filesPage.keyboardActive && fileEntryList.activeFocus
+        active: filesPage.keyboardActive && !filesPage.cachedListing && fileEntryList.activeFocus
                  && filesPage.selectedEntry !== null && !filesPage.remoteFiles.busy
         onActivated: filesPage.openSelection()
     }
@@ -2093,7 +2095,7 @@ Item {
 
     AppShortcut {
         action: "newFolder"
-        active: filesPage.keyboardActive && fileEntryList.activeFocus
+        active: filesPage.keyboardActive && !filesPage.cachedListing && fileEntryList.activeFocus
                  && !filesPage.remoteFiles.busy && !filesPage.remoteFiles.searchMode
                  && filesPage.remoteFiles.currentDeviceId.length > 0
         onActivated: fileActionPopup.showCreateDirectory()
@@ -2101,7 +2103,7 @@ Item {
 
     AppShortcut {
         action: "cancel"
-        active: filesPage.keyboardActive && fileEntryList.activeFocus
+        active: filesPage.keyboardActive && !filesPage.cachedListing && fileEntryList.activeFocus
                  && filesPage.selectedEntries.length > 0
         onActivated: filesPage.clearSelection()
     }
