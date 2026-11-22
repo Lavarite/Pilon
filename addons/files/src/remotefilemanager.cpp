@@ -2038,6 +2038,15 @@ QString RemoteFileManager::importAppearanceIcon(const QUrl &source, const QStrin
 
 QUrl RemoteFileManager::appearanceIconUrl(const QString &name) const
 {
+    if (name.startsWith(QStringLiteral("phosphor/"))) {
+        static const QRegularExpression variant(QStringLiteral(
+            "\\Aphosphor/(thin|light|regular|bold|fill|duotone)/[a-z0-9]+(?:-[a-z0-9]+)*\\z"));
+        const auto match = variant.match(name);
+        if (!match.hasMatch()) return {};
+        const QString weight = match.captured(1);
+        const QString path = "/" + name + (weight == "regular" ? QString{} : "-" + weight) + ".svg";
+        return QFile::exists(":" + path) ? QUrl("qrc:" + path) : QUrl{};
+    }
     static const QRegularExpression key(QStringLiteral("\\Acustom-[a-f0-9]{64}\\z"));
     if (!key.match(name).hasMatch())
         return {};
