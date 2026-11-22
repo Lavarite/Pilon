@@ -9,6 +9,7 @@ Basic.Popup {
         implicitContentHeight + topPadding + bottomPadding, contentHasCloseButton ? 0 : 16 + 42 + 16)
     popupType: Basic.Popup.Item
     dim: false
+    property bool contentSizedWindow: false
     property bool contentHasCloseButton: false
     padding: 16
     topPadding: padding

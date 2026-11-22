@@ -33,10 +33,7 @@ PilonScrollView {
             enabled: !addon.notesManager.loading && !addon.notesManager.importing
             onClicked: addon.fileWorkspace.selectFolder(qsTr("Notes folder"), path => addon.notesManager.setStorageDirectory(path), addon.ownerWindow)
         }
-        Label {
-            width: parent.width; wrapMode: Text.Wrap; visible: text.length > 0
-            text: addon.notesManager.errorMessage; color: addon.selectedWarningColour
-        }
+
         PilonSectionHeader { objectName: "notesDrawingSection"; width: parent.width; text: qsTr("Drawing") }
         NotesCheckBox {
             objectName: "notesPressureSensitive"
@@ -69,12 +66,17 @@ PilonScrollView {
             }
         }
     }
+    PilonErrorPopup {
+        owner: notesSettings
+        message: notesSettings.visible && !defaultPaperDialog.opened && notesSettings.Window.window?.active ? addon.notesManager.errorMessage : ""
+        onDismissed: addon.notesManager.clearError()
+    }
     NotePaperDialog {
         id: defaultPaperDialog
         parent: notesSettings
         palette: notesSettings.palette
         errorMessage: addon.notesManager.errorMessage
-        warningColour: addon.selectedWarningColour
+        onErrorDismissed: addon.notesManager.clearError()
         savePaper: value => {
             addon.notesManager.clearError()
             addon.notesManager.usePaperAsDefault(value)

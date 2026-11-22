@@ -20,13 +20,25 @@ QtObject {
     property bool refreshHeight: false
     readonly property bool fillsBounds: {
         const parent = host.transientParent
-        if (!parent) return false
+        if (!parent || popup.contentSizedWindow) return false
         const width = Qt.platform.os === "android" || parent.hasDisplayFold === true
             ? (parent.workspaceGeometry || parent.usableGeometry || Qt.rect(0, 0, parent.width, parent.height)).width : host.Screen.width - 40
         return width / host.uiScale < 560
     }
     readonly property rect placementBounds: {
         const parent = host.transientParent
+        if (parent && popup.contentSizedWindow) {
+            const area = parent.usableGeometry || Qt.rect(0, 0, parent.width, parent.height)
+            const left = Math.max(parent.x + area.x, host.Screen.virtualX)
+            const top = Math.max(parent.y + area.y, host.Screen.virtualY)
+            const right = Math.min(parent.x + area.x + area.width, host.Screen.virtualX + host.Screen.width)
+            const bottom = Math.min(parent.y + area.y + area.height, host.Screen.virtualY + host.Screen.height)
+            const gap = PilonStyle.pageMargin * host.uiScale
+            const horizontal = Math.min(gap, Math.max(0, (right - left - 1) / 2))
+            const vertical = Math.min(gap, Math.max(0, (bottom - top - 1) / 2))
+            return Qt.rect(left + horizontal, top + vertical,
+                Math.max(1, right - left - 2 * horizontal), Math.max(1, bottom - top - 2 * vertical))
+        }
         if (parent && (Qt.platform.os === "android" || parent.hasDisplayFold === true)) {
             const area = parent.hasDisplayFold !== true && fillsBounds
                 ? Qt.rect(0, 0, parent.width, parent.height)
@@ -146,6 +158,11 @@ QtObject {
         if (!parent) return
         if (fillsBounds) {
             host.x = placementBounds.x; host.y = placementBounds.y
+            return
+        }
+        if (popup.contentSizedWindow) {
+            host.x = Math.round(placementBounds.x + (placementBounds.width - host.width) / 2)
+            host.y = Math.round(placementBounds.y + (placementBounds.height - host.height) / 2)
             return
         }
         let bounds = placementBounds

@@ -10,6 +10,11 @@ Control {
     property string selectedProposal: ""
     property string dismissedProposal: ""
     property string message: ""
+    PilonErrorPopup {
+        owner: prompt
+        message: prompt.message
+        onDismissed: prompt.message = ""
+    }
     property real maximumHeight: 300
     readonly property var proposals: calendar ? calendar.proposals : []
     readonly property var proposal: proposals.find(p => p.id === selectedProposal) || proposals[0] || ({changes: []})
@@ -131,7 +136,7 @@ Control {
             Label {
                 id: warnings
                 width: warningScroll.availableWidth
-                text: prompt.message || (prompt.proposal.warnings || []).join("\n")
+                text: (prompt.proposal.warnings || []).join("\n")
                 textFormat: Text.PlainText; wrapMode: Text.Wrap; color: prompt.palette.windowText
             }
         }

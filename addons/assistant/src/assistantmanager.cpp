@@ -549,6 +549,14 @@ void AssistantManager::setStatus(const QString &status)
     emit stateChanged();
 }
 
+void AssistantManager::dismissError()
+{
+    auto &current = !m_viewChatId.isEmpty() && !m_viewError.isEmpty() ? m_viewError : m_error;
+    if (current.isEmpty()) return;
+    current.clear();
+    emit stateChanged();
+}
+
 void AssistantManager::fail(const QString &error)
 {
     if (!m_preloadModel.isEmpty()) { prefixFailure(error); return; }

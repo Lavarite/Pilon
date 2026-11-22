@@ -265,6 +265,7 @@ Control {
                     Git.GitFilePreview {
                         id:previewContent
                         width:detailScroll.contentWidth
+                        errorOwner: pane
                         preview:pane.preview
                     }
                 }

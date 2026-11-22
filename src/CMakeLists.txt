@@ -216,6 +216,8 @@ set(PILON_UI_FILES
     ui/controls/PilonDialog.qml
     ui/controls/PilonMenu.qml
     ui/controls/PilonMenuItem.qml
+    ui/controls/PilonConfirmation.qml
+    ui/controls/PilonErrorPopup.qml
     ui/controls/PilonPopup.qml
     ui/controls/PilonScrollBar.qml
     ui/controls/PilonScrollView.qml

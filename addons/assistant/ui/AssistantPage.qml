@@ -203,6 +203,31 @@ Control {
         return assistant.attachments.map(a => assistant.attachmentWarning ? assistant.attachmentWarning(a) : "")
     }
     readonly property bool attachmentsBlocked: attachmentWarnings.some(w => w.length > 0)
+    function confirmDeletion(dialog, remove, fallback) {
+        const previousError = assistant.error
+        if (remove()) return true
+        const error = assistant.error
+        if (error && error !== previousError) {
+            dialog.operationError = error
+            assistant.dismissError()
+        } else {
+            dialog.operationError = fallback
+        }
+        return false
+    }
+    PilonErrorPopup {
+        objectName: "assistantOperationError"
+        owner: renameChatPopup.opened ? renameChatPopup.contentItem : instructionsPopup.opened ? instructionsPopup.contentItem : page
+        message: page.visible && !deleteChatPopup.opened && !deleteProjectPopup.opened && owner.Window.window?.active
+            ? page.assistant.error : ""
+        onDismissed: page.assistant.dismissError()
+    }
+    PilonErrorPopup {
+        objectName: "attachmentError"
+        owner: page
+        message: page.visible && !(page.compactLayout && page.chatBrowserOpen) && !page.assistant.error
+            ? page.attachmentWarnings.filter(w => w.length > 0).join("\n") : ""
+    }
     function sendMessage() {
         if (assistant.recording)
             assistant.stopRecording()
@@ -695,18 +720,23 @@ Control {
             onTriggered: { projectContextMenu.close(); deleteProjectPopup.open() }
         }
     }
-    PilonPopup {
-        id: deleteProjectPopup; objectName: "deleteProjectPopup"
-        anchors.centerIn: Overlay.overlay; width: Math.min(360, page.width); padding: 12; modal: true
-        background: Rectangle { radius: 12; color: page.secondaryColour; border.color: page.alpha(page.textColour, .22) }
-        contentItem: Column {
-            spacing: 12
-            Label { width: parent.width; text: qsTr("Delete %1? Chats will move to Recents. Project files are kept.").arg(projectContextMenu.projectName); color: page.textColour; wrapMode: Text.Wrap }
-            Flow {
-                width: parent.width; spacing: 8
-                ActionButton { text: qsTr("Cancel"); onClicked: deleteProjectPopup.close() }
-                ActionButton { objectName: "confirmDeleteProject"; text: qsTr("Delete"); onClicked: if (page.assistant.deleteProject(projectContextMenu.projectId)) deleteProjectPopup.close() }
-            }
+    PilonConfirmation {
+        id: deleteProjectPopup
+        objectName: "deleteProjectPopup"
+        parent: page.Overlay.overlay
+        preferredWidth: 360
+        palette: page.palette
+        message: qsTr("Delete %1? Chats will move to Recents. Project files are kept.").arg(projectContextMenu.projectName)
+        confirmText: qsTr("Delete")
+        confirmButton.objectName: "confirmDeleteProject"
+        property string operationError: ""
+        onClosed: operationError = ""
+        perform: () => page.confirmDeletion(deleteProjectPopup, () => page.assistant.deleteProject(projectContextMenu.projectId),
+            qsTr("Unable to delete this project."))
+        PilonErrorPopup {
+            owner: deleteProjectPopup.contentItem
+            message: deleteProjectPopup.operationError
+            onDismissed: deleteProjectPopup.operationError = ""
         }
     }
     PilonMenu {
@@ -744,56 +774,33 @@ Control {
             onTriggered: {
                 deleteChatPopup.chatId = chatContextMenu.chatId
                 deleteChatPopup.chatTitle = chatContextMenu.chatTitle
-                deleteChatPopup.message = ""
                 chatContextMenu.close()
                 deleteChatPopup.open()
             }
         }
     }
-    PilonPopup {
-        id: deleteChatPopup; objectName: "deleteChatPopup"
+    PilonConfirmation {
+        id: deleteChatPopup
+        objectName: "deleteChatPopup"
         property string chatId: ""
         property string chatTitle: ""
-        property string message: ""
-        anchors.centerIn: Overlay.overlay; width: Math.min(360, page.width); padding: 12; modal: true
-        height: Math.min(topPadding + bottomPadding + deleteChatMessageColumn.implicitHeight
-            + deleteChatActions.implicitHeight + 12, maximumContentHeight)
-        onOpened: cancelDeleteChat.forceActiveFocus()
-        background: Rectangle { radius: 12; color: page.secondaryColour; border.color: page.alpha(page.textColour, .22) }
-        contentItem: ColumnLayout {
-            spacing: 12
-            PilonScrollView {
-                id: deleteChatMessages
-                Layout.fillWidth: true; Layout.fillHeight: true; Layout.minimumHeight: 0
-                contentWidth: availableWidth; clip: true
-                ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-                Column {
-                    id: deleteChatMessageColumn
-                    width: deleteChatMessages.availableWidth; spacing: 12
-                    Label {
-                        width: parent.width; wrapMode: Text.Wrap; color: page.textColour
-                        text: qsTr("Delete %1? This permanently deletes the conversation.").arg(deleteChatPopup.chatTitle)
-                    }
-                    Label {
-                        objectName: "deleteChatError"
-                        width: parent.width; wrapMode: Text.Wrap; color: page.textColour
-                        visible: deleteChatPopup.message.length > 0
-                        text: deleteChatPopup.message
-                    }
-                }
-            }
-            Flow {
-                id: deleteChatActions
-                Layout.fillWidth: true; spacing: 8
-                ActionButton { id: cancelDeleteChat; objectName: "cancelDeleteChat"; text: qsTr("Cancel"); onClicked: deleteChatPopup.close() }
-                ActionButton {
-                    objectName: "confirmDeleteChat"; text: qsTr("Delete"); enabled: !page.assistant.recording
-                    onClicked: {
-                        if (page.assistant.deleteChat(deleteChatPopup.chatId)) deleteChatPopup.close()
-                        else deleteChatPopup.message = page.assistant.error || qsTr("Unable to delete this chat.")
-                    }
-                }
-            }
+        property string operationError: ""
+        parent: page.Overlay.overlay
+        preferredWidth: 360
+        palette: page.palette
+        message: qsTr("Delete %1? This permanently deletes the conversation.").arg(chatTitle)
+        confirmText: qsTr("Delete")
+        cancelButton.objectName: "cancelDeleteChat"
+        confirmButton.objectName: "confirmDeleteChat"
+        confirmButton.enabled: !page.assistant.recording
+        onClosed: operationError = ""
+        perform: () => page.confirmDeletion(deleteChatPopup, () => page.assistant.deleteChat(chatId),
+            qsTr("Unable to delete this chat."))
+        PilonErrorPopup {
+            objectName: "deleteChatError"
+            owner: deleteChatPopup.contentItem
+            message: deleteChatPopup.operationError
+            onDismissed: deleteChatPopup.operationError = ""
         }
     }
 
@@ -1104,8 +1111,7 @@ Control {
                     objectName: "assistantComposerStatus"
                     width: parent.width
                     visible: text.length > 0
-                    text: page.assistant.error.length > 0 ? ""
-                        : page.assistant.recording ? qsTr("Recording…")
+                    text: page.assistant.recording ? qsTr("Recording…")
                         : page.assistant.speaking && page.currentChatWorking ? qsTr("Generating speech…")
                         : ""
                     color: page.mutedTextColour
@@ -1149,12 +1155,7 @@ Control {
                                 }
                             }
                         }
-                        Label {
-                            objectName: "attachmentError"
-                            width: parent.width; visible: page.attachmentsBlocked
-                            text: page.attachmentWarnings.filter(w => w.length > 0).join("\n")
-                            color: page.warningColour; wrapMode: Text.Wrap
-                        }
+
                     }
                 }
                 Label {
@@ -1313,6 +1314,27 @@ Control {
         }
     }
 
+    PilonConfirmation {
+        id: toolApproval
+        objectName: "assistantToolApproval"
+        parent: page.Overlay.overlay
+        palette: page.palette
+        preferredWidth: 560
+        message: page.assistant.pendingAction
+        confirmText: qsTr("Run")
+        confirmButton.objectName: "assistantRunApprovedAction"
+        readonly property bool requested: page.visible && !!page.assistant.pendingAction
+            && !page.assistant.connection.promptText
+        function sync() {
+            if (requested && !visible) open()
+            else if (!requested && visible) close()
+        }
+        onRequestedChanged: Qt.callLater(sync)
+        Component.onCompleted: sync()
+        onAccepted: if (requested) page.assistant.approveAction(true)
+        onRejected: if (requested) page.assistant.approveAction(false)
+    }
+
     Rectangle {
         id: actionNotification
         objectName: "assistantActionNotification"
@@ -1322,7 +1344,7 @@ Control {
         width: Math.min(560, page.width - 24)
         height: Math.min(actionContent.implicitHeight + 24, Math.max(0, page.height - y))
         z: 10
-        visible: page.assistant.pendingAction.length > 0 || page.assistant.connection.promptText.length > 0
+        visible: page.assistant.connection.promptText.length > 0
         color: page.secondaryColour
         border.color: page.alpha(page.accentColour, 0.7)
         radius: 12
@@ -1344,8 +1366,7 @@ Control {
                     height: Math.min(180, actionText.contentHeight)
                     PilonTextArea {
                         id: actionText
-                        text: page.assistant.connection.promptText.length > 0
-                              ? page.assistant.connection.promptText : page.assistant.pendingAction
+                        text: page.assistant.connection.promptText
                         readOnly: true
                         selectByMouse: true
                         textFormat: TextEdit.PlainText
@@ -1393,19 +1414,17 @@ Control {
                     ActionButton {
                         text: qsTr("Cancel")
                         onClicked: {
-                            if (page.assistant.pendingAction.length > 0) page.assistant.approveAction(false)
-                            else page.assistant.stop()
+                            page.assistant.stop()
                             authenticationInput.clear()
                         }
                     }
                     ActionButton {
                         id: confirmAction
                         objectName: "assistantConfirmAction"
-                        text: page.assistant.pendingAction.length > 0 ? qsTr("Run") : qsTr("Continue")
+                        text: qsTr("Continue")
                         accented: true
                         onClicked: {
-                            if (page.assistant.pendingAction.length > 0) page.assistant.approveAction(true)
-                            else if (savePassword.checked)
+                            if (savePassword.checked)
                                 page.assistant.connection.submitPromptAndSave(authenticationInput.text)
                             else
                                 page.assistant.connection.submitPrompt(authenticationInput.text)

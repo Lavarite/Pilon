@@ -35,7 +35,8 @@ TestCase {
         readonly property var savedDevices: devices.filter(row => row.saved)
         property var calls: []
         function record(action) { calls = calls.concat(action) }
-        function refresh() { record("refresh") }
+        property bool deferRefresh: false
+        function refresh() { record("refresh"); if (deferRefresh) { errorMessage = ""; busy = true } }
         function startService() { record("connect") }
         function openExternalApplication() { record("open") }
         function disconnectExternalApplication() { record("disconnect") }
@@ -91,7 +92,7 @@ TestCase {
         manager.discoveryConnected = false; manager.discoverySucceeds = false; manager.discoveryDisconnects = true; manager.statusKnown = true
         manager.externalStatus = "No Android VPN active."
         manager.loggedIn = false; manager.serviceRunning = false; manager.busy = false
-        manager.errorMessage = ""; manager.devices = []; manager.calls = []
+        manager.errorMessage = ""; manager.devices = []; manager.calls = []; manager.deferRefresh = false
         owner.width = 380; owner.height = 680; owner.show(); owner.requestActivate()
         page = createTemporaryObject(settingsComponent, surface)
         verify(page !== null); wait(30)
@@ -117,6 +118,26 @@ TestCase {
         page.revealFocus(item)
         owner.update();verify(waitForRendering(owner.contentItem))
         mouseClick(item)
+    }
+    function test_onlyRequestedDeviceFailuresFloatOverTheUnchangedForm() {
+        const error = control("tailscaleOperationError")
+        const field = control("devicesDiscoveryClientId")
+        field.text = "client draft"
+        const before = field.mapToItem(page, 0, 0)
+        manager.errorMessage = "Background refresh failed"
+        verify(!error.visible)
+        manager.deferRefresh = true
+        click("devicesRefresh")
+        manager.errorMessage = "Unable to refresh this account"
+        manager.busy = false
+        tryCompare(error, "opened", true)
+        compare(error.message, manager.errorMessage)
+        compare(field.mapToItem(page, 0, 0), before)
+        compare(field.text, "client draft")
+        verify(!error.focus && !error.dim && !error.modal)
+        error.dismiss()
+        manager.errorMessage = "Background refresh failed again"
+        verify(!error.visible)
     }
     function test_externalControlsArePassiveAndDoNotExposeAnotherAccount() {
         compare(manager.calls.length, 0)

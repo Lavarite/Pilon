@@ -40,7 +40,13 @@ Viewer.ViewerSurface {
             priorities.restart()
         }
     }
+    PilonErrorPopup {
+        owner: root
+        readonly property var current: pages.count ? pages.itemAt(root.currentPage) : null
+        message: current && current.pageError ? qsTr("Page %1: %2").arg(current.index + 1).arg(current.pageError) : ""
+    }
     Repeater {
+        id: pages
         model: document
         delegate: Item {
             id: page
@@ -71,7 +77,6 @@ Viewer.ViewerSurface {
                         }
                     }
                     BusyIndicator { anchors.centerIn: parent; running: !String(page.pageImage) && !page.pageError; visible: running }
-                    Label { anchors.centerIn: parent; width: parent.width; wrapMode: Text.Wrap; text: page.pageError; visible: !!text }
                 }
             }
         }

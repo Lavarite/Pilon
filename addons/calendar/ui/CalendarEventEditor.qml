@@ -32,11 +32,11 @@ PilonPopup {
     property string organiser: ""
     property string expandedCalendarAccount: ""
     property string message: ""
-    onMessageChanged: if (message.length) Qt.callLater(revealMessage)
-    function revealMessage() {
-        if (!message.length || !opened) return
-        const view = formScroll.contentItem
-        view.contentY = Math.max(0, Math.min(eventMessage.y, view.contentHeight - view.height))
+    PilonErrorPopup {
+        objectName: "calendarEventMessage"
+        owner: editor.contentItem
+        message: editor.visible ? editor.message : ""
+        onDismissed: editor.message = ""
     }
     property string actionScope: "series"
     signal saved()
@@ -142,7 +142,7 @@ PilonPopup {
         let ok = proposalId ? calendar.updateProposal(proposalId, proposalIndex, value)
                             : calendar.saveEvent(value, actionScope, occurrence).length > 0
         if (ok) { close(); saved() }
-        else { message = calendar.error; Qt.callLater(revealMessage) }
+        else message = calendar.error
     }
     readonly property var availableCalendars: calendar.calendars.filter(c => c.id !== "pilon"
         && ((c.enabled && c.writable) || destinations.indexOf(c.id) >= 0 || draft.source === c.id))
@@ -513,12 +513,6 @@ PilonPopup {
                         onActiveFocusChanged: if (activeFocus) Qt.callLater(revealCursor)
                     }
                 }
-                Label {
-                    id: eventMessage; objectName: "calendarEventMessage"
-                    visible: editor.message.length > 0; text: editor.message; color: editor.textColour
-                    Layout.fillWidth: true; wrapMode: Text.Wrap
-                    onHeightChanged: if (visible) Qt.callLater(editor.revealMessage)
-                }
             }
             }
         }
@@ -560,38 +554,17 @@ PilonPopup {
             text += "\n\n" + qsTr("Guests may receive a cancellation.")
         return text
     }
-    PilonDialog {
+    PilonConfirmation {
         id: deleteConfirm
         objectName: "calendarDeleteConfirmation"
         parent: editor.contentItem
-        x: (parent.width - width) / 2; y: (parent.height - height) / 2
-        title: qsTr("Delete event?")
-        width: Math.min(440, parent.width - 32); modal: true
-        height: Math.min(implicitHeight, parent.height - 32)
         palette: editor.palette
-        background: Rectangle { color: editor.mainColour; radius: 8; border.color: Qt.alpha(editor.textColour, .22) }
-        contentItem: PilonScrollView {
-            id: deleteScroll
-            implicitHeight: deleteContents.implicitHeight
-            contentWidth: availableWidth; clip: true
-            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-            ColumnLayout {
-                id: deleteContents
-                width: deleteScroll.availableWidth; spacing: 12
-                Label {
-                    objectName: "calendarDeleteMessage"
-                    Layout.fillWidth: true; wrapMode: Text.Wrap; color: editor.textColour
-                    text: editor.deletionMessage()
-                }
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: 8
-                    Item { Layout.fillWidth: true }
-                    CalendarButton { objectName: "calendarDeleteCancel"; text: qsTr("Cancel"); onClicked: deleteConfirm.reject() }
-                    CalendarButton { objectName: "calendarDeleteAccept"; text: qsTr("Delete"); onClicked: deleteConfirm.accept() }
-                }
-            }
-        }
+        title: qsTr("Delete event?")
+        message: editor.deletionMessage()
+        messageLabel.objectName: "calendarDeleteMessage"
+        cancelButton.objectName: "calendarDeleteCancel"
+        confirmButton.objectName: "calendarDeleteAccept"
+        confirmText: qsTr("Delete")
         onAccepted: if (editor.calendar.deleteEvent(editor.draft.id, editor.actionScope, editor.occurrence)) { editor.close(); editor.saved() } else editor.message = editor.calendar.error
     }
 }

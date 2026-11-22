@@ -248,7 +248,7 @@ TestCase {
         property string errorMessage:""
         function cleanupBlockedReason(){return pending ? "Wait for the password store." : ""}
         function disconnectFromHost(){Qt.callLater(()=>ssh.running=false)}
-        function forgetPasswords(){test.record("forget");return true}
+        function clearSavedPasswords(){test.record("forget");return ""}
     }}
     Component { id:deviceFactory; QtObject {
         id:device

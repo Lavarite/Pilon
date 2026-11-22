@@ -20,6 +20,14 @@ PilonScrollView {
         width: voiceSettingsScroll.availableWidth
         spacing: 12
         property string playbackError: ""
+        PilonErrorPopup {
+            owner: voiceSettingsScroll
+            message: voiceSettingsScroll.visible && voiceSettingsScroll.Window.window?.active ? voiceSettings.playbackError || addon.assistantManager.error : ""
+            onDismissed: {
+                if (voiceSettings.playbackError) voiceSettings.playbackError = ""
+                else addon.assistantManager.dismissError()
+            }
+        }
         readonly property bool previewActive: addon.assistantManager.previewingVoice
             || voicePreviewPlayer.playbackState === MediaPlayer.PlayingState
         onVisibleChanged: if (!visible && previewActive) addon.assistantManager.stopSpeech()
@@ -105,12 +113,6 @@ PilonScrollView {
                 onClicked: addon.assistantManager.saveVoiceSettings(voicePromptInput.text, voiceSpeedSlider.value)
             }
         }
-        Label {
-            width: parent.width
-            visible: text.length > 0
-            text: voiceSettings.playbackError || addon.assistantManager.error
-            color: addon.selectedWarningColour
-            wrapMode: Text.Wrap
-        }
+
     }
 }

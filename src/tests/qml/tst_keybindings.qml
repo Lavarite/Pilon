@@ -11,7 +11,7 @@ TestCase {
     App.KeybindingSettings {
         id: settings; anchors.fill: parent
         textColour: "#eeeeee"; mutedTextColour: "#aaaaaa"; secondaryColour: "#202020"
-        accentColour: "#aabbcc"; accentTextColour: "#101010"; warningColour: "#cc9988"
+        accentColour: "#aabbcc"; accentTextColour: "#101010"
     }
     property int activations: 0
     UI.AppShortcut { action: "newNote"; onActivated: test.activations++ }

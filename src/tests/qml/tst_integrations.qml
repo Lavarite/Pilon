@@ -98,7 +98,7 @@ TestCase {
         records=[]
         tryCompare(host,"error","")
     }
-    function test_brokenSettingsAugmentationUsesTheExistingErrorLabel() {
+    function test_brokenSettingsAugmentationShowsItsOwnErrorPopup() {
         targetAddon.configurationOnly=true
         const broken=row("provider","broken",true,"settings")
         broken.entry=Qt.resolvedUrl("fixtures/MissingAugmentation.qml")
@@ -108,15 +108,11 @@ TestCase {
         host.settingsContent.visible=true
         const status=findChild(host.settingsContent,"addonSettingsErrorStatus")
         verify(status);tryCompare(status,"visible",true)
-        verify(status.text.indexOf("broken")>=0)
-        const window=status.Window.window, foreground=window.palette.windowText
-        try {
-            window.palette.windowText="#d8c7b7"
-            status.palette.windowText="#000000"; status.palette.text="#000000"
-            compare(status.color,window.palette.windowText)
-            window.palette.windowText="#f1e7d8"
-            compare(status.color,window.palette.windowText)
-        } finally { window.palette.windowText=foreground }
+        verify(status.message.includes("broken"))
+        const message = findChild(status.contentItem, "pilonErrorMessage")
+        compare(message.Accessible.name, status.message)
+        compare(status.owner, host.settingsContent)
+        verify(!status.modal)
         records=[]
         tryCompare(status,"visible",false)
     }

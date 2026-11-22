@@ -15,12 +15,12 @@ ColumnLayout {
     property var removeAddon: id => registry.finalizeRemoval(id)
     property var notices: ({})
     property var operationErrors: ({})
+    Component.onCompleted: if (registry?.error) report("", registry.error)
     property var pendingIds: ({})
     property var checkedOverrides: ({})
     property bool changesBusy: false
     property bool widgetsAvailable: false
     property var createWidget: null
-    property string importError: ""
     signal settingsRequested(string addonId)
     spacing: 12
     function checkedValue(addon) {
@@ -33,7 +33,14 @@ ColumnLayout {
         pendingIds = ids
     }
     function report(id, message) {
-        operationErrors = Object.assign({}, operationErrors, {[id]: message})
+        const errors = Object.assign({}, operationErrors)
+        if (message) {
+            const addon = id ? registry.addons.find(entry => entry.id === id) : null
+            errors[id] = addon ? qsTr("%1: %2").arg(addon.name).arg(message) : message
+        } else {
+            delete errors[id]
+        }
+        operationErrors = errors
     }
     function requestWidget(owner, widget) {
         const result = createWidget(owner, widget)
@@ -47,7 +54,7 @@ ColumnLayout {
             try { name = decodeURIComponent(name) } catch (error) {}
             failures.push(name + ": " + registry.error)
         }
-        importError = failures.join("\n")
+        report("", failures.join("\n"))
     }
     PilonWrapButton {
         objectName: "reorderSidebarTabs"
@@ -182,9 +189,16 @@ ColumnLayout {
                         wrapMode: Text.Wrap
                         color: page.Window.window ? page.Window.window.palette.windowText : palette.windowText
                     }
+                    PilonButton {
+                        visible: !!card.modelData.error
+                        Layout.maximumWidth: card.availableWidth
+                        text: qsTr("Show error")
+                        Accessible.name: qsTr("Show error for %1").arg(card.modelData.name)
+                        onClicked: page.report(card.modelData.id, card.modelData.error)
+                    }
                     Label {
                         Layout.fillWidth: true; Layout.minimumWidth: 0
-                        text: page.operationErrors[card.modelData.id] || card.modelData.error || card.modelData.blockedReason || (card.modelData.restartRequired ? qsTr("Restart Pilon to load this add-on’s changes.") : "")
+                        text: card.modelData.blockedReason || (card.modelData.restartRequired ? qsTr("Restart Pilon to load this add-on’s changes.") : "")
                         visible: text.length > 0; textFormat: Text.PlainText; wrapMode: Text.Wrap
                         color: page.Window.window ? page.Window.window.palette.windowText : palette.windowText
                     }
@@ -230,11 +244,10 @@ ColumnLayout {
             }
         }
     }
-    Label {
-        objectName: "addonImportError"
-        Layout.fillWidth: true
-        text: page.importError || (page.registry ? page.registry.error : "")
-        visible: text.length > 0; textFormat: Text.PlainText; wrapMode: Text.Wrap
-        color: page.Window.window ? page.Window.window.palette.windowText : palette.windowText
+    PilonErrorPopup {
+        objectName: "addonOperationError"
+        owner: page
+        message: Object.values(page.operationErrors).join("\n")
+        onDismissed: page.operationErrors = ({})
     }
 }

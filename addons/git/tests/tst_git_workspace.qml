@@ -41,6 +41,8 @@ TestCase {
         property var absent: []
         property var folderErrors: ({})
         property string error: ""
+        property int errorRevision: 0
+        onErrorChanged: if (error) ++errorRevision
         property var prepared: []
         property var validated: []
         property var finished: []

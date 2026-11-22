@@ -835,8 +835,13 @@ Control {
                     }
                 }
                 BusyIndicator { objectName: "previewLoadingIndicator"; anchors.centerIn: parent; running: (filePreview.manager !== null && filePreview.manager.previewLoading) || documentView.document.loading; visible: running }
-                Label { anchors.centerIn: parent; width: parent.width; wrapMode: Text.Wrap; color: filesPage.warningColour; text: documentView.document.error || (filePreview.manager ? filePreview.manager.errorMessage : ""); visible: !!text }
-                Label { anchors.centerIn: parent; visible: !!previewPlayer.errorString && (filePreview.kind === "video" || filePreview.kind === "audio"); text: previewPlayer.errorString; color: filesPage.warningColour; width: parent.width; wrapMode: Text.Wrap }
+                PilonErrorPopup {
+                    objectName: "filePreviewError"
+                    owner: previewContent
+                    message: !filePreview.visible ? "" : documentView.document.error || filePreview.manager?.errorMessage
+                        || ((filePreview.kind === "video" || filePreview.kind === "audio") ? previewPlayer.errorString : "")
+                    onDismissed: if (filePreview.manager?.errorMessage) filePreview.manager.dismissError()
+                }
             }
         }
         MediaPlayer {
@@ -850,6 +855,7 @@ Control {
         id: tileComponent
         FileTile {
             id: tile
+            errorInPreview: filePreview.visible && filePreview.manager === remoteFiles
             workspace: filesPage
             fileWorkspace: filesPage.fileWorkspace
             SplitView.minimumHeight: filesPage.compactTiles ? 244 : 150
@@ -909,6 +915,7 @@ Control {
                 workspace: filesPage
                 fileWorkspace: filesPage.fileWorkspace
                 remoteFiles: filesPage.searchManager
+                errorInPreview: filePreview.visible && filePreview.manager === remoteFiles
                 searchResults: true
                 searchQuery: filesPage.searchQuery
                 onCloseRequested: filesPage.closeSearch()

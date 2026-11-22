@@ -36,6 +36,8 @@ Window {
     }
     readonly property rect workspaceGeometry: appService.foldOccluding === true ? usableGeometry : safeGeometry
     readonly property bool bottomNavigation: workspaceGeometry.width / uiScale < 600
+    readonly property real errorPopupBottom: workspaceGeometry.y + workspaceGeometry.height
+        - (bottomNavigation && sidebar ? sidebar.height * uiScale : 0)
     readonly property rect usableGeometry: {
         const area = safeGeometry
         const fold = appService.foldBounds
@@ -751,7 +753,6 @@ Window {
         ColumnLayout {
             objectName: "emptyAddonsPage"
             anchors.fill: parent; anchors.margins: 16
-            anchors.bottomMargin: workspaceStatus.visible ? workspaceStatus.height + 32 : 16
             visible: window.pages.length === 0 && !window.selectedPage
             PilonScrollView {
                 id: emptyAddons
@@ -766,26 +767,16 @@ Window {
                 }
             }
         }
-        PilonScrollView {
-            id: workspaceStatus
-            anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
-            anchors.margins: 16; z: 2
-            height: Math.min(workspaceErrorText.implicitHeight, addonArea.height * .25)
-            visible: workspaceErrorText.text.length > 0
-            contentWidth: availableWidth; contentHeight: workspaceErrorText.implicitHeight; clip: true
-            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-            Label {
-                id: workspaceErrorText
-                objectName: "workspaceErrorStatus"
-                width: workspaceStatus.availableWidth; wrapMode: Text.Wrap
-                color: window.selectedTextColour
-                text: window.addonError || guardError || (window.addonHosts[window.selectedPage] ? window.addonHosts[window.selectedPage].error : "")
-            }
+        PilonErrorPopup {
+            objectName: "workspaceErrorStatus"
+            owner: addonArea
+            message: !settingsMenu.visible && !firstRunSetup.visible
+                ? window.addonError || window.guardError || window.addonHosts[window.selectedPage]?.error || "" : ""
+            onDismissed: if (message === window.addonError) window.addonError = ""
         }
     }
     Component { id: addonHostFactory; AddonHost {
         anchors.fill: parent
-        anchors.bottomMargin: workspaceStatus.visible ? workspaceStatus.height + 32 : 0
         id: addonHost
         onPageCreated: { window.pageRevision++; window.finishNavigation(addonHost) }
     } }
@@ -1044,39 +1035,9 @@ Window {
 
     Connections {
         target: assistantManager
-        property string lastError: ""
         function onStateChanged() {
-            const message = assistantManager.error
-            if (message && message !== lastError) {
-                assistantError.message = message; assistantError.open()
-            }
-            lastError = message
             if (assistantManager.questions.length > 0 && !assistantQuestion.visible) assistantQuestion.open()
             else if (assistantManager.questions.length === 0) assistantQuestion.close()
-        }
-    }
-    PilonPopup {
-        id: assistantError
-        objectName: "assistantErrorNotification"
-        parent: uiContent
-        x: (parent.width - width) / 2; y: (parent.height - height) / 2
-        width: Math.min(560, parent.width - 32)
-        height: Math.min(topPadding + bottomPadding + assistantErrorHeading.implicitHeight
-            + assistantErrorText.implicitHeight + 12, maximumContentHeight)
-        modal: true; focus: true; padding: 20
-        property string message: ""
-        background: Rectangle { color: window.selectedMainColour; border.color: window.selectedMutedTextColour; radius: 8 }
-        Column {
-            anchors.fill: parent; spacing: 12
-            Label { id: assistantErrorHeading; text: qsTr("Assistant error"); color: window.selectedTextColour; font.pixelSize: 20 }
-            PilonScrollView {
-                width: parent.width; height: parent.height - assistantErrorHeading.height - parent.spacing; clip: true
-                PilonTextArea {
-                    id: assistantErrorText
-                    text: assistantError.message; readOnly: true; selectByMouse: true; wrapMode: TextEdit.Wrap
-                    color: window.selectedTextColour; font.pixelSize: 16; background: null
-                }
-            }
         }
     }
     PilonPopup {
@@ -1287,15 +1248,18 @@ Window {
             }
         }
         footerComponent: Component {
-            Column {
-                Label {
-                    objectName: "applicationErrorStatus"
-                    width: parent.width; wrapMode: Text.Wrap
-                    color: window.selectedWarningColour
-                    visible: !!text
-                    text: addonCleanup.status || addonCleanup.error || window.appService.error || window.addonError || window.guardError
-                }
+            Label {
+                text: addonCleanup.status
+                visible: !!text
+                wrapMode: Text.Wrap
+                color: settingsMenu.palette.windowText
             }
+        }
+        PilonErrorPopup {
+            objectName: "applicationErrorStatus"
+            owner: settingsMenu.contentItem
+            message: addonCleanup.error || window.appService.error || window.addonError || window.guardError
+            onDismissed: if (message === window.addonError) window.addonError = ""
         }
         onCategoriesChanged: if (!categories.some(section => section.id === currentId)) currentId = "addons"
         PilonScrollView {
@@ -1326,7 +1290,7 @@ Window {
                 visible: settingsMenu.currentId === "keybindings"
                 textColour: window.selectedTextColour; mutedTextColour: window.selectedMutedTextColour
                 secondaryColour: window.selectedSecondaryColour; accentColour: window.selectedAccentColour
-                accentTextColour: window.selectedAccentTextColour; warningColour: window.selectedWarningColour
+                accentTextColour: window.selectedAccentTextColour
             }
 
 
@@ -1596,15 +1560,19 @@ Window {
         }
     }
 
-    PilonDialog {
+    PilonConfirmation {
         id: disableDependentsConfirmation
         objectName: "disableDependentsConfirmation"
         parent: settingsMenu.visible ? settingsMenu.contentItem
             : window.setupActive ? firstRunSetup.contentItem : window.contentItem
-        width: Math.max(1, Math.min(480, parent.width - 32))
-        height: Math.max(1, Math.min(implicitHeight, parent.height - 32))
-        modal: true
+        preferredWidth: 480
         palette: window.palette
+        message: qsTr("Disabling %1 will also disable these add-ons.").arg(addonName)
+        details: dependentNames.join("\n")
+        detailLabel.objectName: "dependentAddonNames"
+        cancelButton.objectName: "cancelDisableDependents"
+        confirmButton.objectName: "confirmDisableDependents"
+        confirmText: qsTr("Disable add-ons")
         property var response: null
         property string addonName: ""
         property var dependentNames: []
@@ -1622,53 +1590,8 @@ Window {
             response = null
             resolve(accepted)
         }
-        onOpened: cancelDisableDependents.forceActiveFocus(Qt.PopupFocusReason)
+        perform: () => { answer(true); return true }
         onClosed: answer(false)
-
-        contentItem: PilonScrollView {
-            implicitHeight: cascadeContent.implicitHeight
-            contentWidth: availableWidth
-            clip: true
-            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-            ColumnLayout {
-                id: cascadeContent
-                width: parent.width
-                spacing: 12
-                Label {
-                    Layout.fillWidth: true
-                    wrapMode: Text.Wrap
-                    textFormat: Text.PlainText
-                    text: qsTr("Disabling %1 will also disable these add-ons.").arg(disableDependentsConfirmation.addonName)
-                }
-                Label {
-                    objectName: "dependentAddonNames"
-                    Layout.fillWidth: true
-                    wrapMode: Text.WrapAnywhere
-                    textFormat: Text.PlainText
-                    text: disableDependentsConfirmation.dependentNames.join("\n")
-                }
-                Flow {
-                    Layout.fillWidth: true
-                    spacing: 8
-                    PilonWrapButton {
-                        id: cancelDisableDependents
-                        objectName: "cancelDisableDependents"
-                        width: Math.min(implicitWidth, parent.width)
-                        text: qsTr("Cancel")
-                        onClicked: disableDependentsConfirmation.reject()
-                    }
-                    PilonWrapButton {
-                        objectName: "confirmDisableDependents"
-                        width: Math.min(implicitWidth, parent.width)
-                        text: qsTr("Disable add-ons")
-                        onClicked: {
-                            disableDependentsConfirmation.answer(true)
-                            disableDependentsConfirmation.close()
-                        }
-                    }
-                }
-            }
-        }
     }
 
     PilonColourDialog {
@@ -1717,9 +1640,8 @@ Window {
         readonly property bool prompting: sshManager.promptKind !== Backend.SshManager.NoPrompt
         readonly property bool hostConfirmation: sshManager.promptKind === Backend.SshManager.HostTrustPrompt
         readonly property bool connecting: sshManager.connecting
-        readonly property bool failed: sshManager.errorMessage.length > 0
-        readonly property string details: failed ? sshManager.errorDetails : sshManager.connectionText
-        property bool showErrorDetails: false
+        readonly property string details: sshManager.connectionText
+        contentSizedWindow: hostConfirmation
         property real lastPromptRevision: -1
 
         function refresh() {
@@ -1729,9 +1651,12 @@ Window {
                 saveSshPassword.checked = false
                 lastPromptRevision = sshManager.promptRevision
             }
-            if (prompting || connecting || failed) {
+            if (prompting || connecting) {
                 open()
-                if (prompting && !hostConfirmation && changed) sshPromptInput.forceActiveFocus()
+                if (prompting && changed) {
+                    if (hostConfirmation) sshCancel.forceActiveFocus(Qt.PopupFocusReason)
+                    else sshPromptInput.forceActiveFocus()
+                }
             } else close()
         }
         function submit() {
@@ -1758,8 +1683,7 @@ Window {
         focus: modal
         closePolicy: Popup.CloseOnEscape
         onClosed: {
-            if (sshManager.connecting) sshManager.disconnectFromHost()
-            else if (failed) sshManager.dismissError()
+            if (sshManager.connecting || prompting) sshManager.disconnectFromHost()
         }
         palette: window.palette
         background: Rectangle {
@@ -1788,19 +1712,9 @@ Window {
                     return result + Math.max(0, count - 1) * spacing
                 }
                 Label {
-                    objectName: "sshErrorSummary"
-                    Layout.fillWidth: true
-                    visible: sshLoginNotification.failed
-                    text: sshManager.errorMessage
-                    textFormat: Text.PlainText
-                    color: window.selectedWarningColour
-                    wrapMode: Text.Wrap; maximumLineCount: 3; elide: Text.ElideRight
-                    Accessible.name: qsTr("SSH connection error")
-                }
-                Label {
                     Layout.fillWidth: true
                     visible: sshLoginNotification.prompting || (sshLoginNotification.connecting
-                        && !sshLoginNotification.failed && sshLoginNotification.details.length === 0)
+                        && sshLoginNotification.details.length === 0)
                     text: sshLoginNotification.prompting ? sshManager.promptText : qsTr("Connecting…")
                     textFormat: Text.PlainText
                     color: window.selectedTextColour
@@ -1810,7 +1724,6 @@ Window {
                     id: sshDetailsScroll
                     objectName: "sshConnectionDetailsScroll"
                     visible: sshLoginNotification.details.length > 0
-                        && (!sshLoginNotification.failed || sshLoginNotification.showErrorDetails)
                     Layout.fillWidth: true; Layout.fillHeight: true
                     Layout.minimumHeight: 0
                     Layout.preferredHeight: Math.min(220, sshConnectionDetails.implicitHeight,
@@ -1823,21 +1736,14 @@ Window {
                         id: sshConnectionDetails
                         objectName: "sshConnectionDetails"
                         width: sshDetailsScroll.availableWidth
-                        text: sshLoginNotification.failed ? sshLoginNotification.details
-                            : sshLoginNotification.linkedText(sshLoginNotification.details)
-                        textFormat: sshLoginNotification.failed ? TextEdit.PlainText : TextEdit.RichText
+                        text: sshLoginNotification.linkedText(sshLoginNotification.details)
+                        textFormat: TextEdit.RichText
                         wrapMode: TextEdit.Wrap
                         readOnly: true; selectByMouse: true; padding: 0
                         background: null
                         Accessible.name: qsTr("SSH connection details")
                         onLinkActivated: link => Qt.openUrlExternally(link)
                     }
-                }
-                PilonButton {
-                    objectName: "sshErrorDetailsToggle"
-                    visible: sshLoginNotification.failed && sshLoginNotification.details.length > 0
-                    text: sshLoginNotification.showErrorDetails ? qsTr("Hide details") : qsTr("Show details")
-                    onClicked: sshLoginNotification.showErrorDetails = !sshLoginNotification.showErrorDetails
                 }
                 PilonTextField {
                     id: sshPromptInput
@@ -1858,7 +1764,7 @@ Window {
                 }
                 Flow {
                     Layout.fillWidth: true
-                    visible: sshLoginNotification.connecting || sshLoginNotification.prompting || sshLoginNotification.failed
+                    visible: sshLoginNotification.connecting || sshLoginNotification.prompting
                     layoutDirection: Qt.RightToLeft
                     spacing: 8
                     PilonButton {
@@ -1871,21 +1777,11 @@ Window {
                         onClicked: sshLoginNotification.submit()
                     }
                     PilonButton {
-                        objectName: "sshRetryConnection"
-                        visible: sshLoginNotification.failed && sshManager.canRetry && !sshManager.running
-                        width: Math.min(implicitWidth, parent.width)
-                        text: qsTr("Retry")
-                        highlighted: true
-                        onClicked: sshManager.retryConnection()
-                    }
-                    PilonButton {
+                        id: sshCancel
                         objectName: "sshCancelConnection"
                         width: Math.min(implicitWidth, parent.width)
-                        text: sshLoginNotification.connecting ? qsTr("Cancel") : qsTr("Dismiss")
-                        onClicked: {
-                            if (sshLoginNotification.connecting) sshManager.disconnectFromHost()
-                            else sshLoginNotification.close()
-                        }
+                        text: qsTr("Cancel")
+                        onClicked: sshLoginNotification.close()
                     }
                 }
             }
@@ -1896,10 +1792,6 @@ Window {
             function onPromptChanged() { Qt.callLater(sshLoginNotification.refresh) }
             function onConnectionTextChanged() { Qt.callLater(sshLoginNotification.refresh) }
             function onConnectingChanged() { Qt.callLater(sshLoginNotification.refresh) }
-            function onErrorMessageChanged() {
-                sshLoginNotification.showErrorDetails = false
-                Qt.callLater(sshLoginNotification.refresh)
-            }
             function onAuthenticatedChanged() {
                 if (sshManager.authenticated) sshLoginNotification.close()
             }

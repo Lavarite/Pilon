@@ -386,14 +386,11 @@ FilePickerWindow {
                     function onSaved() { if (setup.awaitingSharingSave) Qt.callLater(setup.finishAfterSharingSave) }
                     function onSaveFailed() { setup.awaitingSharingSave = false }
                 }
-                Label {
+                PilonErrorPopup {
                     objectName: "setupError"
-                    Layout.fillWidth: true
-                    visible: text.length > 0
-                    text: setup.message
-                    color: setup.palette.windowText
-                    wrapMode: Text.Wrap
-                    Accessible.name: text
+                    owner: panel
+                    message: setup.message
+                    onDismissed: setup.message = ""
                 }
                 GridLayout {
                     id: actions

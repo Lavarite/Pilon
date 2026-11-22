@@ -66,6 +66,7 @@ public:
     Q_INVOKABLE void dismissError();
     Q_INVOKABLE QString cleanupBlockedReason() const;
     Q_INVOKABLE bool forgetPasswords();
+    Q_INVOKABLE QString clearSavedPasswords();
     Q_INVOKABLE void submitPrompt(const QString &input);
     Q_INVOKABLE void submitPromptAndSave(const QString &input);
     Q_INVOKABLE void trustHost();

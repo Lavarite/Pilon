@@ -23,7 +23,7 @@ PilonScrollView {
     signal folderRequested(string path)
     readonly property string operationError: calendar.error || ""
     onOperationErrorChanged: if (active && operationError) showIssue(operationError)
-    function showIssue(message) { syncIssue.message = message; syncIssue.open() }
+    function showIssue(message, setupUrl = "") { syncIssue.setupUrl = setupUrl; syncIssue.message = message }
     function accountIssue(account) {
         const messages = []
         if (account.status && account.status !== qsTr("Connected")) messages.push(account.status)
@@ -92,8 +92,7 @@ PilonScrollView {
                                 objectName: "calendarSyncIssue-" + accountRow.modelData.id
                                 text: qsTr("Sync details"); visible: !!page.accountIssue(accountRow.modelData)
                                 onClicked: {
-                                    syncIssue.setupUrl = accountRow.modelData.setupUrl || ""
-                                    page.showIssue(page.accountIssue(accountRow.modelData))
+                                    page.showIssue(page.accountIssue(accountRow.modelData), accountRow.modelData.setupUrl || "")
                                 }
                             }
                             SettingsButton {
@@ -206,29 +205,16 @@ PilonScrollView {
             }
         }
     }
-    PilonDialog {
+    PilonErrorPopup {
         id: syncIssue
         objectName: "calendarSyncDetails"
-        property string message: ""
+        owner: page
         property string setupUrl: ""
-        palette: page.palette
-        parent: page.Overlay.overlay; x: (parent.width-width)/2; y: (parent.height-height)/2
-        width: Math.min(480, parent.width-32); modal: true; title: qsTr("Calendar sync")
-        onClosed: setupUrl = ""
-        height: Math.min(implicitHeight, parent.height - 32)
-        contentItem: PilonScrollView {
-            id: syncScroll
-            implicitHeight: syncFields.implicitHeight
-            contentWidth: availableWidth; clip: true
-            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-            Column {
-                id: syncFields
-                width: syncScroll.availableWidth; spacing: 8
-                Label { width: parent.width; text: syncIssue.message; color: page.textColour; wrapMode: Text.Wrap }
-                SettingsButton { visible: !!syncIssue.setupUrl; text: qsTr("Enable Google Calendar API"); onClicked: Qt.openUrlExternally(syncIssue.setupUrl) }
-                SettingsButton { objectName: "calendarRetrySync"; text: qsTr("Retry sync"); enabled: !page.calendar.syncing; onClicked: { syncIssue.close(); page.calendar.retrySync() } }
-            }
-        }
+        actionText: page.calendar.syncing ? "" : qsTr("Retry sync")
+        onActionRequested: { message = ""; page.calendar.retrySync() }
+        secondaryActionText: setupUrl ? qsTr("Enable Google Calendar API") : ""
+        onSecondaryActionRequested: Qt.openUrlExternally(setupUrl)
+        onDismissed: message = ""
     }
     PilonDialog {
         palette: page.palette
@@ -283,26 +269,20 @@ PilonScrollView {
         }
         onAccepted:{page.calendar.addFeed(feedUrl.text,feedName.text);feedUrl.clear()}
     }
-    PilonDialog {
-        palette: page.palette
-        id:disconnectPopup
+    PilonConfirmation {
+        id: disconnectPopup
         objectName: "calendarSignOutConfirmation"
-        property string accountId:""
+        property string accountId: ""
         property string accountName: ""
         property bool isFeed: false
         property bool isIcs: false
-        parent:page.Overlay.overlay;x:(parent.width-width)/2;y:(parent.height-height)/2;width:Math.min(480,parent.width-32);modal:true
+        parent: page.Overlay.overlay
+        palette: page.palette
+        preferredWidth: 480
         title: isIcs ? qsTr("Remove %1?").arg(accountName) : isFeed ? qsTr("Unsubscribe from %1?").arg(accountName) : qsTr("Sign out of %1?").arg(accountName)
-        standardButtons:Dialog.Cancel|Dialog.Ok
-        height: Math.min(implicitHeight, parent.height - 32)
-        contentItem: PilonScrollView {
-            id: disconnectScroll
-            implicitHeight: disconnectMessage.implicitHeight
-            contentWidth: availableWidth; clip: true
-            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-            Label {id:disconnectMessage;width:disconnectScroll.availableWidth;wrapMode:Text.Wrap;color:page.textColour;text:disconnectPopup.isIcs ? qsTr("This removes the imported calendar and its events from Pilon. The original ICS file is unchanged.") : qsTr("This removes cached external events and credentials from Pilon. Locally created events remain. Unsynced external changes are discarded; remote calendars are not deleted.")}
-        }
-        onOpened: standardButton(Dialog.Ok).text = isIcs ? qsTr("Remove source") : isFeed ? qsTr("Unsubscribe") : qsTr("Sign out")
-        onAccepted:page.calendar.disconnectAccount(accountId)
+        message: isIcs ? qsTr("This removes the imported calendar and its events from Pilon. The original ICS file is unchanged.")
+            : qsTr("This removes cached external events and credentials from Pilon. Locally created events remain. Unsynced external changes are discarded; remote calendars are not deleted.")
+        confirmText: isIcs ? qsTr("Remove source") : isFeed ? qsTr("Unsubscribe") : qsTr("Sign out")
+        onAccepted: page.calendar.disconnectAccount(accountId)
     }
 }

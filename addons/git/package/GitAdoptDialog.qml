@@ -54,6 +54,12 @@ PilonDialog {
             else error = typeof value === "string" ? value : qsTr("The folder could not be changed.")
         }).catch(problem => { if (ticket === generation) { busy = false; error = String(problem) } })
     }
+    PilonErrorPopup {
+        objectName: "gitAdoptError"
+        owner: dialog.contentItem
+        message: dialog.visible ? dialog.error : ""
+        onDismissed: dialog.error = ""
+    }
     contentItem: PilonScrollView {
         id: scroll
         contentWidth: availableWidth; contentHeight: body.implicitHeight; clip: true
@@ -103,10 +109,9 @@ PilonDialog {
                 color: dialog.palette.windowText
             }
             Label {
-                objectName: "gitAdoptError"
                 width: body.width; wrapMode: Text.Wrap; textFormat: Text.PlainText
-                visible: !!dialog.error || dialog.busy
-                text: dialog.error || qsTr("Changing folder…")
+                visible: dialog.busy
+                text: qsTr("Changing folder…")
                 color: dialog.palette.windowText
             }
             PilonWrapButton {

@@ -9,6 +9,28 @@ PilonPopup {
     objectName: "calendarSharesDialog"
     required property var calendar
     required property string initialFrom
+    property string selectedError: ""
+    property bool revoking: false
+    readonly property bool sharingBusy: calendar.sharingBusy
+    function settleRequest() {
+        if (sharingBusy) return
+        if (revoking) {
+            revoking = false
+            selectedError = calendar.sharingError
+        } else if (creation.creating && calendar.sharingError) {
+            creation.creating = false
+            linkPopup.close()
+            creation.error = calendar.sharingError
+        }
+    }
+    onSharingBusyChanged: if (!sharingBusy) Qt.callLater(settleRequest)
+    onClosed: { revoking = false; selectedError = "" }
+    PilonErrorPopup {
+        objectName: "calendarSharesError"
+        owner: manager.contentItem
+        message: manager.visible ? manager.selectedError : ""
+        onDismissed: manager.selectedError = ""
+    }
     required property string initialThrough
     width: Math.min(560, parent.width - 32)
     height: Math.min(sharesContents.implicitHeight + topPadding + bottomPadding, parent.height - 32)
@@ -60,6 +82,12 @@ PilonPopup {
                                     onTriggered: { actions.dismiss(); linkPopup.show(linkButton.modelData.id) }
                                 }
                                 PilonMenuItem {
+                                    objectName: "calendarShareError-" + linkButton.modelData.id
+                                    shown: !!linkButton.modelData.error
+                                    text: qsTr("Show error")
+                                    onTriggered: { actions.dismiss(); manager.selectedError = linkButton.modelData.error }
+                                }
+                                PilonMenuItem {
                                     objectName: "calendarRenameShare-" + linkButton.modelData.id
                                     text: qsTr("Rename")
                                     onTriggered: {
@@ -73,24 +101,24 @@ PilonPopup {
                                     objectName: "calendarRevokeShare-" + linkButton.modelData.id
                                     text: qsTr("Stop sharing")
                                     enabled: !manager.calendar.sharingBusy
-                                    onTriggered: { actions.dismiss(); manager.calendar.revokeShare(linkButton.modelData.id) }
+                                    onTriggered: {
+                                        actions.dismiss()
+                                        manager.selectedError = ""
+                                        manager.revoking = true
+                                        manager.calendar.revokeShare(linkButton.modelData.id)
+                                        manager.settleRequest()
+                                    }
                                 }
                             }
                         }
                         Label {
                             objectName: "calendarShareStatus-" + linkButton.modelData.id
                             Layout.fillWidth: true; Layout.minimumWidth: 0
-                            visible: !!linkButton.modelData.error || !!linkButton.modelData.pending
-                            text: linkButton.modelData.error || qsTr("Waiting to publish this link.")
+                            visible: !!linkButton.modelData.pending
+                            text: qsTr("Waiting to publish this link.")
                             color: manager.palette.text; wrapMode: Text.Wrap
                         }
                     }
-                }
-                Label {
-                    visible: manager.calendar.sharingError.length > 0
-                        && !manager.calendar.shares.some(share => share.error === manager.calendar.sharingError)
-                    text: manager.calendar.sharingError; color: manager.palette.text
-                    Layout.fillWidth: true; wrapMode: Text.Wrap
                 }
             }
         }
@@ -101,7 +129,21 @@ PilonPopup {
         width: Math.min(560, manager.parent.width - 32)
         height: Math.min(contentItem.contentHeight + topPadding + bottomPadding, manager.parent.height - 32)
         calendar: manager.calendar; initialFrom: manager.initialFrom; initialThrough: manager.initialThrough
-        onCreationRequested: linkPopup.start()
+        property bool creating: false
+        property string error: ""
+        onClosed: { creating = false; error = "" }
+        onCreationRequested: {
+            error = ""
+            creating = true
+            linkPopup.start()
+            Qt.callLater(manager.settleRequest)
+        }
+        PilonErrorPopup {
+            objectName: "calendarShareCreationError"
+            owner: creation.contentItem
+            message: creation.visible ? creation.error : ""
+            onDismissed: creation.error = ""
+        }
         onLinkCreated: id => linkPopup.show(id)
     }
     PilonPopup {
@@ -129,7 +171,7 @@ PilonPopup {
                 Label {
                     objectName: "calendarShareResult"
                     visible: !linkPopup.linkId
-                    text: manager.calendar.sharingBusy ? qsTr("Creating link…") : manager.calendar.sharingError
+                    text: manager.calendar.sharingBusy ? qsTr("Creating link…") : ""
                     color: linkPopup.palette.text; Layout.fillWidth: true; Layout.minimumWidth: 0; wrapMode: Text.Wrap
                 }
                 PilonTextField { id: linkField; objectName: "calendarShareLink"; visible: !!linkPopup.linkId; Layout.fillWidth: true; Layout.minimumWidth: 0; readOnly: true; selectByMouse: true }
@@ -139,6 +181,13 @@ PilonPopup {
     }
     PilonPopup {
         id: renamePopup; objectName: "calendarRenameSharePopup"
+        property string error: ""
+        PilonErrorPopup {
+            owner: renamePopup.contentItem
+            message: renamePopup.visible ? renamePopup.error : ""
+            onDismissed: renamePopup.error = ""
+        }
+        onClosed: error = ""
         parent: manager.contentItem; palette: manager.palette
         property string linkId: ""
         width: Math.min(360, parent.width - 32)
@@ -158,9 +207,11 @@ PilonPopup {
                 CalendarButton {
                     objectName: "calendarSaveShareName"; text: qsTr("Rename")
                     enabled: renameName.text.trim().length > 0
-                    onClicked: if (manager.calendar.renameShare(renamePopup.linkId, renameName.text)) renamePopup.close()
+                    onClicked: {
+                        if (manager.calendar.renameShare(renamePopup.linkId, renameName.text)) renamePopup.close()
+                        else renamePopup.error = manager.calendar.sharingError
+                    }
                 }
-                Label { visible: manager.calendar.sharingError.length > 0; text: manager.calendar.sharingError; color: renamePopup.palette.text; Layout.fillWidth: true; wrapMode: Text.Wrap }
             }
         }
     }

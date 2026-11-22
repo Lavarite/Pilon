@@ -226,20 +226,25 @@ QString SshManager::cleanupBlockedReason() const
 
 bool SshManager::forgetPasswords()
 {
+    const QString error = clearSavedPasswords();
+    setErrorMessage(error);
+    return error.isEmpty();
+}
+
+QString SshManager::clearSavedPasswords()
+{
     const auto blocked = cleanupBlockedReason();
-    if (!blocked.isEmpty()) { setErrorMessage(blocked); return false; }
+    if (!blocked.isEmpty()) return blocked;
 #ifdef Q_OS_ANDROID
     if (!AndroidCredentials::request("clear", {{"application", "pilon"}, {"protocol", "ssh"}}).ok) {
-        setErrorMessage(tr("Unable to forget saved SSH passwords. Unlock your system keyring and try again."));
-        return false;
+        return tr("Unable to forget saved SSH passwords. Unlock your system keyring and try again.");
     }
     ++m_promptRevision;
     m_loadingPassword = false;
     if (m_promptKind == PasswordPrompt) emit promptChanged();
 #else
     if (m_secretToolExecutable.isEmpty()) {
-        setErrorMessage(tr("Install secret-tool (libsecret) to remove saved SSH passwords, then try again."));
-        return false;
+        return tr("Install secret-tool (libsecret) to remove saved SSH passwords, then try again.");
     }
     QProcess process;
     process.start(m_secretToolExecutable, {"clear", "application", "pilon", "protocol", "ssh"});
@@ -247,15 +252,13 @@ bool SshManager::forgetPasswords()
     const bool noMatches = process.exitCode() == 1 && process.readAllStandardError().trimmed().isEmpty();
     if (process.error() == QProcess::FailedToStart || process.exitStatus() != QProcess::NormalExit
         || (process.exitCode() != 0 && !noMatches)) {
-        setErrorMessage(tr("Unable to forget saved SSH passwords. Unlock your system keyring and try again."));
-        return false;
+        return tr("Unable to forget saved SSH passwords. Unlock your system keyring and try again.");
     }
 #endif
     SshCredentials::clear();
     NetworkSnapshot::clear("sftp");
     NetworkSnapshot::clear("sftp-sizes");
-    setErrorMessage({});
-    return true;
+    return {};
 }
 
 void SshManager::connectToHost(const QString &usernameInput, const QString &hostInput)

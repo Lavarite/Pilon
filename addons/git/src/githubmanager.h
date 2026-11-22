@@ -24,6 +24,7 @@ class GitHubManager : public QObject {
     Q_PROPERTY(QString account READ account NOTIFY changed)
     Q_PROPERTY(QString loginCode READ loginCode NOTIFY changed)
     Q_PROPERTY(QString error READ error NOTIFY changed)
+    Q_PROPERTY(quint64 errorRevision READ errorRevision NOTIFY changed)
     Q_PROPERTY(QString notice READ notice NOTIFY changed)
     Q_PROPERTY(QVariantList repositories READ repositories NOTIFY changed)
     Q_PROPERTY(QVariantList localRepositories READ localRepositories NOTIFY changed)
@@ -58,6 +59,7 @@ public:
     QString account() const { return m_account; }
     QString loginCode() const { return m_loginCode; }
     QString error() const { return m_error; }
+    quint64 errorRevision() const { return m_errorRevision; }
     QString notice() const { return m_notice; }
     QVariantList repositories() const { return m_repositories; }
     QVariantList localRepositories() const;
@@ -147,6 +149,7 @@ private:
     void git(const QStringList &args, Done done);
     bool begin(bool requireGit = true);
     bool check(int code, const QByteArray &error);
+    void recordError(const QString &message);
     void fail(const QString &message);
     void finish(const QString &message = {});
     void loadRepositories();
@@ -210,6 +213,7 @@ private:
     Done m_done;
     QByteArray m_output, m_errors;
     QString m_git, m_gh, m_glab, m_account, m_loginCode, m_loginUrl, m_error, m_notice;
+    quint64 m_errorRevision = 0;
     QString m_provider, m_host, m_sshKey;
     QString m_activeProvider;
     QVariantList m_providers;

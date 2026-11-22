@@ -47,6 +47,7 @@ Item {
     readonly property color warningTextColour: fileWorkspace.warningTextColour
     property string artifactToReveal: ""
     property bool artifactBrowsePending: false
+    property bool errorInPreview: false
     property var selectedEntries: []
     property var displayedEntries: []
     property string displayedLocation: ""
@@ -1028,46 +1029,13 @@ Item {
             wrapMode: Text.Wrap
         }
 
-        Item {
-            id: operationError
+        PilonErrorPopup {
             objectName: "fileOperationError"
-            readonly property var source: filesPage.remoteFiles.errorMessage ? filesPage.remoteFiles
+            owner: fileMainPane
+            readonly property var source: !filesPage.errorInPreview && filesPage.remoteFiles.errorMessage ? filesPage.remoteFiles
                 : filesPage.fileWorkspace.shareErrorOwner === filesPage.remoteFiles ? filesPage.fileWorkspace.shareManager : null
-            visible: !!source && !!source.errorMessage && !source.promptText
-            anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
-            anchors.leftMargin: 12; anchors.rightMargin: 8
-            height: visible ? Math.min(144, Math.max(0, fileMainPane.height - fileColumns.height - savedListingStatus.height) * .4,
-                Math.max(dismissError.implicitHeight, errorText.implicitHeight) + 8) : 0
-            PilonScrollView {
-                id: errorScroll
-                objectName: "fileOperationErrorScroll"
-                anchors.left: parent.left; anchors.right: dismissError.left; anchors.rightMargin: 8
-                anchors.verticalCenter: parent.verticalCenter
-                height: Math.min(errorText.implicitHeight, Math.max(0, parent.height - 8))
-                contentHeight: errorText.implicitHeight
-                PilonTextArea {
-                    id: errorText
-                    objectName: "fileOperationErrorMessage"
-                    width: errorScroll.availableWidth; padding: 0; rightPadding: 8; background: null
-                    readOnly: true; wrapMode: TextEdit.Wrap; textFormat: TextEdit.PlainText
-                    text: operationError.source ? operationError.source.errorMessage : ""
-                    color: filesPage.warningColour
-                    Accessible.role: Accessible.AlertMessage
-                    onTextChanged: if (errorScroll.contentItem) errorScroll.contentItem.contentY = 0
-                }
-            }
-            PilonCloseButton {
-                id: dismissError
-                objectName: "dismissFileOperationError"
-                anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
-                height: Math.min(implicitHeight, parent.height)
-                focusPolicy: Qt.TabFocus
-                text: qsTr("Dismiss error")
-                onClicked: {
-                    if (activeFocus) fileEntryList.forceActiveFocus(Qt.OtherFocusReason)
-                    if (operationError.source) operationError.source.dismissError()
-                }
-            }
+            message: source && !source.promptText ? source.errorMessage : ""
+            onDismissed: if (source) source.dismissError()
         }
 
         GridView {
@@ -1077,7 +1045,7 @@ Item {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: fileColumns.bottom
-            anchors.bottom: operationError.top
+            anchors.bottom: parent.bottom
             anchors.leftMargin: 8
             anchors.rightMargin: 8
             anchors.bottomMargin: 8
@@ -1821,7 +1789,7 @@ Item {
             onClicked: {
                 const selected = filesPage.selectedEntries.slice()
                 fileContextMenu.close()
-                fileActionPopup.showDelete(selected)
+                deleteFiles.showDelete(selected)
             }
         }
 
@@ -1889,18 +1857,42 @@ Item {
 
     }
 
+    PilonConfirmation {
+        id: deleteFiles
+        objectName: "fileDeleteConfirmation"
+        parent: filesPage.workspace.Overlay.overlay
+        preferredWidth: 420
+        palette: filesPage.palette
+        property var entries: []
+        message: entries.length === 1
+            ? (entries[0].directory ? qsTr("Permanently delete %1 and all of its contents?") : qsTr("Permanently delete %1?")).arg(entries[0].name)
+            : qsTr("Permanently delete %1 selected items and any directory contents?").arg(entries.length)
+        confirmText: qsTr("Delete")
+        cancelButton.objectName: "cancelFileDelete"
+        confirmButton.objectName: "confirmFileDelete"
+        confirmButton.palette.button: filesPage.warningColour
+        confirmButton.palette.buttonText: filesPage.warningTextColour
+        function showDelete(selected) {
+            if (!selected.length) return
+            entries = selected.slice()
+            open()
+        }
+        onAccepted: {
+            filesPage.usernameCommitted(filesPage.operationUsername())
+            filesPage.remoteFiles.deleteEntries(entries, filesPage.usernameForEntry(entries[0]))
+        }
+    }
+
     PilonPopup {
         id: fileActionPopup
         objectName: "fileActionPopup"
 
         property string mode: ""
         property var entry: null
-        property var entries: []
 
         function showCreateDirectory() {
             mode = "mkdir"
             entry = null
-            entries = []
             fileActionInput.clear()
             open()
             fileActionInput.forceActiveFocus()
@@ -1909,7 +1901,6 @@ Item {
         function showMove(selected) {
             mode = "move"
             entry = selected
-            entries = [selected]
             fileActionInput.text = selected.path
             open()
             fileActionInput.selectAll()
@@ -1918,19 +1909,10 @@ Item {
         function showRename(selected) {
             mode = "rename"
             entry = selected
-            entries = [selected]
             fileActionInput.text = selected.name
             open()
             fileActionInput.selectAll()
             fileActionInput.forceActiveFocus()
-        }
-
-        function showDelete(selected) {
-            mode = "delete"
-            entries = selected.slice()
-            entry = entries.length === 1 ? entries[0] : null
-            fileActionInput.clear()
-            open()
         }
 
         function performAction() {
@@ -1946,9 +1928,6 @@ Item {
                                                 fileActionInput.text)
             } else if (mode === "rename" && entry !== null) {
                 filesPage.remoteFiles.renameEntry(entry, filesPage.usernameForEntry(entry), fileActionInput.text)
-            } else if (mode === "delete" && entries.length > 0) {
-                filesPage.remoteFiles.deleteEntries(entries,
-                                                    filesPage.usernameForEntry(entries[0]))
             }
             close()
         }
@@ -1965,9 +1944,7 @@ Item {
         background: Rectangle {
             radius: 12
             color: filesPage.withOpacity(filesPage.secondaryColour, 0.98)
-            border.color: filesPage.withOpacity(fileActionPopup.mode === "delete"
-                                                ? filesPage.warningColour
-                                                : filesPage.textColour, 0.42)
+            border.color: filesPage.withOpacity(filesPage.textColour, 0.42)
         }
 
         contentItem: PilonScrollView {
@@ -1980,20 +1957,9 @@ Item {
 
                 Label {
                     width: parent.width
-                    text: fileActionPopup.mode === "mkdir"
-                          ? qsTr("New folder")
-                            : fileActionPopup.mode === "move"
-                            ? qsTr("Move") : fileActionPopup.mode === "rename" ? qsTr("Rename")
-                            : fileActionPopup.entries.length === 1
-                              ? fileActionPopup.entries[0].directory
-                                ? qsTr("Permanently delete %1 and all of its contents?")
-                                      .arg(fileActionPopup.entries[0].name)
-                                : qsTr("Permanently delete %1?")
-                                      .arg(fileActionPopup.entries[0].name)
-                              : qsTr("Permanently delete %1 selected items and any directory contents?")
-                                    .arg(fileActionPopup.entries.length)
-                    color: fileActionPopup.mode === "delete"
-                           ? filesPage.warningColour : filesPage.textColour
+                    text: fileActionPopup.mode === "mkdir" ? qsTr("New folder")
+                        : fileActionPopup.mode === "move" ? qsTr("Move") : qsTr("Rename")
+                    color: filesPage.textColour
                     wrapMode: Text.Wrap
                 }
 
@@ -2002,8 +1968,7 @@ Item {
                     objectName: "fileActionInput"
 
                     width: parent.width
-                    height: visible ? 42 : 0
-                    visible: fileActionPopup.mode !== "delete"
+                    height: 42
                     placeholderText: fileActionPopup.mode === "mkdir"
                                      ? qsTr("Folder name") : fileActionPopup.mode === "rename" ? qsTr("Name") : qsTr("Destination path")
                     placeholderTextColor: filesPage.mutedTextColour
@@ -2036,15 +2001,11 @@ Item {
 
                     PilonWrapButton {
                         objectName: "confirmFileAction"
-                        text: fileActionPopup.mode === "mkdir"
-                              ? qsTr("Create folder") : fileActionPopup.mode === "move"
-                                ? qsTr("Move") : fileActionPopup.mode === "rename" ? qsTr("Rename") : qsTr("Delete")
-                        palette.button: fileActionPopup.mode === "delete"
-                                    ? filesPage.warningColour : filesPage.accentColour
-                        palette.buttonText: fileActionPopup.mode === "delete"
-                                          ? filesPage.warningTextColour : filesPage.accentTextColour
-                        enabled: fileActionPopup.mode === "delete"
-                                 || fileActionInput.text.trim().length > 0
+                        text: fileActionPopup.mode === "mkdir" ? qsTr("Create folder")
+                            : fileActionPopup.mode === "move" ? qsTr("Move") : qsTr("Rename")
+                        palette.button: filesPage.accentColour
+                        palette.buttonText: filesPage.accentTextColour
+                        enabled: fileActionInput.text.trim().length > 0
                         onClicked: fileActionPopup.performAction()
                     }
                 }
@@ -2112,7 +2073,7 @@ Item {
         action: "delete"
         active: filesPage.keyboardActive && !filesPage.cachedListing && fileEntryList.activeFocus
                  && filesPage.selectedEntries.length > 0 && !filesPage.remoteFiles.busy
-        onActivated: fileActionPopup.showDelete(filesPage.selectedEntries)
+        onActivated: deleteFiles.showDelete(filesPage.selectedEntries)
     }
 
     AppShortcut {

@@ -274,8 +274,9 @@ TestCase {
         verify(!mockAddons.isEnabled(ids.provider)); verify(!mockAddons.isEnabled(ids.consumer))
         const before=JSON.stringify(setup.draftAddonChoices)
         click("addonEnabled-"+ids.provider)
-        tryVerify(()=>!!control("setupAddons").operationErrors[ids.provider])
-        verify(control("setupAddons").operationErrors[ids.provider].indexOf("Z Consumer")>=0)
+        tryVerify(()=>!!control("addonOperationError").message)
+        verify(control("addonOperationError").message.indexOf("Z Consumer")>=0)
+        control("addonOperationError").dismiss()
         compare(JSON.stringify(setup.draftAddonChoices),before)
         verify(control("addonEnabled-"+ids.provider).checked)
         click(data.all ? "setupSkipAll" : "setupSkipSection")
@@ -371,8 +372,8 @@ TestCase {
         click("setupNext"); click("importAddon")
         mockFiles.selectionCallback(["file:///tmp/first.piext","file:///tmp/bad.piext","file:///tmp/last.piext"])
         compare(mockAddons.installed.length,3)
-        const error=control("addonImportError")
-        verify(error.visible); verify(error.text.indexOf("bad.piext") >= 0); verify(error.text.indexOf("Invalid package") >= 0)
+        const error=control("addonOperationError")
+        verify(error.visible); verify(error.message.indexOf("bad.piext") >= 0); verify(error.message.indexOf("Invalid package") >= 0)
         compare(mockAddons.changes.length,0); compare(setup.step,1)
     }
     function test_cancelledAddonSelectionKeepsChoices() {
@@ -423,7 +424,13 @@ TestCase {
             }
             return null
         }
-        const labels = [control("setupSection"), actionsLabel(setup.contentItem), control("setupError")]
+        const labels = [control("setupSection"), actionsLabel(setup.contentItem)]
+        const popup = control("setupError")
+        tryCompare(popup, "opened", true)
+        const message = findChild(popup.contentItem, "pilonErrorMessage")
+        verify(message.visible)
+        compare(message.Accessible.name, setup.message)
+        fuzzyCompare(message.color, popup.palette.buttonText, 1 / 65535)
         owner.palette.windowText = "#d8c7b7"
         render()
         for (const label of labels) {
@@ -574,8 +581,8 @@ TestCase {
         compare(mockCalendar.savedSharingServer, "https://calendar.example.test/")
         compare(mockCalendar.savedSharingKey, "unsaved-publisher-key")
         compare(control("sharingPublisherKey").text, "unsaved-publisher-key")
-        compare(control("sharingConfigurationStatus").text, "Rejected test key")
-        verify(control("sharingConfigurationStatus").visible)
+        compare(control("sharingConfigurationError").message, "Rejected test key")
+        tryCompare(control("sharingConfigurationError"), "opened", true)
     }
     function test_successfulSharingSaveClearsKeyAndNormalizesServer() {
         mockCalendar.sharingSaveSucceeds = true
@@ -624,8 +631,8 @@ TestCase {
         compare(mockCalendar.savedSharingServer, data.server); compare(mockCalendar.savedSharingKey, data.key)
         compare(server.text, data.server); compare(control("sharingPublisherKey").text, data.key)
         compare(mockCalendar.sharingServer, "https://saved.example.test"); verify(mockCalendar.sharingConfigured)
-        compare(control("sharingConfigurationStatus").text, "Rejected test key")
-        verify(control("sharingConfigurationStatus").visible)
+        compare(control("sharingConfigurationError").message, "Rejected test key")
+        tryCompare(control("sharingConfigurationError"), "opened", true)
     }
     function test_successfulSharingFinishSavesAndCompletesOnce_data() {
         return [{tag:"immediate",deferred:false},{tag:"pending",deferred:true}]

@@ -17,6 +17,12 @@ PilonScrollView {
     property string deviceError: ""
     property bool trustedX11: addon.setting("trustedX11Forwarding", false) === true
     property string x11Error: ""
+    property string passwordError: ""
+    PilonErrorPopup {
+        owner: page
+        message: page.deviceError || page.passwordError || page.x11Error
+        onDismissed: { page.deviceError = ""; page.passwordError = ""; page.x11Error = "" }
+    }
     readonly property bool editing: deviceDraft !== null
     readonly property bool addingDevice: editing && deviceDraft.id === ""
     readonly property string editingDeviceId: deviceDraft?.id || ""
@@ -39,7 +45,8 @@ PilonScrollView {
     }
 
     function removeSavedDevice(id, position) {
-        if (!manager.removeDevice(id)) return
+        if (!manager.removeDevice(id)) { deviceError = manager.errorMessage; return }
+        deviceError = ""
         Qt.callLater(function() {
             const next = devices.itemAt(Math.min(position, devices.count - 1))
             if (next) next.includeButton.forceActiveFocus()
@@ -83,10 +90,10 @@ PilonScrollView {
         }
         Label {
             Layout.fillWidth: true
-            visible: !!page.x11Error || !x11.enabled || x11.checked
-            text: page.x11Error || (x11.enabled ? qsTr("Remote programs can access your X11 display and input.")
+            visible: !x11.enabled || x11.checked
+            text: (x11.enabled ? qsTr("Remote programs can access your X11 display and input.")
                 : qsTr("No local X11 display is available."))
-            color: page.x11Error ? page.addon.selectedWarningColour : page.addon.selectedTextColour
+            color: page.addon.selectedTextColour
             wrapMode: Text.Wrap
         }
         PilonSectionHeader { Layout.fillWidth: true; text: qsTr("Devices") }
@@ -224,12 +231,7 @@ PilonScrollView {
             objectName:"sshForgetPasswords"
             Layout.maximumWidth:page.availableWidth
             text:qsTr("Forget saved passwords")
-            onClicked:page.addon.sshManager.forgetPasswords()
-        }
-        Label {
-            Layout.fillWidth:true;wrapMode:Text.Wrap;textFormat:Text.PlainText
-            visible:text.length>0;text:page.addon.sshManager.errorMessage
-            color:page.addon.selectedWarningColour
+            onClicked: page.passwordError = page.addon.sshManager.clearSavedPasswords()
         }
     }
 
@@ -276,14 +278,6 @@ PilonScrollView {
             id: cancelButton
             text: qsTr("Cancel")
             onClicked: page.finishDeviceEdit()
-        }
-        Label {
-            Layout.columnSpan: form.columns
-            Layout.fillWidth: true; Layout.minimumWidth: 0
-            wrapMode: Text.Wrap; textFormat: Text.PlainText
-            visible: text.length > 0
-            text: page.deviceError
-            color: page.addon.selectedWarningColour
         }
     }
 }

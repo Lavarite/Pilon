@@ -19,6 +19,8 @@ TestCase {
         property string account: "tester"
         property string loginCode: ""
         property string error: ""
+        property int errorRevision: 0
+        onErrorChanged: if (error) ++errorRevision
         property string notice: ""
         property string cloneDirectory: "/home/tester/Projects"
         property string commitName: "Test User"
@@ -165,7 +167,13 @@ TestCase {
         }
         function removeProviderRecord(id) {providers=providers.filter(p=>p.id !== id);activeProvider=providers.length ? providers[0].id : "";changed()}
         function selectRemote(url) { repository = {name: "group/project", remote: url}; changed() }
-        function saveRemote(url) { repository = Object.assign({}, repository, {remote: url}); changed() }
+        function saveRemote(url) {
+            if (url === "oops" || url === "still-invalid") {
+                if (error === "Enter a valid repository URL.") ++errorRevision
+                else error = "Enter a valid repository URL."
+            } else repository = Object.assign({}, repository, {remote: url})
+            changed()
+        }
     }
     QtObject {
         id: fakeWorkspace
@@ -519,7 +527,8 @@ TestCase {
         fakeWorkspace.selectionCallback("/chosen/copies");compare(fakeManager.versionExports.length,1)
         compare(fakeManager.versionExports[0].destination,"/chosen/copies/inspected version.pin")
         compare(fakeManager.versionExports[0].side,"incoming");fakeManager.completeVersionExport(false)
-        verify(dialog.visible);compare(filename.text,"inspected version.pin");verify(previewControl(dialog,"gitConflictPreviewStatus","incoming").text.indexOf("destination already exists") >= 0)
+        verify(dialog.visible);compare(filename.text,"inspected version.pin");const error=findChild(dialog,"gitConflictExportError")
+        tryCompare(error,"opened",true);verify(error.message.indexOf("destination already exists") >= 0);error.dismiss()
         save.clicked();fakeWorkspace.selectionCallback("/chosen/copies");fakeManager.completeVersionExport(true)
         verify(previewControl(dialog,"gitConflictPreviewStatus","incoming").text.indexOf("/chosen/copies/inspected version.pin") >= 0)
         picker.currentIndex=0;picker.activated(0);compare(fakeManager.previewReads.length,2)
@@ -662,16 +671,21 @@ TestCase {
         verify(recover.visible);compare(recover.text,"Recover update")
         clickControl(recover);compare(fakeManager.recovers,1)
     }
-    function test_newOperationErrorScrollsIntoViewWithoutReleasingLease() {
+    function test_operationErrorPreservesScrollFocusAndLease() {
         setSize(320,300);beginConflict(true)
         selectConflict(pane,"other/Removed.txt")
         const last=findChild(pane,"gitConflictIncoming_other/Removed.txt")
         reveal(last);last.forceActiveFocus();wait(30)
         const scroll=findChild(pane,"gitPaneScroll")
         verify(scroll.contentItem.contentY>0)
+        const originalY = scroll.contentItem.contentY, formHeight = scroll.height
         fakeManager.error="Unable to read the chosen version. Retry after restoring the file.";fakeManager.changed()
-        tryCompare(scroll.contentItem,"contentY",0)
-        compare(findChild(pane,"gitOperationStatus").text,fakeManager.error)
+        const failure = findChild(pane,"gitOperationError")
+        tryCompare(failure, "opened", true)
+        compare(failure.message, fakeManager.error)
+        compare(scroll.contentItem.contentY, originalY); compare(scroll.height, formHeight)
+        verify(last.activeFocus); verify(!failure.modal && !failure.dim)
+        failure.dismiss()
         verify(fakeManager.worktreeLeaseActive);compare(fakeManager.phase,"conflicted")
     }
     function test_conflictActionsAtNativeSizes_data() {
@@ -815,9 +829,7 @@ TestCase {
                 {label: labelWithText(pane, fakeManager.repository.name), owner: pane, role: "windowText"},
                 {label: labelWithText(pane, qsTr("Branch: %1").arg("main")), owner: pane, role: "windowText"},
                 {label: findChild(pane, "gitChangeName_" + path), owner: findChild(pane, "gitChangeRow_" + path), role: "buttonText"},
-                {label: findChild(preview, "gitFilePreviewTitle"), owner: owner, role: "windowText"},
-                {label: labelWithText(preview, "Fixture preview failed"), owner: owner, role: "windowText"},
-                {label: findChild(adopt, "gitAdoptError"), owner: adopt, role: "windowText"}
+                {label: findChild(preview, "gitFilePreviewTitle"), owner: owner, role: "windowText"}
             ]
             for (const check of checks) {
                 verify(check.label && check.owner)
@@ -826,6 +838,9 @@ TestCase {
             }
             owner.palette.windowText = "#f1e7d8"; owner.palette.buttonText = "#f1e7d8"
             for (const check of checks) compare(check.label.color, check.owner.palette[check.role])
+            const failure = findChild(adopt, "gitAdoptError")
+            tryCompare(failure, "opened", true)
+            compare(findChild(failure.contentItem, "pilonErrorMessage").text, adopt.error)
             adopt.close()
         } finally {
             owner.palette.window = original.window
@@ -862,6 +877,28 @@ TestCase {
         verify(settings);findChild(settings,"gitAddCustom").clicked();waitForPolish(settings)
         return settings
     }
+    function test_identicalValidationFailuresReopenOnlyForExplicitSaves_data() {
+        return [{tag: "settings", standalone: true}, {tag: "repository", standalone: false}]
+    }
+    function test_identicalValidationFailuresReopenOnlyForExplicitSaves(data) {
+        const form = data.standalone ? customSettings() : pane
+        if (data.standalone) pane.visible = false
+        else pane.currentTab = 2
+        const remote = findChild(form, "gitRemote"), save = findChild(form, "gitSaveRemote")
+        const failure = findChild(form, data.standalone ? "gitSettingsError" : "gitOperationError")
+        for (const value of ["oops", "still-invalid"]) {
+            remote.text = value
+            save.clicked()
+            tryCompare(failure, "opened", true)
+            compare(failure.message, "Enter a valid repository URL.")
+            compare(remote.text, value)
+            failure.dismiss()
+            tryCompare(failure, "opened", false)
+            fakeManager.changed()
+            verify(!failure.visible)
+        }
+        pane.visible = true
+    }
     function test_customCredentialsSaveExplicitlyAndKeepDraftsOnFailure() {
         const settings=customSettings()
         const url=findChild(settings,"gitCredentialUrl"), user=findChild(settings,"gitCredentialUsername"), token=findChild(settings,"gitCredentialToken")
@@ -893,7 +930,7 @@ TestCase {
         compare(findChild(settings,"gitCredentialToken").text,"unsaved-replacement")
         fakeManager.available=false
         signOut.clicked();fakeManager.completeCredentialErase(false)
-        compare(findChild(settings,"gitSettingsError").text,fakeManager.error)
+        compare(findChild(settings,"gitSettingsError").message,fakeManager.error)
         signOut.clicked();fakeManager.completeCredentialErase(true)
         compare(fakeManager.credentialUrl,"");compare(findChild(settings,"gitCredentialToken").text,"")
         verify(!findChild(settings,"gitCredentialSignOut").visible)
@@ -928,7 +965,8 @@ TestCase {
             compare(token.echoMode,TextInput.Password)
             const save=findChild(content,"gitSaveCredentials")
             reveal(save);save.forceActiveFocus();keyClick(Qt.Key_Space);compare(fakeManager.credentialRequests,1)
-            fakeManager.completeCredentialSave(false);compare(token.text,"fake-test-token");wait(20)
+            fakeManager.completeCredentialSave(false);compare(token.text,"fake-test-token")
+            const error=findChild(content,"gitOperationError");tryCompare(error,"opened",true);error.dismiss()
             clickControl(save);compare(fakeManager.credentialRequests,2);fakeManager.completeCredentialSave(true);compare(token.text,"")
             reveal(findChild(content,"gitCredentialUrl"))
             verify(tabletInput.saveWindow(host.contentItem,"/tmp/pilon-git-credentials-"+data.tag+".png"))
@@ -950,7 +988,7 @@ TestCase {
         verify(attributes.readOnly && ignores.readOnly);compare(attributes.textFormat,Text.PlainText);compare(ignores.textFormat,Text.PlainText)
         const apply=findChild(dialog,"gitApplyManagedPolicy");apply.clicked();compare(fakeManager.policyRequests,1)
         compare(JSON.stringify(fakeManager.policyFolders),JSON.stringify(fakeWorkspace.managedFolders));verify(!apply.enabled)
-        fakeManager.completeManagedPolicy(false);verify(dialog.visible);compare(findChild(dialog,"gitManagedPolicyStatus").text,fakeManager.error)
+        fakeManager.completeManagedPolicy(false);verify(dialog.visible);compare(findChild(dialog,"gitManagedPolicyError").message,fakeManager.error)
         apply.clicked();compare(fakeManager.policyRequests,2);fakeManager.completeManagedPolicy(true);tryCompare(dialog,"visible",false)
         compare(fakeManager.pushes,0);compare(fakeManager.committed.message,undefined)
         fakeManager.repository=({});verify(!review.visible)
@@ -961,7 +999,7 @@ TestCase {
         fakeManager.repository=Object.assign({},fakeManager.repository,{localPath:"/another/checkout"});fakeManager.changed()
         findChild(dialog,"gitApplyManagedPolicy").clicked()
         compare(fakeManager.policyRequests,0);verify(dialog.visible)
-        verify(findChild(dialog,"gitManagedPolicyStatus").text.indexOf("repository changed") >= 0)
+        verify(findChild(dialog,"gitManagedPolicyError").message.indexOf("repository changed") >= 0)
         dialog.close()
     }
     function test_managedPolicyAtNativeSizes_data() {return test_conflictActionsAtNativeSizes_data()}
@@ -983,6 +1021,7 @@ TestCase {
             }
             const apply=findChild(dialog,"gitApplyManagedPolicy");reveal(apply);apply.forceActiveFocus();keyClick(Qt.Key_Space)
             compare(fakeManager.policyRequests,1);fakeManager.completeManagedPolicy(false);verify(dialog.visible)
+            const error=findChild(dialog,"gitManagedPolicyError");tryCompare(error,"opened",true);error.dismiss()
             clickControl(apply);fakeManager.completeManagedPolicy(true);tryCompare(dialog,"visible",false)
             dialog.review(["notes"]);tryCompare(dialog,"visible",true)
             tryCompare(findChild(dialog,"gitManagedPolicyScroll").contentItem,"contentY",0)

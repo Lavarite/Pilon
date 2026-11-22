@@ -13,6 +13,7 @@ ColumnLayout {
     required property color textColour
     property color mutedTextColour: textColour
     property bool showError: true
+    readonly property bool reviewingPolicy: policyDialog.visible
     property bool showRepository: true
     property bool identityOnly: false
     readonly property var managedFolders: manager.repository.localPath && typeof workspace.gitManagedFolders === "function" ? workspace.gitManagedFolders(manager.repository.localPath) : []
@@ -318,11 +319,16 @@ ColumnLayout {
             Label { objectName: "gitIdentityClosing"; text: ">"; textFormat: Text.PlainText; color: settings.textColour }
         }
     }
-    Label {
+    Git.GitManagerError {
         objectName: "gitSettingsError"
+        owner: settings
+        manager: settings.manager
+        receiving: settings.visible && settings.showError && !settings.reviewingPolicy
+    }
+    Label {
         Layout.fillWidth: true; wrapMode: Text.Wrap
-        visible: settings.showError && (!settings.manager.available || !!settings.manager.error)
-        text: settings.manager.error || (!settings.manager.available ? qsTr("Install git to use repository actions.") : "")
+        visible: settings.showError && !settings.manager.available
+        text: qsTr("Install git to use repository actions.")
         color: settings.textColour
     }
 }

@@ -66,7 +66,9 @@ TestCase {
         tryCompare(dialog, "busy", false)
         compare(calls.length, 1); compare(calls[0].copy, true)
         verify(dialog.opened); compare(dialog.selectedDirectory, "/checkout/Notes")
-        compare(findChild(dialog, "gitAdoptError").text, result)
+        const failure = findChild(dialog, "gitAdoptError")
+        tryCompare(failure, "opened", true); compare(failure.message, result)
+        mouseClick(findChild(failure.contentItem, "dismissPilonError")); tryCompare(failure, "opened", false)
         mode.currentIndex = 0; result = true
         reveal(apply); mouseClick(apply)
         tryCompare(dialog, "opened", false); compare(calls[1].copy, false)

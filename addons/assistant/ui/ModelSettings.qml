@@ -39,6 +39,13 @@ PilonScrollView {
         target: settings.Window.window
         function onVisibleChanged() { if (settings.runtimeActive && settings.visible && settings.Window.window.visible && settings.connections) settings.connections.refreshUsage() }
     }
+    PilonErrorPopup {
+        objectName: "modelOperationError"
+        owner: apiEditor.opened && settings.connections?.error ? apiEditor.contentItem : settings
+        readonly property var source: settings.connections?.error ? settings.connections : settings.catalog
+        message: settings.visible ? source?.error || "" : ""
+        onDismissed: if (source) source.dismissError()
+    }
     function alpha(colour, opacity) { return Qt.rgba(colour.r, colour.g, colour.b, opacity) }
 
     component Modalities: Flow {
@@ -202,7 +209,6 @@ PilonScrollView {
                     Label { id: capabilityStatus; width: parent.width; wrapMode: Text.Wrap; color: settings.mutedTextColour }
 
                 }
-                Label { width: parent.width; wrapMode: Text.Wrap; text: settings.connections ? settings.connections.error : ""; visible: text.length > 0; color: settings.warningColour }
                 Flow {
                     width: parent.width; spacing: 8
                     Action { objectName: "saveApiServer"; text: qsTr("Save"); enabled: apiContext.acceptableInput && apiModel.text.trim().length > 0 && !settings.assistant.busy; onClicked: {
@@ -316,7 +322,6 @@ PilonScrollView {
             }
 
             Action { objectName: "addApiServer"; text: qsTr("Add API server"); enabled: !settings.assistant.busy; onClicked: apiEditor.edit(null) }
-            Label { width: parent.width; wrapMode: Text.Wrap; text: settings.connections ? settings.connections.error : ""; visible: text.length > 0; color: settings.warningColour }
         }
         PilonSectionHeader { objectName: "modelsLocalSection"; width: parent.width; text: qsTr("Local models") }
         Flow {
@@ -609,19 +614,14 @@ PilonScrollView {
                     Label {
                         width: parent.width
                         visible: text.length > 0
-                        text: settings.catalog.error || settings.catalog.status
-                        color: settings.catalog.error ? settings.warningColour : settings.mutedTextColour
+                        text: settings.catalog.status
+                        color: settings.mutedTextColour
                         wrapMode: Text.Wrap
                     }
                 }
             }
         }
-        Label {
-            width: parent.width
-            visible: !addCard.editing && text.length > 0
-            text: settings.catalog.error
-            color: settings.warningColour; wrapMode: Text.Wrap
-        }
+
         PilonSectionHeader { width: parent.width; visible: (settings.catalog.supportModels || []).length > 0; text: qsTr("Supporting models") }
         Repeater {
             model: settings.catalog.supportModels || []

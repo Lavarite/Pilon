@@ -146,6 +146,7 @@ public:
     Q_INVOKABLE void stop();
     Q_INVOKABLE void approveAction(bool approved);
     Q_INVOKABLE void answerQuestions(const QVariantMap &answers);
+    Q_INVOKABLE void dismissError();
     Q_INVOKABLE void clear();
     Q_INVOKABLE void addAttachments(const QList<QUrl> &urls);
     Q_INVOKABLE void removeAttachment(int index);
