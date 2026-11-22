@@ -1,7 +1,6 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
-import QtQuick.Controls.impl as ControlsImpl
 import "ui"
 
 FilePickerWindow {
@@ -67,7 +66,7 @@ FilePickerWindow {
                     contentY = Math.max(0, Math.min(contentHeight - height, target))
                 }
             }
-            ScrollBar.vertical: ScrollBar { policy: browserViewport.interactive ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff }
+            ScrollBar.vertical: PilonScrollBar { policy: browserViewport.interactive ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff }
             Loader {
                 id: browser
                 objectName: selector.pickerLoaderName
@@ -123,7 +122,7 @@ FilePickerWindow {
                 SelectorButton {
                     id: acceptAction
                     text: selector.acceptText; objectName: selector.acceptObjectName
-                    enabled: selector.acceptEnabled; accented: true
+                    enabled: selector.acceptEnabled && selector.remoteFiles.cachedListing !== true; highlighted: true
                     onClicked: selector.accepted()
                 }
             }
@@ -131,25 +130,13 @@ FilePickerWindow {
     }
 
     component SelectorButton: PilonButton {
-        id: button
-        property bool accented: false
-        readonly property color foreground: accented ? selector.workspace.accentTextColour : selector.workspace.textColour
+        palette.button: selector.workspace.secondaryColour
+        palette.buttonText: selector.workspace.textColour
+        palette.highlight: selector.workspace.accentColour
+        palette.highlightedText: selector.workspace.accentTextColour
         width: actions.width < selector.footerActionsImplicitWidth ? actions.width
             : selector.secondaryAction ? Math.ceil(implicitWidth) : (actions.width - actions.spacing) / 2
         height: 38
         leftPadding: selector.secondaryAction ? 4 : 6; rightPadding: leftPadding
-        contentItem: ControlsImpl.IconLabel {
-            text: button.text
-            display: button.display; icon: button.icon; spacing: button.spacing
-            font: button.font; mirrored: button.mirrored
-            color: button.foreground
-            defaultIconColor: button.foreground
-            alignment: Qt.AlignCenter
-        }
-        background: Rectangle {
-            radius: 8; opacity: button.enabled ? 1 : .45
-            color: button.accented ? selector.workspace.accentColour
-                : selector.workspace.withOpacity(selector.workspace.textColour, button.down ? .18 : button.hovered ? .12 : .07)
-        }
     }
 }

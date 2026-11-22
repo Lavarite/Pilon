@@ -124,6 +124,7 @@ TestCase {
         property string currentDeviceId: "fixture"
         property string currentPath: "/fixture"
         property string errorMessage: ""
+        function dismissError() { errorMessage = "" }
         property string promptText: ""
         property string promptKind: ""
         property var dragged: []
@@ -1916,10 +1917,8 @@ TestCase {
             }
             verify(tabletInput.saveWindow(host.contentItem,"/tmp/pilon-file-access-"+data.tag+".png"))
             mouseClick(findChild(accessPopup,"cancelFileAccess"));tryCompare(accessPopup,"opened",false)
-            accessFiles.errorMessage="Connection ended";tryCompare(accessPopup,"opened",true)
-            host.update();verify(waitForRendering(host.contentItem))
-            const close=findChild(host.contentItem,"windowCloseButton")
-            verify(close.mapToItem(host.contentItem,close.width,close.height).y<=host.height+1)
+            accessFiles.errorMessage="Connection ended"
+            verify(!accessPopup.opened && !host.visible)
         } finally {
             accessFiles.cancelPrompt();accessFiles.errorMessage="";accessPopup.close();accessPopup.parent=parent
             scaledViewerHost.close();tabletInput.setScreenGeometry(screen)
@@ -1942,14 +1941,78 @@ TestCase {
         tryCompare(accessPopup.dialogWindow, "visible", false)
         // A later error update must not resurrect the cancelled password box.
         accessFiles.errorMessage = "Connection ended"
-        tryCompare(accessPopup, "opened", true)
-        compare(accessPopup.modal, false)
-        verify(waitForRendering(accessPopup.contentItem))
-        verify(tabletInput.saveWindow(accessPopup.contentItem,"/tmp/pilon-file-access-error.png"))
-        accessPopup.close()
+        verify(!accessPopup.opened && !accessPopup.dialogWindow.visible)
         const input = findChild(page, "fileLocationInput")
         mouseClick(input)
         tryCompare(input, "activeFocus", true)
+    }
+    function test_fileErrorsStayInlineAndCanRepeat_data() {
+        return [{tag:"phone", width:320, font:24}, {tag:"desktop", width:900, font:16}]
+    }
+    function test_fileErrorsStayInlineAndCanRepeat(data) {
+        const oldWidth = test.width
+        test.width = data.width
+        try {
+            const list = findChild(page, "fileEntriesView")
+            const error = findChild(page, "fileOperationError")
+            verify(error !== null)
+            const text = findChild(error, "fileOperationErrorMessage")
+            const close = findChild(error, "dismissFileOperationError")
+            const scroll = findChild(error, "fileOperationErrorScroll")
+            const originalFont = text.font
+            try {
+                text.font = Qt.font({pixelSize:data.font})
+                list.forceActiveFocus()
+                tryCompare(list, "activeFocus", true)
+                const message = "Cannot delete /" + "a-long-directory-name/".repeat(85) + "file: permission denied."
+                for (let attempt = 0; attempt < 2; ++attempt) {
+                    files.errorMessage = message
+                    tryCompare(error, "visible", true)
+                    verify(list.activeFocus)
+                    compare(text.text, message)
+                    verify(list.height >= error.height)
+                    verify(scroll.contentItem.contentHeight > scroll.contentItem.height)
+                    verify(!accessPopup.opened)
+                    verify(close.width >= 32 && close.height >= 32)
+                    if (attempt === 0) {
+                        verify(tabletInput.saveWindow(page, "/tmp/pilon-files-inline-error-" + data.tag + ".png"))
+                        mouseWheel(scroll.contentItem, 4, 4, 0, -120)
+                        tryVerify(() => scroll.contentItem.contentY > 0)
+                    }
+                    if (attempt === 0) mouseClick(close)
+                    else { close.forceActiveFocus(Qt.TabFocusReason); keyClick(Qt.Key_Space) }
+                    tryCompare(error, "visible", false)
+                    compare(files.errorMessage, "")
+                    verify(list.activeFocus)
+                }
+            } finally { text.font = originalFont }
+        } finally { files.errorMessage = ""; test.width = oldWidth }
+    }
+    function test_fileAndPickerErrorsStayWithTheirOperation() {
+        sharedFiles.uploadFiles(page)
+        const upload = findWorkspaceChild("fileUploadWindow")
+        tryCompare(upload, "opened", true)
+        const pickerError = findChild(upload.picker, "fileOperationError")
+        const pageError = findChild(page, "fileOperationError")
+        try {
+            sharedFiles.uploadManager.errorMessage = "Unable to open the upload source folder."
+            tryCompare(pickerError, "visible", true)
+            verify(!pageError.visible)
+            const close = findChild(pickerError, "dismissFileOperationError")
+            mouseClick(close)
+            tryCompare(pickerError, "visible", false)
+            verify(upload.opened)
+        } finally { sharedFiles.uploadManager.dismissError(); upload.close() }
+
+        const entry = {name:"report", path:"/example/report", deviceId:"local", directory:false}
+        sharedFiles.shareEntry(entry, "local-user", files)
+        try {
+            sharedFiles.shareManager.errorMessage = "Unable to open the system share menu."
+            tryCompare(pageError, "visible", true)
+            compare(findChild(pageError, "fileOperationErrorMessage").text, sharedFiles.shareManager.errorMessage)
+            mouseClick(findChild(pageError, "dismissFileOperationError"))
+            tryCompare(sharedFiles.shareManager, "errorMessage", "")
+        } finally { sharedFiles.shareManager.dismissError() }
     }
     function test_remote_export_keeps_window_open_for_credentials() {
         sharedFiles.exportNote(exportNote)

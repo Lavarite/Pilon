@@ -11,9 +11,9 @@ PilonPopup {
     readonly property bool prompting: remoteFiles !== null && remoteFiles.promptText.length > 0
     readonly property bool credentialPrompt: remoteFiles !== null && remoteFiles.promptKind === "credential"
     parent: workspace.Overlay.overlay
-    x: Math.round((parent.width - width) / 2)
-    y: Math.round((parent.height - height) / 2)
-    width: Math.min(440, parent.width - 32)
+    x: parent ? Math.round((parent.width - width) / 2) : 0
+    y: parent ? Math.round((parent.height - height) / 2) : 0
+    width: parent ? Math.min(440, Math.max(0, parent.width - 32)) : 440
     height: Math.min(implicitHeight, maximumContentHeight)
     padding: 16
     modal: prompting; focus: prompting
@@ -30,8 +30,7 @@ PilonPopup {
             credential.clear(); savePassword.checked = false
             open()
             if (credentialPrompt) credential.forceActiveFocus()
-        } else if (remoteFiles.errorMessage) open()
-        else close()
+        } else close()
     }
     function submit() {
         if (!credentialPrompt) remoteFiles.acceptHostKey()
@@ -46,7 +45,7 @@ PilonPopup {
     }
     contentItem: ColumnLayout {
         spacing: 12
-        ScrollView {
+        PilonScrollView {
             id: messageScroll
             Layout.fillWidth: true; Layout.fillHeight: true; Layout.minimumHeight: 0
             Layout.preferredHeight: Math.min(280, message.contentHeight)
@@ -55,9 +54,9 @@ PilonPopup {
                 id: message
                 objectName: "fileAccessMessage"
                 width: messageScroll.availableWidth; padding: 0; background: null
-                text: dialog.remoteFiles ? (dialog.prompting ? dialog.remoteFiles.promptText : dialog.remoteFiles.errorMessage) : ""
+                text: dialog.remoteFiles ? dialog.remoteFiles.promptText : ""
                 readOnly: true; selectByMouse: true; wrapMode: Text.WrapAnywhere
-                color: dialog.prompting ? dialog.workspace.textColour : dialog.workspace.warningColour
+                color: dialog.workspace.textColour
             }
         }
         PilonTextField {
@@ -83,6 +82,5 @@ PilonPopup {
     Connections {
         target: dialog.remoteFiles
         function onPromptChanged() { dialog.refresh() }
-        function onErrorMessageChanged() { dialog.refresh() }
     }
 }
