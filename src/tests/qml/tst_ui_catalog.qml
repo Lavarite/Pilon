@@ -38,7 +38,7 @@ TestCase {
             width: owner.width / owner.uiScale; height: owner.height / owner.uiScale
             scale: owner.uiScale; transformOrigin: Item.TopLeft
             padding: 16; font.pixelSize: owner.typeSize
-            contentItem: ScrollView {
+            contentItem: UI.PilonScrollView {
                 id: scroll
                 contentWidth: availableWidth; clip: true
                 ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
@@ -129,6 +129,12 @@ TestCase {
         verify(waitForRendering(surface))
         verify(tabletInput.saveWindow(surface, path))
     }
+    function topBorderColour(item) {
+        const point = item.mapToItem(owner.contentItem, item.width / 2, 0)
+        verify(point.x >= 0 && point.x < owner.width && point.y >= 0 && point.y < owner.height,
+               "The focus border is inside the rendered window")
+        return tabletInput.pixelAt(item, item.width / 2, 0)
+    }
     function init() {
         failOnWarning(/(Binding loop|ReferenceError|TypeError|Cannot assign|Unable to assign|Cannot open:|Error:)/)
         actionCount = 0; menuCount = 0
@@ -138,6 +144,24 @@ TestCase {
         formHelp = false; formRow.label = "Storage folder"
     }
     function cleanup() { menu.close(); owner.hide() }
+    Component {
+        id: scrollRangeProbe
+        UI.PilonScrollView { width: 180; height: 120; contentHeight: 120 }
+    }
+    function test_scrollbarsFollowActualOverflow() {
+        owner.show()
+        const form = createTemporaryObject(scrollRangeProbe, surface)
+        verify(form)
+        const bar = form.ScrollBar.vertical
+        tryCompare(bar, "visible", false)
+        form.contentHeight = 120.25
+        tryCompare(bar, "visible", false)
+        form.contentHeight = 145
+        tryCompare(bar, "visible", true)
+        form.height = 150
+        tryCompare(bar, "visible", false)
+        compare(form.ScrollBar.horizontal.visible, false)
+    }
     function test_expandedNavigationWrapsLabelsWithIcons() {
         owner.width = 420; owner.height = 480; owner.uiScale = 1; owner.typeSize = 28; owner.lightTheme = false
         scroll.visible = false
@@ -254,20 +278,20 @@ TestCase {
         reveal(assistantAction); mouseClick(assistantAction); compare(actionCount, 4)
         mouseClick(cancelAction); compare(actionCount, 5)
         reveal(panelAction); mouseClick(panelAction); compare(actionCount, 6)
-        field.forceActiveFocus(); reveal(assistantAction)
+        surface.forceActiveFocus(); reveal(assistantAction)
         mouseMove(surface, surface.width - 2, 2)
         capture("/tmp/pilon-ui-catalog-" + data.tag + "-before-focus.png")
-        const unfocused = tabletInput.pixelAt(assistantAction, assistantAction.width / 2, 0)
+        const unfocused = topBorderColour(assistantAction)
         assistantAction.forceActiveFocus(Qt.TabFocusReason)
         capture("/tmp/pilon-ui-catalog-" + data.tag + "-focus.png")
-        const focused = tabletInput.pixelAt(assistantAction, assistantAction.width / 2, 0)
+        const focused = topBorderColour(assistantAction)
         verify(!Qt.colorEqual(unfocused, focused), "Keyboard focus is visible in every theme and scale")
-        reveal(panelAction); field.forceActiveFocus()
+        surface.forceActiveFocus(); reveal(panelAction)
         capture("/tmp/pilon-ui-catalog-" + data.tag + "-panel-before-focus.png")
-        const panelUnfocused = tabletInput.pixelAt(panelAction, panelAction.width / 2, 0)
+        const panelUnfocused = topBorderColour(panelAction)
         panelAction.forceActiveFocus(Qt.TabFocusReason)
         capture("/tmp/pilon-ui-catalog-" + data.tag + "-panel-focus.png")
-        verify(!Qt.colorEqual(panelUnfocused, tabletInput.pixelAt(panelAction, panelAction.width / 2, 0)),
+        verify(!Qt.colorEqual(panelUnfocused, topBorderColour(panelAction)),
                "Panel actions preserve keyboard focus in every theme and scale")
         reveal(menuButton); mouseClick(menuButton)
         tryCompare(menu, "opened", true)

@@ -7,10 +7,9 @@ Basic.TextArea {
     color: palette.text; placeholderTextColor: palette.placeholderText
     selectionColor: palette.highlight; selectedTextColor: palette.highlightedText
     selectByMouse: true
-    background: Rectangle {
-        radius: 8
+    background: PilonControlFrame {
+        owner: control
         color: Qt.alpha(control.palette.text, .06)
-        border.color: Qt.alpha(control.palette.text, control.activeFocus ? .48 : .2)
-        opacity: control.enabled ? 1 : .4
+        outline: control.palette.text
     }
 }

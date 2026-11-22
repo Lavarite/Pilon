@@ -8,7 +8,7 @@ import QtMultimedia
 import Pilon
 import Pilon as Backend
 
-ScrollView {
+PilonScrollView {
     required property var addon
     id: notesSettings
     anchors.fill: parent

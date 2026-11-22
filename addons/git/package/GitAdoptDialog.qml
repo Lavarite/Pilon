@@ -23,9 +23,22 @@ PilonDialog {
     modal: true
     closePolicy: busy ? Popup.NoAutoClose : Popup.CloseOnEscape
     readonly property string addonName: ownerName || addonId
+    property bool initialFocusPending: false
+    function focusInitialAction() {
+        if (initialFocusPending && dialogWindow.active) {
+            initialFocusPending = false
+            choose.forceActiveFocus(Qt.OtherFocusReason)
+        }
+    }
+    Connections {
+        target: dialog.dialogWindow
+        function onActiveChanged() { dialog.focusInitialAction() }
+    }
+    onClosed: initialFocusPending = false
     onOpened: {
         generation++; selectedDirectory = ""; error = ""; busy = false; mode.currentIndex = 0
-        choose.forceActiveFocus(Qt.PopupFocusReason)
+        initialFocusPending = true
+        focusInitialAction()
     }
     function apply() {
         if (busy || !selectedDirectory) return

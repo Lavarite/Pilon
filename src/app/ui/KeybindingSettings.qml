@@ -6,7 +6,7 @@ import QtQuick.Controls.impl as ControlsImpl
 import Pilon as Backend
 import "ui"
 
-ScrollView {
+PilonScrollView {
     id: settings
     palette.window: secondaryColour; palette.base: secondaryColour; palette.button: secondaryColour
     palette.text: textColour; palette.windowText: textColour; palette.buttonText: textColour

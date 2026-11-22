@@ -399,67 +399,16 @@ Control {
     onVisibleChanged: if (!visible) { pointerHoldKey = -1; saveCurrentNote() }
     onEditingChanged: { if (!editing) pointerHoldKey = -1; captureNoteView() }
 
-    component StyledButton: LocalComponents.PilonButton {
-        id: button
-        property color fillColour: page.secondaryColour
-        property color foregroundColour: page.textColour
-        icon.color: foregroundColour
-        implicitHeight: 36
+    component StyledButton: LocalComponents.PilonPanelButton {
+        fillColour: page.secondaryColour
+        foregroundColour: page.textColour
+        implicitHeight: Math.max(36, implicitContentHeight + topPadding + bottomPadding)
         leftPadding: display === AbstractButton.IconOnly ? 6 : 12; rightPadding: leftPadding
         topPadding: 6; bottomPadding: 6
-        contentItem: ControlsImpl.IconLabel {
-            icon: button.icon; text: button.text; font: button.font
-            spacing: button.spacing; display: button.display
-            defaultIconColor: button.foregroundColour; color: button.foregroundColour
-            alignment: Qt.AlignCenter
-            opacity: button.enabled ? 1 : .45
-        }
-        background: Rectangle {
-            radius: 8
-            color: button.down ? Qt.darker(button.fillColour, 1.12)
-                : button.hovered ? Qt.lighter(button.fillColour, 1.08) : button.fillColour
-            border.color: page.withOpacity(button.foregroundColour, button.activeFocus ? .48 : .2)
-        }
     }
-    component StyledField: LocalComponents.PilonTextField {
-        id: field
-        color: page.textColour
-        placeholderTextColor: page.mutedTextColour
-        selectionColor: page.accentColour
-        selectedTextColor: page.accentTextColour
-        selectByMouse: true
-        leftPadding: 10; rightPadding: 10
-        implicitHeight: 36
-        background: Rectangle {
-            radius: 8
-            color: page.withOpacity(page.textColour, .06)
-            border.color: page.withOpacity(page.textColour, field.activeFocus ? .48 : .2)
-        }
-    }
-    component StyledCombo: LocalComponents.PilonComboBox {
-        id: combo
-        implicitHeight: 36
-        palette.text: page.textColour
-        palette.buttonText: page.textColour
-        palette.button: page.secondaryColour
-        palette.base: page.secondaryColour
-        palette.window: page.secondaryColour
-        palette.windowText: page.textColour
-        palette.highlight: page.accentColour
-        palette.highlightedText: page.accentTextColour
-        background: Rectangle {
-            radius: 8; color: page.secondaryColour
-            border.color: page.withOpacity(page.textColour, combo.activeFocus ? .48 : .2)
-        }
-    }
-    component StyledSpinBox: LocalComponents.PilonSpinBox {
-        implicitHeight: 36
-        palette.text: page.textColour; palette.buttonText: page.textColour
-        palette.button: page.secondaryColour; palette.base: page.secondaryColour
-        palette.window: page.secondaryColour; palette.windowText: page.textColour
-        palette.highlight: page.accentColour; palette.highlightedText: page.accentTextColour
-        background: Rectangle { radius: 8; color: page.secondaryColour; border.color: page.withOpacity(page.textColour, .22) }
-    }
+    component StyledField: LocalComponents.PilonTextField {}
+    component StyledCombo: LocalComponents.PilonComboBox {}
+    component StyledSpinBox: LocalComponents.PilonSpinBox {}
     component StyledMenuItem: LocalComponents.PilonMenuItem {}
     component StyledMenu: LocalComponents.PilonMenu {
         width: Math.min(240, maximumContentWidth)
@@ -659,7 +608,7 @@ Control {
                 cellWidth: width / Math.max(1, Math.floor(width / (190 + page.libraryZoomLevel * 18)))
                 cellHeight: 236 + page.libraryZoomLevel * 16
                 model: libraryRows
-                ScrollBar.vertical: ScrollBar { id: libraryScrollBar; objectName: "noteLibraryScrollBar" }
+                ScrollBar.vertical: PilonScrollBar { id: libraryScrollBar; objectName: "noteLibraryScrollBar" }
                 MouseArea {
                     id: librarySelection
                     objectName: "noteLibrarySelection"
@@ -907,7 +856,7 @@ Control {
             height: Math.min(headerActions.implicitHeight, Math.max(36, notePane.height / 4))
             contentWidth: width; contentHeight: headerActions.implicitHeight
             clip: true; interactive: contentHeight > height
-            ScrollBar.vertical: ScrollBar { id: headerScrollBar }
+            ScrollBar.vertical: PilonScrollBar { id: headerScrollBar }
             Flow {
                 id: headerActions
                 objectName: "noteHeaderActions"
@@ -1009,7 +958,7 @@ Control {
                     target: page.Window.window
                     function onActiveFocusItemChanged() { Qt.callLater(toolScroller.revealFocus) }
                 }
-                ScrollBar.horizontal: ScrollBar {
+                ScrollBar.horizontal: PilonScrollBar {
                     id: toolScrollBar
                     parent: toolScroller.parent
                     anchors.left: toolScroller.left; anchors.right: toolScroller.right; anchors.bottom: parent.bottom
@@ -1192,8 +1141,8 @@ Control {
             boundsBehavior: Flickable.StopAtBounds
             flickableDirection: Flickable.HorizontalAndVerticalFlick
             interactive: false
-            ScrollBar.vertical: ScrollBar { z: 5; interactive: !ink.viewLocked && !ink.stylusDown }
-            ScrollBar.horizontal: ScrollBar { z: 5; interactive: !ink.viewLocked && !ink.stylusDown }
+            ScrollBar.vertical: PilonScrollBar { z: 5; interactive: !ink.viewLocked && !ink.stylusDown }
+            ScrollBar.horizontal: PilonScrollBar { z: 5; interactive: !ink.viewLocked && !ink.stylusDown }
             NoteCanvas {
                 id: ink
                 objectName: "noteCanvas"
@@ -1383,7 +1332,7 @@ Control {
         onOpened: page.notes.clearError()
         onClosed: noteId = ""
         height: Math.min(folderOptions.implicitHeight + topPadding + bottomPadding, maximumContentHeight)
-        contentItem: ScrollView {
+        contentItem: PilonScrollView {
             id: folderDialogScroller
             objectName: "folderDialogScroller"
             clip: true
@@ -1438,7 +1387,7 @@ Control {
             })
         }
         height: Math.min(moveOptions.implicitHeight + topPadding + bottomPadding, maximumContentHeight)
-        contentItem: ScrollView {
+        contentItem: PilonScrollView {
             id: moveDialogScroller
             objectName: "moveDialogScroller"
             clip: true
@@ -1472,7 +1421,7 @@ Control {
         objectName: "noteDeleteDialog"
         property var entries: []
         height: Math.min(deleteOptions.implicitHeight + topPadding + bottomPadding, maximumContentHeight)
-        contentItem: ScrollView {
+        contentItem: PilonScrollView {
             id: deleteDialogScroller
             objectName: "deleteDialogScroller"
             clip: true
@@ -1568,7 +1517,7 @@ Control {
         property color originalColour
         property real originalWidth
         height: Math.min(inkStyleOptions.implicitHeight + topPadding + bottomPadding, maximumContentHeight)
-        contentItem: ScrollView {
+        contentItem: PilonScrollView {
             id: inkStyleDialogScroller
             objectName: "inkStyleDialogScroller"
             clip: true
@@ -1623,7 +1572,7 @@ Control {
         property color penColour: "#202020"
         property real penWidth: 3
         height: Math.min(penOptions.implicitHeight + topPadding + bottomPadding, maximumContentHeight)
-        contentItem: ScrollView {
+        contentItem: PilonScrollView {
             id: penDialogScroller
             objectName: "penDialogScroller"
             clip: true

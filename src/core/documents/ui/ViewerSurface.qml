@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
+import "ui"
 
 Flickable {
     id: surface
@@ -13,8 +14,6 @@ Flickable {
     flickableDirection: Flickable.AutoFlickIfNeeded
     boundsBehavior: Flickable.StopAtBounds
     clip: true
-    maximumFlickVelocity: 6000
-    flickDeceleration: 1500
     // Handlers belong to the viewport, so scrolling doesn't move their coordinates.
     Item {
         parent: surface
@@ -66,6 +65,6 @@ Flickable {
             }
         }
     }
-    ScrollBar.vertical: ScrollBar { objectName: "viewerVerticalScrollBar" }
-    ScrollBar.horizontal: ScrollBar { objectName: "viewerHorizontalScrollBar" }
+    ScrollBar.vertical: PilonScrollBar { objectName: "viewerVerticalScrollBar" }
+    ScrollBar.horizontal: PilonScrollBar { objectName: "viewerHorizontalScrollBar" }
 }

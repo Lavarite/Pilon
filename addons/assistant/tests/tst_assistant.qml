@@ -113,6 +113,7 @@ TestCase {
         signal proposalReady(string id)
     }
     SignalSpy { id: proposalRequested; target: page; signalName: "calendarProposalRequested" }
+    SignalSpy { id: conversationMovement; signalName: "movementStarted" }
     Rectangle { anchors.fill: parent; color: "#221e1a" }
     App.AssistantPage {
         id: page
@@ -1096,9 +1097,13 @@ TestCase {
         wait(100)
         const view = findChild(page, "assistantConversation")
         const bottom = view.contentY
+        conversationMovement.target = view
+        conversationMovement.clear()
         mouseWheel(view, 200, 150, 0, 120)
-        wait(30)
-        verify(view.contentY < bottom - 90)
+        tryVerify(() => conversationMovement.count > 0, 1000, "Wheel input starts native list movement")
+        tryVerify(() => view.contentY < bottom)
+        tryCompare(view, "moving", false)
+        verify(!view.followTail)
         const position = view.contentY
         messages[34].text += " Streaming more words."
         backend.messages = messages.slice()

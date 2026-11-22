@@ -379,7 +379,7 @@ Control {
                     model: choice.popup.visible ? choice.delegateModel : null
                     currentIndex: choice.highlightedIndex
                     clip: true
-                    ScrollBar.vertical: ScrollBar {}
+                    ScrollBar.vertical: PilonScrollBar {}
                 }
                 background: Rectangle {
                     radius: 8
@@ -404,7 +404,7 @@ Control {
             spacing: 12
             Label { id: instructionsProjectName; width: parent.width; text: instructionsPopup.projectName; color: page.textColour; elide: Text.ElideRight }
             Label { id: instructionsDescription; width: parent.width; wrapMode: Text.Wrap; text: qsTr("Instructions for every chat in this project"); color: page.mutedTextColour }
-            ScrollView {
+            PilonScrollView {
                 width: parent.width
                 height: Math.max(40, Math.min(240, instructionsPopup.availableHeight - instructionsDescription.height - instructionsButtons.height - instructionsProjectName.height - parent.spacing * 3))
                 PilonTextArea {
@@ -651,7 +651,7 @@ Control {
                            ? page.alpha(page.textColour, .12) : chatEntry.kind !== "heading" && chatEntry.hovered ? page.alpha(page.textColour, .06) : "transparent"
                 }
             }
-            ScrollBar.vertical: ScrollBar { }
+            ScrollBar.vertical: PilonScrollBar { }
         }
     }
     MouseArea {
@@ -762,7 +762,7 @@ Control {
         background: Rectangle { radius: 12; color: page.secondaryColour; border.color: page.alpha(page.textColour, .22) }
         contentItem: ColumnLayout {
             spacing: 12
-            ScrollView {
+            PilonScrollView {
                 id: deleteChatMessages
                 Layout.fillWidth: true; Layout.fillHeight: true; Layout.minimumHeight: 0
                 contentWidth: availableWidth; clip: true
@@ -1057,22 +1057,7 @@ Control {
                     }
                 }
             }
-            ScrollBar.vertical: ScrollBar { }
-        }
-        MouseArea {
-            anchors.fill: conversation
-            acceptedButtons: Qt.NoButton
-            onWheel: function(wheel) {
-                const delta = wheel.pixelDelta.y !== 0 ? wheel.pixelDelta.y * 1.7
-                                                        : wheel.angleDelta.y / 120 * 150
-                conversation.followTail = false
-                const minimum = conversation.originY
-                const maximum = Math.max(minimum, conversation.originY + conversation.contentHeight - conversation.height)
-                conversation.contentY = Math.max(minimum, Math.min(maximum, conversation.contentY - delta))
-                if (delta < 0 && conversation.contentY >= maximum - 1)
-                    conversation.followTail = true
-                wheel.accepted = true
-            }
+            ScrollBar.vertical: PilonScrollBar { }
         }
     }
 
@@ -1100,7 +1085,7 @@ Control {
         color: page.alpha(page.secondaryColour, 0.58)
         border.color: page.alpha(page.textColour, 0.18)
 
-        ScrollView {
+        PilonScrollView {
             id: composerScroll
             objectName: "assistantComposerScroll"
             anchors.fill: parent
@@ -1128,7 +1113,7 @@ Control {
                     maximumLineCount: 4
                     elide: Text.ElideRight
                 }
-                ScrollView {
+                PilonScrollView {
                     id: attachmentScroll
                     objectName: "assistantAttachments"
                     width: parent.width
@@ -1181,7 +1166,7 @@ Control {
                     color: page.mutedTextColour
                     elide: Text.ElideRight
                 }
-                ScrollView {
+                PilonScrollView {
                     id: messageViewport
                     width: parent.width
                     height: Math.min(160, Math.max(44, page.height * .22), Math.max(44, messageInput.contentHeight + 12))
@@ -1342,7 +1327,7 @@ Control {
         border.color: page.alpha(page.accentColour, 0.7)
         radius: 12
 
-        ScrollView {
+        PilonScrollView {
             id: actionScroll
             objectName: "assistantActionScroll"
             anchors.fill: parent
@@ -1354,7 +1339,7 @@ Control {
                 id: actionContent
                 width: actionScroll.availableWidth
                 spacing: 10
-                ScrollView {
+                PilonScrollView {
                     width: parent.width
                     height: Math.min(180, actionText.contentHeight)
                     PilonTextArea {

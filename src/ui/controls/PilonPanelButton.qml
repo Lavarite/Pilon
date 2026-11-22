@@ -16,11 +16,10 @@ PilonButton {
         alignment: Qt.AlignCenter
         opacity: control.enabled ? 1 : .4
     }
-    background: Rectangle {
-        radius: 8
+    background: PilonControlFrame {
+        owner: control
         color: control.down ? Qt.darker(control.fillColour, 1.12)
             : control.hovered ? Qt.lighter(control.fillColour, 1.08) : control.fillColour
-        border.color: Qt.alpha(control.foregroundColour, control.activeFocus ? .48 : .2)
-        opacity: control.enabled ? 1 : .4
+        outline: control.foregroundColour
     }
 }

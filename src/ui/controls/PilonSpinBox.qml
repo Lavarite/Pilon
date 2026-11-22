@@ -33,9 +33,7 @@ Basic.SpinBox {
             color: control.palette.buttonText; opacity: parent.enabled ? 1 : .4
         }
     }
-    background: Rectangle {
-        radius: 8; color: control.palette.button
-        border.color: Qt.alpha(control.palette.buttonText, control.activeFocus ? .48 : .2)
-        opacity: control.enabled ? 1 : .4
+    background: PilonControlFrame {
+        owner: control
     }
 }

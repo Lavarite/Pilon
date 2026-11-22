@@ -230,7 +230,7 @@ FilePickerWindow {
         id: panel
         font: setup.formFont
         anchors.fill: parent
-        ScrollView {
+        PilonScrollView {
             id: scroll
             objectName: "setupScroll"
             anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top

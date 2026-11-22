@@ -26,10 +26,8 @@ Basic.ComboBox {
         width: 16; height: 16; source: "../icons/chevron-right.svg"; rotation: 90
         color: control.palette.buttonText; opacity: control.enabled ? 1 : .4
     }
-    background: Rectangle {
-        radius: 8; color: control.palette.button
-        border.color: Qt.alpha(control.palette.buttonText, control.activeFocus ? .48 : .2)
-        opacity: control.enabled ? 1 : .4
+    background: PilonControlFrame {
+        owner: control
     }
     delegate: Basic.ItemDelegate {
         id: option
@@ -37,6 +35,7 @@ Basic.ComboBox {
         implicitHeight: Math.max(38, implicitContentHeight + topPadding + bottomPadding)
         leftPadding: 10; rightPadding: 10
         text: control.textAt(index)
+        Accessible.name: text
         required property int index
         font: control.font
         highlighted: control.highlightedIndex === index

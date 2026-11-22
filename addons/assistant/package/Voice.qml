@@ -8,7 +8,7 @@ import QtMultimedia
 import Pilon
 import Pilon as Backend
 
-ScrollView {
+PilonScrollView {
     required property var addon
     id: voiceSettingsScroll
     anchors.fill: parent
@@ -38,7 +38,7 @@ ScrollView {
             function onSpeechStopped() { voicePreviewPlayer.stop() }
         }
         PilonSectionHeader { objectName: "voicePromptSection"; width: parent.width; text: qsTr("Voice prompt") }
-        ScrollView {
+        PilonScrollView {
             width: parent.width
             height: 150
             PilonTextArea {
