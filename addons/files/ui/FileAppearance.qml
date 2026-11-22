@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Layouts
 import QtQuick.Controls.impl as ControlsImpl
 import QtQuick.Dialogs as PlatformDialogs
 import "ui"
@@ -95,7 +96,8 @@ Item {
     function sourceForIcon(icon) {
         if (!icon) return ""
         if (iconNames.includes(icon)) return "icons/" + icon + ".svg"
-        if (/^custom-[a-f0-9]{64}$/.test(icon) && typeof manager.appearanceIconUrl === "function")
+        if ((icon.startsWith("phosphor/") || /^custom-[a-f0-9]{64}$/.test(icon))
+                && typeof manager.appearanceIconUrl === "function")
             return manager.appearanceIconUrl(icon).toString()
         return ""
     }
@@ -179,6 +181,7 @@ Item {
     PilonDialog {
         id: editor
         objectName: "fileAppearanceEditor"
+        contentHasCloseButton: true
         property var owner: null
         property bool onlyPath: false
         property int mode: 0
@@ -195,18 +198,15 @@ Item {
             username: onlyPath ? pathDraft.username : accountInput.text.trim(),
             directory: onlyPath ? pathDraft.directory === true : kindInput.currentIndex === 0
         })
-        readonly property var filteredIcons: {
-            const query = iconSearch.text.trim().toLowerCase().split(/[\s-]+/)
-            return appearance.iconNames.filter(name => query.every(word => name.includes(word)))
-        }
+        property string previewTint: ""
         readonly property string type: appearance.normalizedType(identity.text)
         readonly property url preview: appearance.sourceForIcon(choice) || (mode === 0
             ? appearance.fallbackIconForEntry({name: "file." + type}, type)
             : appearance.fallbackIconForEntry(entry))
 
         parent: owner ? owner.contentItem : null
-        width: Math.min(560, owner && owner.width > 0 ? owner.width : 560)
-        height: Math.min(500, owner && owner.height > 0 ? owner.height : 500)
+        width: Math.min(900, owner && owner.width > 0 ? owner.width : 900)
+        height: Math.min(680, owner && owner.height > 0 ? owner.height : 680)
         palette.window: appearance.workspace.mainColour
         palette.button: appearance.workspace.secondaryColour
         palette.windowText: appearance.workspace.textColour
@@ -220,8 +220,8 @@ Item {
             choice = icon || ""
             tint = colour || ""
             importSource = ""
-            iconSearch.clear()
-            iconPicker.currentIndex = Math.max(0, filteredIcons.indexOf(choice))
+            previewTint = ""
+            if (gallery.item) gallery.item.reset()
             errorText = ""
         }
 
@@ -268,167 +268,148 @@ Item {
             close()
         }
 
-        contentItem: PilonScrollView {
-            id: editorScroll
-            Column {
-                width: editorScroll.availableWidth
+        contentItem: ColumnLayout {
+            spacing: 8
+            RowLayout {
+                Layout.fillWidth: true
                 spacing: 8
-
                 PilonTextField {
                     id: identity
                     objectName: "fileAppearanceRuleIdentity"
-                    width: parent.width
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
                     readOnly: editor.onlyPath || (editor.mode === 0 && editor.editingType !== "")
                     placeholderText: editor.mode === 0 ? qsTr("File extension") : qsTr("Absolute path")
                     Accessible.name: placeholderText
                 }
-                PilonComboBox {
-                    id: kindInput
-                    width: parent.width
-                    visible: editor.mode === 1 && !editor.onlyPath
-                    Accessible.name: qsTr("Path type")
-                    model: [qsTr("Folder"), qsTr("File")]
+                PilonCloseButton {
+                    objectName: "windowCloseButton"
+                    onClicked: editor.close()
                 }
-                PilonComboBox {
-                    id: deviceInput
-                    width: parent.width
-                    visible: editor.mode === 1 && !editor.onlyPath && count > 1
-                    Accessible.name: qsTr("Device")
-                    model: editor.devices
-                    textRole: "name"
-                    onActivated: index => {
-                        const device = editor.devices[index]
-                        accountInput.text = appearance.workspace.usernameForDevice(device.id)
-                    }
-                }
-                PilonTextField {
-                    id: accountInput
-                    width: parent.width
-                    visible: editor.mode === 1 && !editor.onlyPath && editor.entry.deviceId !== "local"
-                    placeholderText: qsTr("SSH account")
-                    Accessible.name: placeholderText
-                }
-                PilonTextField {
-                    id: iconSearch
-                    objectName: "fileAppearanceIconSearch"
-                    width: parent.width
-                    placeholderText: qsTr("Search bundled icons")
-                    Accessible.name: placeholderText
-                }
-                GridView {
-                    id: iconPicker
-                    objectName: "fileAppearanceIconPicker"
-                    width: parent.width
-                    height: Math.min(contentHeight, cellHeight * 3)
-                    readonly property int columns: Math.max(1, Math.floor(width / 104))
-                    cellWidth: width / columns
-                    cellHeight: 68
-                    clip: true
-                    activeFocusOnTab: count > 0
-                    keyNavigationEnabled: true
-                    Accessible.name: qsTr("Bundled icons")
-                    ScrollBar.vertical: ScrollBar {}
-                    model: editor.filteredIcons
-                    Keys.onReturnPressed: if (currentItem) editor.chooseIcon(currentItem.modelData)
-                    Keys.onSpacePressed: if (currentItem) editor.chooseIcon(currentItem.modelData)
-                    delegate: PilonButton {
-                        required property string modelData
-                        required property int index
-                        width: iconPicker.cellWidth - 8
-                        height: iconPicker.cellHeight - 8
-                        flat: true
-                        activeFocusOnTab: false
-                        highlighted: editor.choice === modelData || (iconPicker.activeFocus && GridView.isCurrentItem)
-                        leftPadding: 4; rightPadding: 4; topPadding: 4; bottomPadding: 4; spacing: 4
-                        display: AbstractButton.TextUnderIcon
-                        text: modelData.replace(/^application-x-pilon-/, "pilon-").replace(/-/g, " ")
-                        Accessible.name: text
-                        ToolTip.visible: hovered
-                        ToolTip.text: text
-                        icon.source: appearance.sourceForIcon(modelData)
-                        icon.width: 28; icon.height: 28
-                        onClicked: {
-                            iconPicker.currentIndex = index
-                            editor.chooseIcon(modelData)
-                        }
-                    }
-                }
-                Label {
-                    width: parent.width
-                    visible: iconPicker.count === 0
-                    text: qsTr("No matching icons")
-                    wrapMode: Text.Wrap
-                    color: editor.palette.windowText
-                }
-                Row {
-                    width: parent.width
+            }
+            PilonScrollView {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                id: editorScroll
+                Column {
+                    width: editorScroll.availableWidth
                     spacing: 8
-                    ControlsImpl.ColorImage {
-                        width: 36
-                        height: width
-                        sourceSize: Qt.size(96, 96)
-                        source: editor.preview
-                        color: editor.tint || (editor.preview.toString().startsWith("file:")
-                               ? "transparent" : editor.palette.windowText)
-                    }
-                    Label {
-                        width: parent.width - 44
-                        anchors.verticalCenter: parent.verticalCenter
-                        elide: Text.ElideMiddle
-                        color: editor.palette.windowText
-                        text: editor.importSource.toString() ? editor.importSource.toString().split("/").pop()
-                             : editor.choice.startsWith("custom-") ? qsTr("Custom icon") : editor.choice || qsTr("Default icon")
-                    }
-                }
-                Flow {
-                    width: parent.width
-                    spacing: 8
-                    PilonButton {
-                        width: Math.min(implicitWidth, parent.width)
-                        text: qsTr("Import icon…")
-                        enabled: appearance.loaded && typeof appearance.manager.importAppearanceIcon === "function"
-                        onClicked: importDialog.open()
-                    }
-                    PilonButton {
-                        width: Math.min(implicitWidth, parent.width)
-                        text: editor.mode === 0 && editor.editingType && !appearance.defaultIcons[editor.editingType]
-                            ? qsTr("Remove icon rule") : qsTr("Reset icon")
-                        enabled: editor.choice !== "" || editor.importSource.toString() !== ""
-                        onClicked: {
-                            editor.choice = ""
-                            editor.importSource = ""
+
+                    Column {
+                        id: identityFields
+                        visible: editor.mode === 1 && !editor.onlyPath
+                        width: parent.width
+                        spacing: 8
+                        PilonComboBox {
+                            id: kindInput
+                            width: parent.width
+                            visible: editor.mode === 1 && !editor.onlyPath
+                            Accessible.name: qsTr("Path type")
+                            model: [qsTr("Folder"), qsTr("File")]
+                        }
+                        PilonComboBox {
+                            id: deviceInput
+                            width: parent.width
+                            visible: editor.mode === 1 && !editor.onlyPath && count > 1
+                            Accessible.name: qsTr("Device")
+                            model: editor.devices
+                            textRole: "name"
+                            onActivated: index => {
+                                const device = editor.devices[index]
+                                accountInput.text = appearance.workspace.usernameForDevice(device.id)
+                            }
+                        }
+                        PilonTextField {
+                            id: accountInput
+                            width: parent.width
+                            visible: editor.mode === 1 && !editor.onlyPath && editor.entry.deviceId !== "local"
+                            placeholderText: qsTr("SSH account")
+                            Accessible.name: placeholderText
                         }
                     }
-                    PilonButton {
-                        width: Math.min(implicitWidth, parent.width)
-                        visible: editor.mode === 1
-                        text: qsTr("Change colour…")
-                        onClicked: {
-                            colourDialog.selectedColor = editor.tint || editor.palette.windowText
-                            colourDialog.open()
+                    Loader {
+                        id: gallery
+                        active: editor.visible
+                        width: parent.width
+                        sourceComponent: PhosphorBrowser {
+                            selection: editor.choice
+                            previewColour: editor.tint || editor.previewTint || editor.palette.windowText
+                            availableHeight: editorScroll.availableHeight - appearanceActions.height - 8
+                                - (identityFields.visible ? identityFields.height + 8 : 0)
+                            onChosen: key => editor.chooseIcon(key)
+                            onChooseColour: {
+                                colourDialog.selectedColor = previewColour
+                                colourDialog.open()
+                            }
                         }
                     }
-                    PilonButton {
-                        width: Math.min(implicitWidth, parent.width)
-                        visible: editor.mode === 1
-                        text: qsTr("Reset colour")
-                        enabled: editor.tint !== ""
-                        onClicked: editor.tint = ""
+                    Column {
+                        id: appearanceActions
+                        width: parent.width
+                        spacing: 8
+                        Row {
+                            width: parent.width
+                            spacing: 8
+                            ControlsImpl.ColorImage {
+                                width: 36
+                                height: width
+                                sourceSize: Qt.size(96, 96)
+                                source: editor.preview
+                                color: editor.tint || editor.previewTint || (editor.preview.toString().startsWith("file:")
+                                       ? "transparent" : editor.palette.windowText)
+                            }
+                            Label {
+                                width: parent.width - 44
+                                anchors.verticalCenter: parent.verticalCenter
+                                elide: Text.ElideMiddle
+                                color: editor.palette.windowText
+                                text: editor.importSource.toString() ? editor.importSource.toString().split("/").pop()
+                                     : editor.choice.startsWith("custom-") ? qsTr("Custom icon") : editor.choice.startsWith("phosphor/")
+                                        ? qsTr("%1 (%2)").arg(editor.choice.split("/")[2]).arg(editor.choice.split("/")[1]) : editor.choice || qsTr("Default icon")
+                            }
+                        }
+                        Flow {
+                            width: parent.width
+                            spacing: 8
+                            PilonButton {
+                                width: Math.min(implicitWidth, parent.width)
+                                text: qsTr("Import icon…")
+                                enabled: appearance.loaded && typeof appearance.manager.importAppearanceIcon === "function"
+                                onClicked: importDialog.open()
+                            }
+                            PilonButton {
+                                width: Math.min(implicitWidth, parent.width)
+                                text: editor.mode === 0 && editor.editingType && !appearance.defaultIcons[editor.editingType]
+                                    ? qsTr("Remove icon rule") : qsTr("Reset icon")
+                                enabled: editor.choice !== "" || editor.importSource.toString() !== ""
+                                onClicked: {
+                                    editor.choice = ""
+                                    editor.importSource = ""
+                                }
+                            }
+                            PilonButton {
+                                width: Math.min(implicitWidth, parent.width)
+                                visible: editor.mode === 1
+                                text: qsTr("Reset colour")
+                                enabled: editor.tint !== ""
+                                onClicked: editor.tint = ""
+                            }
+                        }
+                        Label {
+                            width: parent.width
+                            visible: text !== ""
+                            text: editor.errorText
+                            wrapMode: Text.Wrap
+                            color: appearance.workspace.warningColour
+                        }
+                        PilonButton {
+                            objectName: "saveFileAppearance"
+                            width: Math.min(implicitWidth, parent.width)
+                            text: editor.mode === 0 && !editor.editingType ? qsTr("Add rule") : qsTr("Save")
+                            enabled: appearance.loaded && (editor.mode === 0 ? editor.type !== "" : appearance.pathKey(editor.entry) !== "")
+                            onClicked: editor.save()
+                        }
                     }
-                }
-                Label {
-                    width: parent.width
-                    visible: text !== ""
-                    text: editor.errorText
-                    wrapMode: Text.Wrap
-                    color: appearance.workspace.warningColour
-                }
-                PilonButton {
-                    objectName: "saveFileAppearance"
-                    width: Math.min(implicitWidth, parent.width)
-                    text: editor.mode === 0 && !editor.editingType ? qsTr("Add rule") : qsTr("Save")
-                    enabled: appearance.loaded && (editor.mode === 0 ? editor.type !== "" : appearance.pathKey(editor.entry) !== "")
-                    onClicked: editor.save()
                 }
             }
         }
@@ -447,7 +428,10 @@ Item {
         PilonColourDialog {
             id: colourDialog
             parentWindow: editor.dialogWindow
-            onAccepted: editor.tint = selectedColor.toString()
+            onAccepted: {
+                if (editor.mode === 1) editor.tint = selectedColor.toString()
+                else editor.previewTint = selectedColor.toString()
+            }
         }
     }
 }

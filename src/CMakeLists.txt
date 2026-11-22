@@ -131,6 +131,7 @@ target_include_directories(pilon_devices PUBLIC ${PILON_INCLUDE_DIRECTORIES})
 target_link_libraries(pilon_devices PUBLIC Qt6::Gui Qt6::Qml Qt6::Network Qt6::Concurrent ${PILON_PLATFORM_LIBRARIES})
 
 add_library(pilon_files STATIC ../addons/files/src/remotefilemanager.cpp ../addons/files/src/remotefilemanager.h)
+include(cmake/Phosphor.cmake)
 target_include_directories(pilon_files PUBLIC ${PILON_INCLUDE_DIRECTORIES})
 target_link_libraries(pilon_files PUBLIC pilon_documents Qt6::Network ${PILON_SSH2_TARGET} PRIVATE Qt6::Quick)
 if(NOT ANDROID)
@@ -272,6 +273,7 @@ qt_add_qml_module(pilon
         app/ui/AppNavigation.qml
         ../addons/files/ui/FileWorkspace.qml
         ../addons/files/ui/FileAppearance.qml
+        ../addons/files/ui/PhosphorBrowser.qml
         ../addons/files/ui/FileAppearanceSection.qml
         app/ui/FirstRunSetup.qml
         app/ui/SetupOverview.qml

@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Window
 import QtQuick.Controls
 import QtCore
+import Pilon 1.0 as Native
 import QtTest
 import ".." as App
 import "../ui" as Ui
@@ -76,6 +77,7 @@ TestCase {
             changed()
         }
     }
+    Native.RemoteFileManager { id: iconResolver }
     component MockFiles: QtObject {
         property var previewEntry: ({})
         property bool previewLoading: false
@@ -158,7 +160,7 @@ TestCase {
         }
         function reloadBookmarks() { }
         function appearanceIconNames() { return ["command-line", "film", "pencil", "photo"] }
-        function appearanceIconUrl(name) { return "" }
+        function appearanceIconUrl(name) { return iconResolver.appearanceIconUrl(name) }
         function removeBookmark(deviceId, username, path) {
             bookmarks = bookmarks.filter(function(entry) { return entry.deviceId !== deviceId || entry.username !== username || entry.path !== path })
         }
@@ -245,15 +247,42 @@ TestCase {
         verify(identity.readOnly)
         const search = findChild(editor, "fileAppearanceIconSearch")
         const picker = findChild(editor, "fileAppearanceIconPicker")
-        search.text = "PENC"
+        const weight = findChild(editor, "fileAppearanceIconWeight")
+        verify(weight)
+        tryCompare(picker, "count", 1512)
+        const size = findChild(editor, "fileAppearanceIconSize")
+        verify(size && findChild(editor, "fileAppearanceIconColour"))
+        size.value = 64
+        tryCompare(picker.itemAtIndex(0).icon, "width", 64)
+        search.text = "weather"
+        tryVerify(() => picker.count > 10 && picker.count < 1512 && picker.model.includes("cloud-rain"))
+        search.text = "not-a-possible-icon-1847"
+        tryCompare(picker, "count", 0)
+        search.text = "paerclip"
+        tryVerify(() => picker.count > 0 && picker.count < 10 && picker.itemAtIndex(0)?.text === "paperclip")
+        search.text = "=acorn"
         tryCompare(picker, "count", 1)
-        tryVerify(() => picker.itemAtIndex(0) !== null)
-        const pencil = picker.itemAtIndex(0)
-        verify(pencil.icon.source.toString().endsWith("/pencil.svg"))
-        mouseClick(pencil)
+        tryVerify(() => picker.itemAtIndex(0)?.text === "acorn")
+        for (let index = 0; index < weight.count; ++index) {
+            weight.currentIndex = index
+            weight.activated(index)
+            const variant = ["thin", "light", "regular", "bold", "fill", "duotone"][index]
+            const expected = "/phosphor/" + variant + "/acorn" + (variant === "regular" ? "" : "-" + variant) + ".svg"
+            tryVerify(() => picker.itemAtIndex(0).icon.source.toString().endsWith(expected))
+            compare(iconResolver.appearanceIconUrl("phosphor/" + variant + "/acorn").toString(), "qrc:" + expected)
+        }
+        mouseClick(picker.itemAtIndex(0))
         findChild(editor, "saveFileAppearance").clicked()
         tryCompare(editor, "opened", false)
-        compare(page.iconForFile(entry.name, true, entry.path, "local"), "icons/pencil.svg")
+        sharedFiles.appearance.reload()
+        compare(page.iconForFile(entry.name, true, entry.path, "local"), "qrc:/phosphor/duotone/acorn-duotone.svg")
+        sharedFiles.appearance.openPath(entry)
+        tryCompare(editor, "opened", true)
+        tryCompare(findChild(editor, "fileAppearanceIconWeight"), "currentIndex", 5)
+        compare(editor.choice, "phosphor/duotone/acorn")
+        verify(!sharedFiles.appearance.saveType("txt", "phosphor/fill/does-not-exist"))
+        verify(!sharedFiles.appearance.saveType("txt", "phosphor/regular/../../pilon"))
+        editor.close()
         verify(sharedFiles.appearance.savePath(entry, "", ""))
     }
     Window {
