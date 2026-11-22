@@ -48,6 +48,7 @@
 #include <QtConcurrentRun>
 
 #ifdef Q_OS_ANDROID
+#include "../../../src/platform/android/androidstorage.h"
 #include <QJniObject>
 #else
 #include <QDBusArgument>
@@ -60,6 +61,7 @@
 #include <libssh2.h>
 #include <libssh2_sftp.h>
 #include <sys/stat.h>
+#include <unistd.h>
 #include <sys/socket.h>
 #include <poll.h>
 
@@ -948,22 +950,32 @@ QVariantMap deleteRemotePath(SftpConnection &connection, const QString &path, bo
         return {{QStringLiteral("status"), QStringLiteral("cancelled")}};
 
     if (connection.local) {
-        const auto file = QFileInfo(path);
-        if (!directory || file.isSymLink())
-            return removeFile(connection, path) ? QVariantMap{{"status", "ok"}}
-                                               : failure(QObject::tr("Unable to delete %1.").arg(path));
-        const auto listing = listDirectory(connection, pilonLocalDevice(), path);
-        if (listing.value("status") != "ok")
-            return listing;
-        for (const auto &value : listing.value("entries").toList()) {
-            const auto entry = value.toMap();
-            const auto result = deleteRemotePath(connection, entry.value("path").toString(),
-                entry.value("directory").toBool(), cancelRequested, depth + 1);
-            if (result.value("status") != "ok")
-                return result;
+        const auto encoded = QFile::encodeName(path);
+        const bool removeFolder = directory && !QFileInfo(path).isSymLink();
+        if (removeFolder) {
+            const auto listing = listDirectory(connection, pilonLocalDevice(), path);
+            if (listing.value("status") != "ok") return listing;
+            for (const auto &value : listing.value("entries").toList()) {
+                const auto entry = value.toMap();
+                const auto result = deleteRemotePath(connection, entry.value("path").toString(),
+                    entry.value("directory").toBool(), cancelRequested, depth + 1);
+                if (result.value("status") != "ok") return result;
+            }
         }
-        return removeDirectory(connection, path) ? QVariantMap{{"status", "ok"}}
-                                                : failure(QObject::tr("Unable to delete %1.").arg(path));
+        if ((removeFolder ? ::rmdir(encoded.constData()) : ::unlink(encoded.constData())) < 0) {
+            const auto code = errno;
+            auto reason = QString::fromLocal8Bit(std::strerror(code));
+#ifdef Q_OS_ANDROID
+            if (code == EACCES || code == EPERM)
+                reason = AndroidStorage::hasAccess() ? QObject::tr("Android denied access to this location.")
+                    : QObject::tr("Allow Pilon to manage files in Android Settings, then try again.");
+#endif
+            return failure(QObject::tr("Unable to delete %1: %2").arg(path, reason));
+        }
+        struct stat remaining{};
+        if (::lstat(encoded.constData(), &remaining) == 0 || errno != ENOENT)
+            return failure(QObject::tr("Could not confirm that %1 was deleted. Refresh the folder and check the item.").arg(path));
+        return {{"status", "ok"}};
     }
 
     const QByteArray encodedPath = path.toUtf8();
@@ -3090,6 +3102,11 @@ void RemoteFileManager::startRequest(const QVariantMap &request, const Credentia
     const QString kind = request.value(QStringLiteral("kind")).toString();
     const bool searchRequest = kind == QLatin1String("search");
     if (m_operationWatcher.isRunning()) {
+        if (kind == "deleteMany" && !m_searching) {
+            if (m_pendingRequest.value("refresh").toBool() && m_queuedRequest.isEmpty()) m_queuedRequest = request;
+            else setErrorMessage(tr("A file operation is in progress. Wait for it to finish, then try deleting again."));
+            return;
+        }
         if (!m_searching)
             return;
         if (m_cancelRequested)
