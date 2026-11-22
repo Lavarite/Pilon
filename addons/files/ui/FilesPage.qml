@@ -53,7 +53,7 @@ Control {
         if (!visible && searchManager !== null && searchManager.searching)
             searchManager.cancel()
         else if (visible)
-            refresh()
+            refresh(false)
     }
 
     function withOpacity(colour, opacity) {
@@ -478,14 +478,14 @@ Control {
         if (activeTile !== null) activeTile.revealArtifact(path)
     }
 
-    function refresh() {
+    function refresh(verifySizeEstimates = false) {
         for (let index = 0; index < tiles.length; ++index)
-            tiles[index].remoteFiles.refresh()
+            tiles[index].remoteFiles.refresh(verifySizeEstimates)
     }
 
     function refreshOtherTiles(manager) {
         for (let index = 0; index < tiles.length; ++index) {
-            if (tiles[index].remoteFiles !== manager) tiles[index].remoteFiles.refresh()
+            if (tiles[index].remoteFiles !== manager) tiles[index].remoteFiles.refresh(false)
         }
     }
 
@@ -775,7 +775,7 @@ Control {
                             palette.highlight: filesPage.accentColour
                             onClicked: if (pageNumber >= 0) documentView.goToPage(pageNumber, destinationY)
                         }
-                        ScrollBar.vertical: ScrollBar {}
+                        ScrollBar.vertical: PilonScrollBar {}
                     }
                 }
                 DocumentView {
@@ -934,7 +934,7 @@ Control {
                 cancelFlick(); contentY = Math.max(0, contentHeight - height)
             }
             boundsBehavior: Flickable.StopAtBounds
-            ScrollBar.vertical: ScrollBar { policy: locationsViewport.interactive ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff }
+            ScrollBar.vertical: PilonScrollBar { policy: locationsViewport.interactive ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff }
 
             TileSplitView {
                 id: columns

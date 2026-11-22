@@ -363,7 +363,7 @@ const entries = destinationDialog.entries.map(entry => Object.assign({}, entry))
         readonly property var exportOptions: ({firstPageHeadingOnly: exportFirstPageHeading.checked, pageNumbers: exportPageNumbers.checked})
         readonly property string filename: exportName.text.trim().toLowerCase().endsWith(".pdf") ? exportName.text.trim() : exportName.text.trim() + ".pdf"
         readonly property bool validFilename: exportName.text.trim().length > 0 && !/[\\/]/.test(exportName.text)
-        readonly property bool canSaveToFolder: validFilename && fileWorkspace.exportManager !== null
+        readonly property bool canSaveToFolder: validFilename && fileWorkspace.exportManager !== null && fileWorkspace.exportManager.cachedListing !== true
             && fileWorkspace.exportManager.currentPath.length > 0 && !fileWorkspace.exportManager.busy && !sharing
             && !fileWorkspace.exportManager.promptText
             && (!overwritePending || fileWorkspace.exportManager.currentDeviceId === "local")

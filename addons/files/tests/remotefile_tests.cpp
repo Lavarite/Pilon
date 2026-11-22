@@ -3,6 +3,7 @@
 #include "../src/remotefilemanager.cpp"
 #include <QPromise>
 #include <filesystem>
+#include <sys/inotify.h>
 #include <QTcpServer>
 #include <QJsonArray>
 #include <QSignalSpy>
@@ -61,6 +62,141 @@ private slots:
         manager.createDirectory(manager.localDevice(), {}, directory.path(), "new-folder");
         QTRY_VERIFY(!manager.busy());
         QVERIFY(QFileInfo(directory.filePath("new-folder")).isDir());
+    }
+
+    void cachedRemoteListingIsScopedToAccountAndTrustedHost()
+    {
+        const auto peer = device("snapshot-test");
+        const QString id = peer.value("id").toString(), account = "fixture", path = "/notes";
+        const QByteArray key("fixture-host-key");
+        PilonSettings settings;
+        settings.setValue(trustedHostKeySetting(id), key.toBase64());
+        settings.sync();
+        const auto cleanup = qScopeGuard([&] {
+            settings.remove(trustedHostKeySetting(id));
+            NetworkSnapshot::clear("sftp");
+        });
+        const auto file = listingSnapshot(peer, account, path, key);
+        QVERIFY(!file.isEmpty());
+        RemoteFileManager first;
+        first.setAutomaticRefreshEnabled(false);
+        first.m_pendingRequest = {{"kind", "browse"}, {"snapshotPath", file}, {"path", path}};
+        finishSearch(first, {{"status", "ok"}, {"device", peer}, {"username", account}, {"path", path},
+            {"entries", QVariantList{QVariantMap{{"name", "draft.txt"}, {"path", "/notes/draft.txt"}}}}});
+        QTRY_VERIFY(QFileInfo::exists(file));
+
+        RemoteFileManager reopened;
+        reopened.browse(peer, account, path);
+        QTRY_COMPARE(reopened.currentPath(), path);
+        QTRY_VERIFY(!reopened.busy());  // Fixture peer is offline.
+        QCOMPARE(reopened.entries().first().toMap().value("name").toString(), QString("draft.txt"));
+        QVERIFY(!reopened.errorMessage().isEmpty());
+        QVERIFY(NetworkSnapshot::read(listingSnapshot(peer, "other", path, key)).isEmpty());
+        QVERIFY(NetworkSnapshot::read(listingSnapshot(peer, account, path, "another-key")).isEmpty());
+        QVERIFY(reopened.cachedListing());
+        reopened.createDirectory(peer, account, path, "new-folder");
+        QVERIFY(!reopened.busy());
+        QVERIFY(reopened.errorMessage().contains("Refresh"));
+        reopened.browse(peer, "other", path);
+        QTRY_VERIFY(!reopened.busy());
+        QVERIFY(reopened.entries().isEmpty());
+        QVERIFY(!reopened.cachedListing());
+        reopened.setRemoteEnabled(false);
+        reopened.clearRemoteSnapshots();
+        QVERIFY(!QFileInfo::exists(file));
+        QTRY_VERIFY(!reopened.busy());
+        QCOMPARE(reopened.currentDeviceId(), QString("local"));
+    }
+
+    void rejectedSftpAccessClearsLiveAndCachedListings_data()
+    {
+        QTest::addColumn<QString>("status");
+        QTest::addColumn<bool>("cached");
+        QTest::newRow("live rejected-account") << QString("credential") << false;
+        QTest::newRow("cached unknown-key") << QString("hostKey") << true;
+        QTest::newRow("live changed-key") << QString("error") << false;
+    }
+
+    void rejectedSftpAccessClearsLiveAndCachedListings()
+    {
+        QFETCH(QString, status);
+        QFETCH(bool, cached);
+        const auto peer = device("denied-peer");
+        const QString account = "fixture", path = "/home/fixture";
+        const QByteArray key("accepted-key");
+        const auto file = listingSnapshot(peer, account, path, key);
+        const auto alias = listingSnapshot(peer, account, ".", key);
+        const auto home = listingSnapshot(peer, account, {}, key);
+        const auto otherHost = listingSnapshot(device("unrelated"), account, path, key);
+        const auto otherAccount = listingSnapshot(peer, "another", path, key);
+        const auto cleanup = qScopeGuard([&] {
+            for (const auto &name : {file, alias, home, otherHost, otherAccount}) QFile::remove(name);
+        });
+        for (const auto &name : {file, alias, home, otherHost, otherAccount}) {
+            NetworkSnapshot::write(name, {{"path", path}, {"entries", QJsonArray{}}});
+            QVERIFY(QFile::exists(name));
+        }
+        RemoteFileManager manager;
+        manager.setAutomaticRefreshEnabled(false);
+        const QVariantList rows{QVariantMap{{"name", "private"}, {"path", path + "/private"}}};
+        manager.showListing(peer, account, path, rows, cached);
+        RemoteFileManager otherWindow;
+        otherWindow.showListing(peer, account, path, rows, !cached);
+        RemoteFileManager unaffected;
+        unaffected.showListing(device("unrelated"), account, path, rows, true);
+        QVERIFY(!manager.entries().isEmpty());
+        manager.m_pendingRequest = manager.m_listingRequest;
+        manager.m_pendingRequest.insert("snapshotPath", file);
+        manager.m_operationWatcher.setFuture(QtConcurrent::run([=] {
+            if (status != "credential")
+                return verifySftpHostKey(peer, status == "hostKey" ? QByteArray{} : key, "new-host-key");
+            return rejectSftpAccess(peer, account, {{"status", status}, {"deviceId", peer.value("id")},
+                {"username", account}, {"prompt", "Authorization required"}});
+        }));
+        if (status == "error") QTRY_VERIFY(manager.errorMessage().contains("has changed"));
+        else QTRY_COMPARE(manager.promptKind(), status);
+        QTRY_VERIFY(manager.entries().isEmpty());
+        QVERIFY(manager.currentDeviceId().isEmpty());
+        QVERIFY(!manager.cachedListing());
+        QVERIFY(!QFile::exists(file));
+        QVERIFY(!QFile::exists(alias));
+        QVERIFY(!QFile::exists(home));
+        QVERIFY(otherWindow.entries().isEmpty());
+        QCOMPARE(unaffected.entries().size(), 1);
+        QVERIFY(QFile::exists(otherHost));
+        QCOMPARE(QFile::exists(otherAccount), status == "credential");
+    }
+
+    void unavailableSftpFolderClearsOnlyItsSubtreeAndAliases()
+    {
+        const auto peer = device("denied-folder-peer");
+        const QString account = "fixture", canonical = "/home/fixture";
+        const QByteArray key("accepted-key");
+        const auto alias = listingSnapshot(peer, account, {}, key);
+        const auto folder = listingSnapshot(peer, account, canonical, key);
+        const auto nested = listingSnapshot(peer, account, canonical + "/notes", key);
+        const auto sibling = listingSnapshot(peer, account, canonical + "-public", key);
+        const auto cleanup = qScopeGuard([&] {
+            for (const auto &file : {alias, folder, nested, sibling}) QFile::remove(file);
+        });
+        NetworkSnapshot::write(alias, {{"path", canonical}});
+        NetworkSnapshot::write(folder, {{"path", canonical}});
+        NetworkSnapshot::write(nested, {{"path", canonical + "/notes"}});
+        NetworkSnapshot::write(sibling, {{"path", canonical + "-public"}});
+        RemoteFileManager child, other;
+        child.showListing(peer, account, canonical + "/notes", {}, true);
+        other.showListing(peer, account, canonical + "-public", {}, false);
+        for (const auto code : {LIBSSH2_FX_PERMISSION_DENIED, LIBSSH2_FX_NO_SUCH_FILE, LIBSSH2_FX_NO_SUCH_PATH})
+            QVERIFY(sftpFolderUnavailable(LIBSSH2_ERROR_SFTP_PROTOCOL, code));
+        QVERIFY(!sftpFolderUnavailable(LIBSSH2_ERROR_SOCKET_RECV, LIBSSH2_FX_PERMISSION_DENIED));
+        QVERIFY(!sftpFolderUnavailable(LIBSSH2_ERROR_SFTP_PROTOCOL, LIBSSH2_FX_CONNECTION_LOST));
+        rejectSftpDirectory(peer, account, {}, {}, key);
+        QVERIFY(!QFile::exists(alias));
+        QVERIFY(!QFile::exists(folder));
+        QVERIFY(!QFile::exists(nested));
+        QVERIFY(QFile::exists(sibling));
+        QVERIFY(child.currentPath().isEmpty());
+        QCOMPARE(other.currentPath(), canonical + "-public");
     }
 
     void paintedDragPreviewFollowsTheOriginalGrabPoint()
@@ -499,6 +635,157 @@ private slots:
         QTRY_VERIFY(manager.entries().first().toMap().value("size").isValid());
         const auto size = manager.entries().first().toMap().value("size").toLongLong();
         QVERIFY(size >= 7); QVERIFY(size < 500000);
+    }
+
+    void watchedSizesSkipUnchangedSubtreesAndSeeInPlaceFileResizes()
+    {
+        QTemporaryDir root("/dev/shm/pilon-size-XXXXXX");
+        if (!root.isValid()) QSKIP("This test requires a writable tmpfs");
+        const auto changed = root.filePath("changed/deep");
+        const auto stable = root.filePath("stable");
+        QVERIFY(QDir().mkpath(changed));
+        QVERIFY(QDir().mkpath(stable));
+        QVERIFY(writeVersion(changed + "/data", "1234", 1000));
+        for (int i = 0; i < 128; ++i)
+            QVERIFY(writeVersion(stable + '/' + QString::number(i), "unchanged", 1000));
+        const int observer = ::inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
+        QVERIFY(observer >= 0);
+        const auto close = qScopeGuard([observer] { ::close(observer); });
+        QVERIFY(::inotify_add_watch(observer, QFile::encodeName(stable).constData(), IN_OPEN) >= 0);
+        const auto openedStable = [&] {
+            alignas(inotify_event) char buffer[4096];
+            return ::read(observer, buffer, sizeof(buffer)) > 0;
+        };
+
+        FolderSizeCache cache;
+        std::atomic_bool cancel{false};
+        bool watched = false;
+        const auto first = cache.measure(root.path(), cancel, &watched);
+        QVERIFY(first.has_value());
+        QVERIFY(watched);
+        QVERIFY(openedStable());
+        QCOMPARE(cache.measure(root.path(), cancel), first);
+        QVERIFY(!openedStable());
+        const auto directoryTime = QFileInfo(changed).lastModified();
+        QVERIFY(writeVersion(changed + "/data", "123456789", 1000));
+        QCOMPARE(QFileInfo(changed).lastModified(), directoryTime);
+        QCOMPARE(cache.measure(root.path(), cancel), std::optional<qint64>(*first + 5));
+        QVERIFY(!openedStable());
+        cancel.store(true);
+        QVERIFY(!cache.measure(root.path(), cancel));
+    }
+
+    void storedSizeEstimatesSurviveReopeningAndRefreshFromDisk()
+    {
+        QTemporaryDir root;
+        QVERIFY(QDir().mkpath(root.filePath("box")));
+        QVERIFY(writeVersion(root.filePath("box/example"), "input", 1000));
+        const auto local = pilonLocalDevice();
+        const auto file = sizeSnapshotPath(local, {}, root.path(), {});
+        const auto cleanup = qScopeGuard([&] { QFile::remove(file); });
+        qint64 exact = 0;
+        {
+            RemoteFileManager first;
+            first.browse(local, {}, root.path());
+            QTRY_VERIFY(!NetworkSnapshot::read(file).isEmpty());
+            exact = NetworkSnapshot::read(file).value("folders").toObject().value("box").toObject().value("bytes").toInteger();
+            QVERIFY(exact >= 5);
+        }
+        // Simulate a previous process measuring a volume with no reliable notifications.
+        auto snapshot = NetworkSnapshot::read(file);
+        auto folders = snapshot.value("folders").toObject();
+        auto record = folders.value("box").toObject();
+        record.insert("bytes", 1);
+        record.insert("watched", false);
+        folders.insert("box", record);
+        snapshot.insert("folders", folders);
+        NetworkSnapshot::write(file, snapshot);
+        RemoteFileManager reopened;
+        reopened.browse(local, {}, root.path());
+        QTRY_COMPARE(reopened.currentPath(), root.path());
+        QTRY_VERIFY(!reopened.m_sizeWatcher.isRunning());
+        QCOMPARE(reopened.entries().first().toMap().value("size").toLongLong(), 1);
+        QVERIFY(reopened.entries().first().toMap().value("sizeCached").toBool());
+        reopened.refresh();
+        QTRY_VERIFY(!reopened.entries().first().toMap().value("sizeCached").toBool());
+        QCOMPARE(reopened.entries().first().toMap().value("size").toLongLong(), exact);
+        const auto now = record.value("measured").toInteger();
+        const QVariantMap same{{"modified", record.value("modified").toInteger()}};
+        QVERIFY(reusableSizeEstimate(record, same, now, false));
+        QVERIFY(!reusableSizeEstimate(record, same, now + sizeEstimateLifetime, false));
+        QVERIFY(!reusableSizeEstimate(record, same, now - 1, false));
+        QVERIFY(!reusableSizeEstimate(record, same, now, true));
+        QVERIFY(!reusableSizeEstimate(record, {{"modified", -1}}, now, false));
+    }
+
+    void rejectedSftpAccountsDiscardTheirFolderSizeEstimates()
+    {
+        const auto peer = device("size-estimate-test");
+        const auto first = sizeSnapshotPath(peer, "first", "/notes", "server-key");
+        const auto second = sizeSnapshotPath(peer, "second", "/notes", "server-key");
+        const auto cleanup = qScopeGuard([&] { QFile::remove(first); QFile::remove(second); });
+        QVERIFY(!first.isEmpty());
+        QVERIFY(first != second);
+        QVERIFY(first != sizeSnapshotPath(peer, "first", "/notes", "other-key"));
+        NetworkSnapshot::write(first, {{"private", true}});
+        NetworkSnapshot::write(second, {{"private", true}});
+        rejectSftpAccess(peer, "first", {});
+        QVERIFY(!QFileInfo::exists(first));
+        QVERIFY(QFileInfo::exists(second));
+        rejectSftpAccess(peer, {}, {});
+        QVERIFY(!QFileInfo::exists(second));
+    }
+
+    void localMutationsPreserveSiblingAndRemoteSizeSnapshots()
+    {
+        QTemporaryDir root;
+        QVERIFY(QDir().mkpath(root.filePath("inside/nested")));
+        QVERIFY(QDir().mkpath(root.filePath("stable")));
+        const auto local = pilonLocalDevice();
+        const auto child = root.filePath("inside/nested");
+        const auto rootRecord = sizeSnapshotPath(local, {}, root.path(), {});
+        const auto childRecord = sizeSnapshotPath(local, {}, child, {});
+        const auto remote = sizeSnapshotPath(device("independent-size-test"), "user", root.path(), "key");
+        const auto cleanup = qScopeGuard([&] {
+            for (const auto &file : {rootRecord, childRecord, remote}) QFile::remove(file);
+        });
+        const QJsonObject stable{{"bytes", 72}};
+        const QJsonObject folders{{"inside", QJsonObject{{"bytes", 42}}}, {"stable", stable}};
+        NetworkSnapshot::write(rootRecord, {{"path", root.path()}, {"folders", folders}});
+        NetworkSnapshot::write(childRecord, {{"path", child}, {"folders", folders}});
+        NetworkSnapshot::write(remote, {{"path", root.path()}, {"folders", folders}});
+        const auto result = executeRequest({{"kind", "deleteMany"}, {"devices", QVariantList{local}},
+            {"entries", QVariantList{localEndpoint(child, true)}}}, std::make_shared<std::atomic_bool>(false));
+        QCOMPARE(result.value("status"), "ok");
+        const QJsonObject expected{{"stable", stable}};
+        QCOMPARE(NetworkSnapshot::read(rootRecord).value("folders").toObject(), expected);
+        QVERIFY(!QFile::exists(childRecord));
+        QCOMPARE(NetworkSnapshot::read(remote).value("folders").toObject(), folders);
+    }
+
+    void remoteSizesUseRecentEstimatesAndFinishWhenTheServerIsOffline()
+    {
+        const auto peer = device("offline-size-test");
+        const auto file = sizeSnapshotPath(peer, "fixture", "/home", "key");
+        const auto cleanup = qScopeGuard([&] { QFile::remove(file); });
+        const auto now = QDateTime::currentSecsSinceEpoch();
+        const QJsonObject record{{"bytes", 100}, {"modified", 73}, {"measured", now}, {"watched", false}};
+        const QJsonObject saved{{"current", record}, {"removed", record}};
+        NetworkSnapshot::write(file, {{"path", "/home"}, {"folders", saved}});
+        const QVariantMap folder{{"name", "current"}, {"path", "/home/current"}, {"directory", true}, {"modified", 73}};
+        const QVariantMap newlyListed{{"name", "new"}, {"path", "/home/new"}, {"directory", true}, {"modified", 19}};
+        const QVariantList entries{folder, newlyListed};
+        RemoteFileManager manager;
+        manager.m_entries = entries;
+        restoreFolderSizes(manager.m_entries, saved);
+        manager.m_sizeRequest = {{"device", peer}, {"username", "fixture"}, {"trustedKey", "key"},
+            {"entries", entries}, {"path", "/home"}, {"sizeSnapshot", saved}, {"sizeEpoch", sizeEpoch(peer)},
+            {"generation", manager.m_requestGeneration}};
+        manager.startFolderSizes();
+        QTRY_VERIFY(manager.m_entries.at(1).toMap().value("sizeUnavailable").toBool());
+        QVERIFY(manager.m_entries.at(0).toMap().value("sizeCached").toBool());
+        QCOMPARE(manager.m_entries.at(0).toMap().value("size").toLongLong(), 100);
+        QTRY_COMPARE(NetworkSnapshot::read(file).value("folders").toObject().size(), 1);
     }
 
     void confirmedLocalDownloadReplacesAtomicallyAndCancellationPreservesDestination()

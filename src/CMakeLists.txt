@@ -130,7 +130,8 @@ add_library(pilon_devices STATIC ../addons/ssh/src/sshmanager.cpp ../addons/ssh/
 target_include_directories(pilon_devices PUBLIC ${PILON_INCLUDE_DIRECTORIES})
 target_link_libraries(pilon_devices PUBLIC Qt6::Gui Qt6::Qml Qt6::Network Qt6::Concurrent ${PILON_PLATFORM_LIBRARIES})
 
-add_library(pilon_files STATIC ../addons/files/src/remotefilemanager.cpp ../addons/files/src/remotefilemanager.h)
+add_library(pilon_files STATIC ../addons/files/src/remotefilemanager.cpp ../addons/files/src/remotefilemanager.h
+    ../addons/files/src/foldersizecache.cpp ../addons/files/src/foldersizecache.h)
 include(cmake/Phosphor.cmake)
 target_include_directories(pilon_files PUBLIC ${PILON_INCLUDE_DIRECTORIES})
 target_link_libraries(pilon_files PUBLIC pilon_documents Qt6::Network ${PILON_SSH2_TARGET} PRIVATE Qt6::Quick)
@@ -735,7 +736,8 @@ if(PILON_BUILD_TESTS)
         PREFIX "/qt/qml/Pilon" FILES ${PILON_SKILL_FILES} ${PILON_AGENT_FILES})
     add_test(NAME assistant COMMAND pilon_assistant_tests -platform offscreen)
     # This suite includes the implementation to exercise its private traversal helpers.
-    qt_add_executable(pilon_file_tests ../addons/files/tests/remotefile_tests.cpp ../addons/files/src/remotefilemanager.h)
+    qt_add_executable(pilon_file_tests ../addons/files/tests/remotefile_tests.cpp ../addons/files/src/remotefilemanager.h
+        ../addons/files/src/foldersizecache.cpp)
     target_link_libraries(pilon_file_tests PRIVATE pilon_documents Qt6::Test
         Qt6::Network Qt6::Concurrent Qt6::Quick ${PILON_SSH2_TARGET})
     if(NOT ANDROID)
