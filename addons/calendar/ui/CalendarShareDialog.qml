@@ -30,7 +30,7 @@ PilonPopup {
     padding: 16; modal: true; focus: true
     onOpened: nameField.forceActiveFocus()
     background: Rectangle { color: dialog.palette.window; radius: 8; border.color: Qt.alpha(dialog.palette.text, .22) }
-    contentItem: ScrollView {
+    contentItem: PilonScrollView {
         contentWidth: availableWidth
         clip: true
         ScrollBar.horizontal.policy: ScrollBar.AlwaysOff

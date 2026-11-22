@@ -218,7 +218,7 @@ PilonPopup {
                 onClicked: editor.close()
             }
         }
-        ScrollView {
+        PilonScrollView {
             id: formScroll
             objectName: "calendarEventForm"
             anchors.left: parent.left; anchors.right: parent.right
@@ -278,7 +278,7 @@ PilonPopup {
                             height: Math.min(calendarChoices.implicitHeight + topPadding + bottomPadding, editor.parent.height - 64)
                             padding: 12; margins: 16; modal: true; focus: true
                             background: Rectangle { color: editor.mainColour; radius: 8; border.color: Qt.alpha(editor.textColour, .22) }
-                            contentItem: ScrollView {
+                            contentItem: PilonScrollView {
                                 id: calendarScroll
                                 contentWidth: availableWidth; clip: true
                                 ColumnLayout {
@@ -570,7 +570,7 @@ PilonPopup {
         height: Math.min(implicitHeight, parent.height - 32)
         palette: editor.palette
         background: Rectangle { color: editor.mainColour; radius: 8; border.color: Qt.alpha(editor.textColour, .22) }
-        contentItem: ScrollView {
+        contentItem: PilonScrollView {
             id: deleteScroll
             implicitHeight: deleteContents.implicitHeight
             contentWidth: availableWidth; clip: true

@@ -83,8 +83,10 @@ Control {
     readonly property int monthDateHeight: Math.max(24, Math.ceil(monthHeaderMetrics.height))
     readonly property int monthMoreHeight: Math.max(32, Math.ceil(monthHeaderMetrics.height) + 14)
     readonly property int minimumMonthRowHeight: monthDateHeight + monthEventHeight + monthMoreHeight + 14
+    readonly property int timelineDays: viewMode === 2 ? 0 : dayCount
     readonly property var timelineColumnWidths: {
-        const count = viewMode === 0 ? 1 : 7
+        const count = timelineDays
+        if (!count) return []
         const available = Math.max(0, timeline.width - timeGutterWidth) / count
         const widths = []
         for (let i = 0; i < count; ++i) {
@@ -382,7 +384,7 @@ Control {
                     CalendarAction { id: newEventAction; text: qsTr("New event"); objectName: "calendarNewEvent"; icon.source: "icons/plus.svg"; onClicked: page.create(page.selectedDate,540) }
                     CalendarAction { objectName: "calendarSync"; text: qsTr("Refresh"); icon.source: "icons/refresh.svg"; enabled: !page.calendar.syncing; onClicked: page.calendar.sync() }
                     CalendarAction { objectName: "calendarSettings"; text: qsTr("Calendars"); icon.source: "icons/cog-6-tooth.svg"; onClicked: page.settingsRequested() }
-                    CalendarAction { objectName: "calendarShare"; text: qsTr("Share"); icon.source: "icons/share.svg"; onClicked: sharesDialog.open() }
+                    CalendarAction { objectName: "calendarShare"; text: qsTr("Share"); icon.source: "icons/share.svg"; onClicked: { sharesLoader.active = true; sharesLoader.item.open() } }
                 }
             }
         }
@@ -413,7 +415,7 @@ Control {
                 Row {
                     id: monthHeaders
                     spacing: 1
-                    Repeater { model: 7; delegate: Label { required property int index; width: (month.contentWidth - 6) / 7; horizontalAlignment: Text.AlignHCenter; text: Qt.formatDate(page.addDays(page.rangeStart,index),"ddd"); color: page.mutedTextColour; bottomPadding: 6 } }
+                    Repeater { model: page.viewMode === 2 ? 7 : 0; delegate: Label { required property int index; width: (month.contentWidth - 6) / 7; horizontalAlignment: Text.AlignHCenter; text: Qt.formatDate(page.addDays(page.rangeStart,index),"ddd"); color: page.mutedTextColour; bottomPadding: 6 } }
                 }
             }
             Flickable {
@@ -427,14 +429,14 @@ Control {
                 onContentWidthChanged: contentX = Math.min(contentX, Math.max(0, contentWidth - width))
                 Keys.onUpPressed: contentY = Math.max(0, contentY - monthGrid.height / 6)
                 Keys.onDownPressed: contentY = Math.min(Math.max(0, contentHeight - height), contentY + monthGrid.height / 6)
-                ScrollBar.vertical: ScrollBar {}
-                ScrollBar.horizontal: ScrollBar { id: monthHorizontal; visible: month.contentWidth > month.width + .5 }
+                ScrollBar.vertical: PilonScrollBar {}
+                ScrollBar.horizontal: PilonScrollBar { id: monthHorizontal; visible: month.contentWidth > month.width + .5 }
                 GridLayout {
                     id: monthGrid
                     width: month.contentWidth; height: Math.max(month.height, 6 * page.minimumMonthRowHeight + 5)
                     columns: 7; rowSpacing: 1; columnSpacing: 1
             Repeater {
-                model: 42
+                model: page.viewMode === 2 ? 42 : 0
                 delegate: Rectangle {
                     id: dayCell
                     required property int index
@@ -458,6 +460,7 @@ Control {
                     }
                     MouseArea { anchors.fill: parent; onDoubleClicked: page.create(dayCell.date,540) }
                     Column {
+                        id: monthEntries
                         anchors.fill: parent; anchors.margins: 5; spacing: 2
                         Label { width: parent.width; height: page.monthDateHeight; text: dayCell.date.getDate(); color: dayCell.isToday?page.accentColour:page.textColour; opacity: dayCell.date.getMonth()===page.selectedDate.getMonth()?1:.4; font.bold: dayCell.isToday }
                         Repeater {
@@ -465,7 +468,7 @@ Control {
                             delegate: CalendarButton {
                                 id: monthEntry
                                 required property var modelData
-                                width: parent.width; height: page.monthEventHeight; leftPadding: 5; rightPadding: 5; topPadding: 4; bottomPadding: 4
+                                width: monthEntries.width; height: page.monthEventHeight; leftPadding: 5; rightPadding: 5; topPadding: 4; bottomPadding: 4
                                 onActiveFocusChanged: if (activeFocus) month.positionViewAtChild(monthEntry, Flickable.Contain)
                                 text: (modelData.allDay?"":String(Math.floor(modelData.startMinute/60)).padStart(2,"0")+":"+String(modelData.startMinute%60).padStart(2,"0")+" ")+modelData.title+(modelData.pending?qsTr(" (sync pending)"):"")
                                 contentItem: Label { text: monthEntry.text; wrapMode: Text.Wrap; maximumLineCount: 2; elide: Text.ElideRight; color: page.textColour; verticalAlignment: Text.AlignVCenter; font.pixelSize: 12 }
@@ -494,7 +497,7 @@ Control {
                     clip: true; interactive: false
                     Row {
                         id: timelineHeaders
-                        Repeater { model: page.viewMode===0?1:7; delegate: Label { required property int index; objectName: "calendarDayHeader-" + index; width: page.viewMode === 0 ? timeline.width - page.timeGutterWidth : page.timelineColumnWidths[index]; horizontalAlignment: Text.AlignHCenter; text: Qt.formatDate(page.addDays(page.rangeStart,index),"ddd d"); color: page.textColour } }
+                        Repeater { model: page.timelineDays; delegate: Label { required property int index; objectName: "calendarDayHeader-" + index; width: page.viewMode === 0 ? timeline.width - page.timeGutterWidth : page.timelineColumnWidths[index]; horizontalAlignment: Text.AlignHCenter; text: Qt.formatDate(page.addDays(page.rangeStart,index),"ddd d"); color: page.textColour } }
                     }
                 }
             }
@@ -510,8 +513,8 @@ Control {
                 Keys.onUpPressed: contentY = Math.max(0, contentY - 60)
                 Keys.onDownPressed: contentY = Math.min(Math.max(0, contentHeight - height), contentY + 60)
                 interactive: !page.gesture
-                boundsBehavior: Flickable.StopAtBounds; ScrollBar.vertical: ScrollBar {}
-                ScrollBar.horizontal: ScrollBar { id: timelineHorizontal; visible: timeline.contentWidth > timeline.width + .5; z: 3 }
+                boundsBehavior: Flickable.StopAtBounds; ScrollBar.vertical: PilonScrollBar {}
+                ScrollBar.horizontal: PilonScrollBar { id: timelineHorizontal; visible: timeline.contentWidth > timeline.width + .5; z: 3 }
                 Component.onCompleted: contentY=8*60
                 Item {
                     id: timelineClip
@@ -525,11 +528,11 @@ Control {
                     parent: timelineClip
                     x: -timelineClip.x; y: -timelineClip.y
                     width: timeline.contentWidth; height: timeline.contentHeight
-                    Repeater { model: 24; delegate: Rectangle { required property int index; x: page.timeGutterWidth; y: index*60; width: timeGrid.width - x; height: 1; color: Qt.alpha(page.textColour,.07) } }
+                    Repeater { model: page.timelineDays ? 24 : 0; delegate: Rectangle { required property int index; x: page.timeGutterWidth; y: index*60; width: timeGrid.width - x; height: 1; color: Qt.alpha(page.textColour,.07) } }
                     Row {
                         x: page.timeGutterWidth; width: parent.width - x; height: parent.height
                         Repeater {
-                            model: page.viewMode===0?1:7
+                            model: page.timelineDays
                             delegate: Item {
                                 id: dayColumn
                                 required property int index
@@ -664,7 +667,7 @@ Control {
                         }
                     }
                     Repeater {
-                        model: page.viewMode === 0 ? 1 : 7
+                        model: page.timelineDays
                         delegate: Rectangle {
                         id: dragPreview
                         required property int index
@@ -722,7 +725,7 @@ Control {
                     width: page.timeGutterWidth; height: timeline.height; z: 2
                     Column {
                         y: -timeline.contentY
-                        Repeater { model: 24; delegate: Label { required property int index; height: 60; width: page.timeGutterWidth - 8; text: String(index).padStart(2,"0")+":00"; color: page.mutedTextColour; font.pixelSize: 11; horizontalAlignment: Text.AlignRight } }
+                        Repeater { model: page.timelineDays ? 24 : 0; delegate: Label { required property int index; height: 60; width: page.timeGutterWidth - 8; text: String(index).padStart(2,"0")+":00"; color: page.mutedTextColour; font.pixelSize: 11; horizontalAlignment: Text.AlignRight } }
                     }
                 }
             }
@@ -772,10 +775,13 @@ Control {
             }
         }
     }
-    CalendarSharesDialog {
-        id: sharesDialog
-        parent: page.Overlay.overlay; calendar: page.calendar; palette: page.palette
-        initialFrom: page.iso(page.rangeStart); initialThrough: page.iso(page.addDays(page.rangeStart, page.dayCount - 1))
+    Loader {
+        id: sharesLoader
+        active: false
+        sourceComponent: CalendarSharesDialog {
+            parent: page.Overlay.overlay; calendar: page.calendar; palette: page.palette
+            initialFrom: page.iso(page.rangeStart); initialThrough: page.iso(page.addDays(page.rangeStart, page.dayCount - 1))
+        }
     }
     PilonDialog {
         id: operationIssue

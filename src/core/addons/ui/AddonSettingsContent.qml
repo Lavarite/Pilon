@@ -8,6 +8,7 @@ Item {
     required property var addonContext
     property string currentId: ""
     property bool preparing: false
+    property bool background: false
     property var sections: ({})
     property var currentLoader: null
     property bool componentReady: false
@@ -23,8 +24,13 @@ Item {
         if (!section) return
         let loader = sections[currentId]
         if (!loader) {
-            loader = sectionFactory.createObject(content)
+            loader = sectionFactory.createObject(content, {asynchronous: background})
             const updated = Object.assign({}, sections); updated[currentId] = loader; sections = updated
+            loader.setSource(section.entry, {addon: addonContext})
+        } else if (!background && loader.status === Loader.Loading) {
+            // Restart with initial properties when a caller needs the entry immediately.
+            loader.source = ""
+            loader.asynchronous = false
             loader.setSource(section.entry, {addon: addonContext})
         }
         for (const item of Object.values(sections)) item.visible = item === loader
@@ -41,6 +47,12 @@ Item {
         text: content.currentLoader && content.currentLoader.status === Loader.Error
             ? qsTr("Unable to load these settings. Check the add-on package.")
             : content.currentLoader ? content.currentLoader.integrationError : ""
+    }
+    BusyIndicator {
+        anchors.centerIn: parent
+        visible: content.visible && !!content.currentLoader && content.currentLoader.status === Loader.Loading
+        running: visible
+        Accessible.name: qsTr("Loading settings")
     }
     Component {
         id: sectionFactory

@@ -6,7 +6,7 @@ import QtQuick.Controls.impl as ControlsImpl
 import "ui"
 import "ui/PilonStyle.js" as PilonStyle
 
-ScrollView {
+PilonScrollView {
     id: page
     palette.highlightedText: PilonStyle.contrastingText(accentColour, 1)
     palette.window: mainColour
@@ -216,7 +216,7 @@ ScrollView {
         width: Math.min(480, parent.width-32); modal: true; title: qsTr("Calendar sync")
         onClosed: setupUrl = ""
         height: Math.min(implicitHeight, parent.height - 32)
-        contentItem: ScrollView {
+        contentItem: PilonScrollView {
             id: syncScroll
             implicitHeight: syncFields.implicitHeight
             contentWidth: availableWidth; clip: true
@@ -237,7 +237,7 @@ ScrollView {
         parent: page.Overlay.overlay;x:(parent.width-width)/2;y:(parent.height-height)/2;width:Math.min(480,parent.width-32);modal:true;title:qsTr("Connect iCloud")
         standardButtons:Dialog.Cancel|Dialog.Ok
         height: Math.min(implicitHeight, parent.height - 32)
-        contentItem: ScrollView {
+        contentItem: PilonScrollView {
             id: appleScroll
             implicitHeight: appleFields.implicitHeight
             contentWidth: availableWidth; clip: true
@@ -264,7 +264,7 @@ ScrollView {
         objectName: "calendarFeedDialog"
         parent:page.Overlay.overlay;x:(parent.width-width)/2;y:(parent.height-height)/2;width:Math.min(480,parent.width-32);modal:true;title:qsTr("Subscribe to calendar feed");standardButtons:Dialog.Cancel|Dialog.Ok
         height: Math.min(implicitHeight, parent.height - 32)
-        contentItem: ScrollView {
+        contentItem: PilonScrollView {
             id: feedScroll
             implicitHeight: feedFields.implicitHeight
             contentWidth: availableWidth; clip: true
@@ -295,7 +295,7 @@ ScrollView {
         title: isIcs ? qsTr("Remove %1?").arg(accountName) : isFeed ? qsTr("Unsubscribe from %1?").arg(accountName) : qsTr("Sign out of %1?").arg(accountName)
         standardButtons:Dialog.Cancel|Dialog.Ok
         height: Math.min(implicitHeight, parent.height - 32)
-        contentItem: ScrollView {
+        contentItem: PilonScrollView {
             id: disconnectScroll
             implicitHeight: disconnectMessage.implicitHeight
             contentWidth: availableWidth; clip: true

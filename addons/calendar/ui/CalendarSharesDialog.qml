@@ -23,7 +23,7 @@ PilonPopup {
             enabled: !manager.calendar.sharingBusy
             onClicked: creation.show()
         }
-        ScrollView {
+        PilonScrollView {
             id: linksView
             objectName: "calendarSharedLinks"
             Layout.fillWidth: true; Layout.fillHeight: true; Layout.minimumHeight: 0
@@ -118,7 +118,7 @@ PilonPopup {
         height: Math.min(linkContents.implicitHeight + topPadding + bottomPadding, manager.parent.height - 32, maximumContentHeight)
         padding: 16; modal: true; focus: true
         background: Rectangle { color: linkPopup.palette.window; radius: 8; border.color: Qt.alpha(linkPopup.palette.text, .22) }
-        contentItem: ScrollView {
+        contentItem: PilonScrollView {
             id: linkScroll
             implicitHeight: linkContents.implicitHeight
             contentWidth: availableWidth; clip: true
@@ -146,7 +146,7 @@ PilonPopup {
         padding: 16; modal: true; focus: true
         onOpened: { renameName.forceActiveFocus(); renameName.selectAll() }
         background: Rectangle { color: renamePopup.palette.window; radius: 8; border.color: Qt.alpha(renamePopup.palette.text, .22) }
-        contentItem: ScrollView {
+        contentItem: PilonScrollView {
             id: renameScroll
             implicitHeight: renameContents.implicitHeight
             contentWidth: availableWidth; clip: true
