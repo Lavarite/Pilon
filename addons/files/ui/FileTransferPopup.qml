@@ -47,7 +47,7 @@ PilonPopup {
     }
     contentItem: ColumnLayout {
         spacing: 12
-        ScrollView {
+        PilonScrollView {
             id: pathScroll
             Layout.fillWidth: true; Layout.fillHeight: true; Layout.minimumHeight: 0
             Layout.preferredHeight: Math.min(160, transferPath.contentHeight)

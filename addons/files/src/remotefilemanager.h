@@ -89,6 +89,7 @@ public:
     [[nodiscard]] QString currentUsername() const;
     [[nodiscard]] QString currentPath() const;
     [[nodiscard]] QString errorMessage() const;
+    Q_INVOKABLE void dismissError() { setErrorMessage({}); }
     [[nodiscard]] QString promptText() const;
     [[nodiscard]] QString promptKind() const;
     [[nodiscard]] QString previewName() const;

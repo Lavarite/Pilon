@@ -37,7 +37,7 @@ Item {
         return saved.concat(discovered.filter(device => !device.saved
             && !saved.some(record => record.ip === device.ip)))
     }
-    readonly property var sshDevices: sshEnabled ? sshDeviceOptions.filter(device => device.included) : []
+    readonly property var sshDevices: sshEnabled ? sshDeviceOptions.filter(device => device.included && !device.cached) : []
     readonly property var devices: [remoteFiles.localDevice].concat(sshDevices)
     readonly property var exportManager: fileManagerComponent.createObject(fileWorkspace)
     readonly property var uploadManager: fileManagerComponent.createObject(fileWorkspace)
@@ -45,6 +45,7 @@ Item {
     readonly property var destinationManager: fileManagerComponent.createObject(fileWorkspace)
     readonly property var shareManager: fileManagerComponent.createObject(fileWorkspace)
     property bool sharingNote: false
+    property var shareErrorOwner: null
     property string shareDeviceId: ""
     readonly property bool filePickerOpen: uploadDialog.opened || selectionDialog.opened
         || destinationDialog.opened || exportDialog.opened
@@ -149,8 +150,6 @@ Item {
         pickerName: "fileUploadPicker"
         pickerLoaderName: ""
         onClosed: if (fileWorkspace.uploadManager) fileWorkspace.uploadManager.cancel()
-
-        FileAccessPopup { parent: uploadDialog.contentItem.Overlay.overlay; workspace: fileWorkspace; remoteFiles: fileWorkspace.uploadManager }
 
         acceptText: qsTr("Upload")
         acceptObjectName: "confirmFileUpload"
@@ -289,9 +288,10 @@ const entries = destinationDialog.entries.map(entry => Object.assign({}, entry))
         }
     }
 
-    function shareEntry(entry, username) {
+    function shareEntry(entry, username, owner) {
         if (shareManager.busy || shareManager.promptText || entry.directory || !deviceAvailable(entry.deviceId)) return
         sharingNote = false
+        shareErrorOwner = owner
         shareDeviceId = entry.deviceId
         shareManager.prepareSelection([entry], username)
     }
@@ -375,6 +375,7 @@ const entries = destinationDialog.entries.map(entry => Object.assign({}, entry))
             const source = note.preparePdf(filename, exportOptions)
             if (source.toString().length === 0) return
             fileWorkspace.sharingNote = true
+            fileWorkspace.shareErrorOwner = null
             sharing = true
             fileWorkspace.shareManager.shareFile(source, true)
         }

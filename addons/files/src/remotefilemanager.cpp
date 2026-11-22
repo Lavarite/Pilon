@@ -1113,13 +1113,15 @@ QVariantMap deleteRemotePath(SftpConnection &connection, const QString &path, bo
         }
         if ((removeFolder ? ::rmdir(encoded.constData()) : ::unlink(encoded.constData())) < 0) {
             const auto code = errno;
-            auto reason = QString::fromLocal8Bit(std::strerror(code));
 #ifdef Q_OS_ANDROID
-            if (code == EACCES || code == EPERM)
-                reason = AndroidStorage::hasAccess() ? QObject::tr("Android denied access to this location.")
-                    : QObject::tr("Allow Pilon to manage files in Android Settings, then try again.");
+            if (code == EACCES || code == EPERM) {
+                const auto name = QFileInfo(path).fileName();
+                return failure(AndroidStorage::hasAccess()
+                    ? QObject::tr("Android blocked deletion of “%1”.").arg(name)
+                    : QObject::tr("Allow file access in Android settings to delete “%1”.").arg(name));
+            }
 #endif
-            return failure(QObject::tr("Unable to delete %1: %2").arg(path, reason));
+            return failure(QObject::tr("Unable to delete %1: %2").arg(path, QString::fromLocal8Bit(std::strerror(code))));
         }
         struct stat remaining{};
         if (::lstat(encoded.constData(), &remaining) == 0 || errno != ENOENT)

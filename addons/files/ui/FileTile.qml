@@ -1028,6 +1028,48 @@ Item {
             wrapMode: Text.Wrap
         }
 
+        Item {
+            id: operationError
+            objectName: "fileOperationError"
+            readonly property var source: filesPage.remoteFiles.errorMessage ? filesPage.remoteFiles
+                : filesPage.fileWorkspace.shareErrorOwner === filesPage.remoteFiles ? filesPage.fileWorkspace.shareManager : null
+            visible: !!source && !!source.errorMessage && !source.promptText
+            anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
+            anchors.leftMargin: 12; anchors.rightMargin: 8
+            height: visible ? Math.min(144, Math.max(0, fileMainPane.height - fileColumns.height - savedListingStatus.height) * .4,
+                Math.max(dismissError.implicitHeight, errorText.implicitHeight) + 8) : 0
+            PilonScrollView {
+                id: errorScroll
+                objectName: "fileOperationErrorScroll"
+                anchors.left: parent.left; anchors.right: dismissError.left; anchors.rightMargin: 8
+                anchors.verticalCenter: parent.verticalCenter
+                height: Math.min(errorText.implicitHeight, Math.max(0, parent.height - 8))
+                contentHeight: errorText.implicitHeight
+                PilonTextArea {
+                    id: errorText
+                    objectName: "fileOperationErrorMessage"
+                    width: errorScroll.availableWidth; padding: 0; rightPadding: 8; background: null
+                    readOnly: true; wrapMode: TextEdit.Wrap; textFormat: TextEdit.PlainText
+                    text: operationError.source ? operationError.source.errorMessage : ""
+                    color: filesPage.warningColour
+                    Accessible.role: Accessible.AlertMessage
+                    onTextChanged: if (errorScroll.contentItem) errorScroll.contentItem.contentY = 0
+                }
+            }
+            PilonCloseButton {
+                id: dismissError
+                objectName: "dismissFileOperationError"
+                anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+                height: Math.min(implicitHeight, parent.height)
+                focusPolicy: Qt.TabFocus
+                text: qsTr("Dismiss error")
+                onClicked: {
+                    if (activeFocus) fileEntryList.forceActiveFocus(Qt.OtherFocusReason)
+                    if (operationError.source) operationError.source.dismissError()
+                }
+            }
+        }
+
         GridView {
             id: fileEntryList
             objectName: "fileEntriesView"
@@ -1035,7 +1077,7 @@ Item {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: fileColumns.bottom
-            anchors.bottom: parent.bottom
+            anchors.bottom: operationError.top
             anchors.leftMargin: 8
             anchors.rightMargin: 8
             anchors.bottomMargin: 8
@@ -1648,7 +1690,7 @@ Item {
                 const entry = filesPage.entryWithAccount(filesPage.selectedEntry)
                 if (entry.deviceId === "local") entry.username = filesPage.fileWorkspace.usernameForDevice(entry.deviceId)
                 fileContextMenu.close()
-                filesPage.fileWorkspace.shareEntry(entry, entry.username)
+                filesPage.fileWorkspace.shareEntry(entry, entry.username, filesPage.remoteFiles)
             }
         }
 
