@@ -49,7 +49,7 @@ PilonPopup {
     property real lineWidth: .75
     property string paperSize: "A4"
     height: Math.min(paperOptions.implicitHeight + topPadding + bottomPadding, parent.height - 32, maximumContentHeight)
-    contentItem: ScrollView {
+    contentItem: PilonScrollView {
         id: paperScroller
         objectName: "notePaperScroller"
         clip: true

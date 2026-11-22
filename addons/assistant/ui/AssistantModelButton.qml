@@ -60,7 +60,7 @@ PilonButton {
             Math.max(0, modelButton.popupSurface.height - 16))
         padding: 12
         background: Rectangle { radius: 8; color: modelButton.secondaryColour; border.color: Qt.alpha(modelButton.textColour, .2) }
-        contentItem: ScrollView {
+        contentItem: PilonScrollView {
             id: modelScroll
             contentWidth: availableWidth; clip: true
             rightPadding: effectiveScrollBarWidth

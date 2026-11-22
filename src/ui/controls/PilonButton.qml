@@ -15,13 +15,12 @@ Basic.Button {
         color: control.highlighted ? control.palette.highlightedText : control.palette.buttonText; alignment: Qt.AlignCenter
         opacity: control.enabled ? 1 : .4
     }
-    background: Rectangle {
-        radius: 8
+    background: PilonControlFrame {
+        owner: control
         readonly property color fill: control.highlighted ? control.palette.highlight : control.palette.button
         color: control.down ? Qt.tint(fill, Qt.alpha(control.palette.buttonText, .12))
              : control.hovered || control.checked ? Qt.tint(fill, Qt.alpha(control.palette.buttonText, .06))
              : control.flat && !control.highlighted ? "transparent" : fill
         border.color: Qt.alpha(control.palette.buttonText, control.activeFocus ? .48 : control.flat ? 0 : .2)
-        opacity: control.enabled ? 1 : .4
     }
 }

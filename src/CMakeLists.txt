@@ -210,10 +210,12 @@ set(PILON_UI_FILES
     ui/controls/PilonCloseButton.qml
     ui/controls/PilonColourDialog.qml
     ui/controls/PilonComboBox.qml
+    ui/controls/PilonControlFrame.qml
     ui/controls/PilonDialog.qml
     ui/controls/PilonMenu.qml
     ui/controls/PilonMenuItem.qml
     ui/controls/PilonPopup.qml
+    ui/controls/PilonScrollBar.qml
     ui/controls/PilonScrollView.qml
     ui/controls/PilonSlider.qml
     ui/controls/PilonSpinBox.qml
@@ -706,7 +708,8 @@ if(PILON_BUILD_TESTS)
             ../addons/calendar/ui/CalendarPalette.qml ../addons/calendar/ui/CalendarRecurrenceEditor.qml
             ../addons/calendar/ui/CalendarAccountGroup.qml ../addons/calendar/ui/CalendarDatePicker.qml ../addons/calendar/ui/CalendarTimePicker.qml ../addons/calendar/ui/CalendarTimeWheel.qml ../addons/calendar/ui/CalendarButton.qml
             ${PILON_UI_FILES}
-        RESOURCES ui/controls/PilonStyle.js assets/icons/chevron-left.svg assets/icons/chevron-right.svg assets/icons/x-mark.svg)
+        RESOURCES ui/controls/PilonStyle.js assets/icons/chevron-left.svg assets/icons/chevron-right.svg
+            assets/icons/plus.svg assets/icons/minus.svg assets/icons/x-mark.svg)
     add_test(NAME calendar_ui COMMAND pilon_calendar_ui_tests -platform offscreen -input ${PILON_TEST_SOURCE_DIR}/tests/tst_calendar.qml)
     add_test(NAME calendar_input COMMAND pilon_calendar_ui_tests -platform offscreen -input ${PILON_TEST_SOURCE_DIR}/tests/tst_calendar_input.qml)
     add_test(NAME calendar_geometry COMMAND pilon_calendar_ui_tests -platform offscreen -input ${PILON_TEST_SOURCE_DIR}/tests/tst_calendar_geometry.qml)

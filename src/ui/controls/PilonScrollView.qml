@@ -5,7 +5,37 @@ Basic.ScrollView {
     id: control
     clip: true
     contentWidth: availableWidth
-    Basic.ScrollBar.horizontal.policy: Basic.ScrollBar.AlwaysOff
+    Basic.ScrollBar.vertical: PilonScrollBar {
+        parent: control
+        x: control.mirrored ? 0 : control.width - width
+        y: control.topPadding
+        height: control.availableHeight
+        active: control.Basic.ScrollBar.horizontal.active
+    }
+    Basic.ScrollBar.horizontal: PilonScrollBar {
+        parent: control
+        x: control.leftPadding
+        y: control.height - height
+        width: control.availableWidth
+        active: control.Basic.ScrollBar.vertical.active
+        policy: Basic.ScrollBar.AlwaysOff
+    }
+    Binding {
+        target: control.contentItem
+        property: "boundsBehavior"
+        value: Flickable.StopAtBounds
+        when: control.contentItem instanceof Flickable
+    }
+    Item {
+        parent: control
+        anchors.fill: parent
+        z: 1
+        // A press stops momentum before the Flickable takes that press from its controls.
+        PointHandler {
+            onActiveChanged: if (active && control.contentItem instanceof Flickable
+                                 && control.contentItem.moving) control.contentItem.cancelFlick()
+        }
+    }
     function revealFocus() {
         const view = contentItem, owner = control.Window.window
         const item = owner ? owner.activeFocusItem : null
@@ -13,11 +43,17 @@ Basic.ScrollView {
         let ancestor = item
         while (ancestor && ancestor !== view.contentItem) ancestor = ancestor.parent
         if (!ancestor) return
-        const position = item.mapToItem(view.contentItem, 0, 0)
+        // A mouse click or returning from a popup preserves the current scroll position.
+        if (item.cursorRectangle === undefined && item.visualFocus === false
+                && (item.focusReason === Qt.MouseFocusReason || item.focusReason === Qt.ActiveWindowFocusReason
+                    || item.focusReason === Qt.PopupFocusReason)) return
+        const caret = item.height > view.height && item.cursorRectangle ? item.cursorRectangle : null
+        const position = item.mapToItem(view.contentItem, 0, caret ? caret.y : 0)
+        const height = caret ? caret.height : item.height
         let y = view.contentY
-        if (item.height > view.height) y = position.y + (item.height - view.height) / 2
+        if (height > view.height) y = position.y + (height - view.height) / 2
         else if (position.y < y) y = position.y
-        else if (position.y + item.height > y + view.height) y = position.y + item.height - view.height
+        else if (position.y + height > y + view.height) y = position.y + height - view.height
         const targetY = Math.max(0, Math.min(y, view.contentHeight - view.height))
         if (view.contentY !== targetY) view.contentY = targetY
     }

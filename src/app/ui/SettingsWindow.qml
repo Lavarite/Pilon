@@ -44,7 +44,7 @@ FilePickerWindow {
     Item {
         anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
         anchors.bottom: footer.top; anchors.bottomMargin: footer.height > 0 ? 12 : 0
-        ScrollView {
+        PilonScrollView {
             id: navigation
             objectName: "settingsTabs"
             property alias currentId: settings.currentId
@@ -54,23 +54,10 @@ FilePickerWindow {
             contentWidth: availableWidth
             clip: true
             ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-            Flickable {
+            contentItem: Flickable {
                 id: navigationView
                 contentWidth: width
                 contentHeight: categoryColumn.implicitHeight
-                boundsBehavior: Flickable.StopAtBounds
-                onFlickStarted: cancelFlick()
-                WheelHandler {
-                    acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
-                    target: null
-                    onWheel: event => {
-                        navigationView.cancelFlick()
-                        const distance = event.pixelDelta.y || event.angleDelta.y / 120 * Qt.styleHints.wheelScrollLines * 44
-                        navigationView.contentY = Math.max(0, Math.min(navigationView.contentHeight - navigationView.height,
-                            navigationView.contentY - distance))
-                        event.accepted = true
-                    }
-                }
                 Column {
                     id: categoryColumn
                     width: navigationView.width
