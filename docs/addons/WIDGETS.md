@@ -113,7 +113,8 @@ scaled with text); a shorter allocation shows fewer hours instead of squeezing
 appearance: 5-unit corner radius, event-colour fill at 0.22 opacity, border at
 0.65 opacity, and 2-unit gaps between overlap lanes. Titles/time labels remain
 about 14/12 points or sp before system text scaling; short boxes omit optional
-fields rather than reduce the font. Full event text remains accessible.
+fields rather than reduce the font. Accessibility labels keep the title, time and
+a description preview. Open the event to read its full description.
 
 Overlapping events use the Calendar page's greedy lane assignment and expansion
 into unoccupied adjacent lanes. Android uses one or two readable lanes, requiring
@@ -196,13 +197,13 @@ neutral OS reload; OS-cached pixels cannot be promised instantaneous erasure.
 
 Android uses one AppWidgetProvider and RemoteViews, configured per native widget
 instance to select a provider. Its time grid uses one continuous collection item
-through a private `RemoteViewsService` protected by `BIND_REMOTEVIEWS`. The service
-reads the bounded current cache and returns neutral content for invalid,
-reconfigured or revoked bindings; it does not start Qt. The period/binding/layout
-identity preserves scroll through ordinary same-period publications. Resizing
-uses launcher allocations, including all supplied valid size maps up to 16 on
-API 31+. No per-copy profile system or native custom parameter types are
-introduced.
+with a stable ID to preserve scroll through same-period updates. Android 12 and
+later receive the complete item with the widget update. The launcher can restore
+it without binding to Pilon. The widget uses its reported allocations to provide
+one- and two-lane timelines within the Binder size limit. Older Android versions
+use a private service protected by `BIND_REMOTEVIEWS` that reads the bounded
+cache and returns neutral content for invalid or revoked bindings. Neither path
+starts Qt.
 Each declared widget has one shared publication; multiple native copies may
 select it and independently resize. Widget allocation, rather than
 `addon.device.windowSize` or fold bounds, controls its native layout.

@@ -237,8 +237,10 @@ final class PilonWidgetTimeGrid {
         card.setInt(R.id.widget_grid_card_border, "setImageAlpha", 166);
     }
     private static String description(JSONObject row) {
-        return row.optString("title") + (time(row).isEmpty() ? "" : "\n" + time(row))
-            + (row.optString("detail").isEmpty() ? "" : "\n" + row.optString("detail"));
+        String detail = row.optString("detail");
+        // A launcher delivers all size variants in one asynchronous Binder transaction.
+        if (detail.codePointCount(0, detail.length()) > 80) detail = detail.substring(0, detail.offsetByCodePoints(0, 80)) + "…";
+        return row.optString("title") + (time(row).isEmpty() ? "" : "\n" + time(row)) + (detail.isEmpty() ? "" : "\n" + detail);
     }
     static RemoteViews card(Context context, int id, PilonWidgets.Binding binding, PilonWidgetData.Snapshot snapshot,
                                     JSONObject row, int colour, float width, float height, boolean allDay, boolean preview) {
