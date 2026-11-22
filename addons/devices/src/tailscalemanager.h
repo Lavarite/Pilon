@@ -61,6 +61,7 @@ public:
     bool discoveryConnected() const { return m_discoveryConnected; }
     Q_INVOKABLE void connectDiscovery(const QString &clientId, const QString &clientSecret);
     Q_INVOKABLE void disconnectDiscovery();
+    Q_INVOKABLE void clearPeerSnapshots();
 
     Q_INVOKABLE void refresh(bool clearError = true);
     Q_INVOKABLE void startService();
@@ -101,6 +102,7 @@ private:
     void setErrorMessage(const QString &message);
     void setDevices(QVariantList devices);
     void rebuildIncludedDevices();
+    void showSavedPeers();
     void startPrivilegedAction(const QString &program, const QStringList &arguments, Action action);
     void readActionOutput();
     void handleStatusFinished(int exitCode, QProcess::ExitStatus exitStatus);
@@ -116,7 +118,8 @@ private:
                           std::function<void(const QJsonObject &)> completed);
     void discoverySecret(const QString &action, const QByteArray &secret,
                          std::function<void(bool, const QByteArray &)> completed);
-    void finishDiscovery(const QString &error = {});
+    void markDiscoveryDevicesCached();
+    void finishDiscovery(const QString &error = {}, bool accessDenied = false);
     bool cancelDiscoveryRequest();
     void mergeExternalDevices();
 #ifdef Q_OS_ANDROID
@@ -147,6 +150,7 @@ private:
     bool m_externalAppInstalled = false;
     QString m_externalStatus;
     bool m_discoveryConnected = false;
+    bool m_refreshingDiscovery = false;
     quint64 m_discoveryGeneration = 0;
     qint64 m_discoveryTokenExpiry = 0, m_discoveryRefreshAt = 0;
     QByteArray m_discoveryCredential, m_discoveryToken;

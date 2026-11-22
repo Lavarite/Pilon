@@ -35,6 +35,8 @@ TestCase {
     }
     QtObject {
         id: ssh
+        property bool x11DisplayAvailable: true
+        property bool trustedX11Forwarding: false
         property bool running: false
         property bool authenticated: false
         property string errorMessage: ""
@@ -67,6 +69,10 @@ TestCase {
     }
     QtObject {
         id: context
+        property bool storedForwarding: false
+        property bool writable: true
+        function setting(key, fallback) { return key === "trustedX11Forwarding" ? storedForwarding : fallback }
+        function setSetting(key, value) { if (!writable) return false; storedForwarding=value; return true }
         property var preferences: preferences
         property var fileWorkspace: workspace
         property var remoteFiles: localFiles
@@ -381,6 +387,20 @@ TestCase {
     function test_settingsEditDefaultsWithoutOpeningConnection() {
         const settings=createTemporaryObject(settingsFactory,host)
         verify(settings)
+        const forwarding=findChild(settings,"sshTrustedX11")
+        verify(forwarding && !forwarding.checked)
+        mouseClick(forwarding)
+        compare(context.storedForwarding,true)
+        context.writable=false
+        mouseClick(forwarding)
+        compare(context.storedForwarding,true)
+        verify(forwarding.checked)
+        context.writable=true
+        mouseClick(forwarding)
+        compare(context.storedForwarding,false)
+        ssh.x11DisplayAvailable=false
+        compare(forwarding.enabled,false)
+        ssh.x11DisplayAvailable=true
         const global=findChild(settings,"sshDefaultUsername")
         global.text="configured-user";global.editingFinished()
         compare(workspace.username,"configured-user")

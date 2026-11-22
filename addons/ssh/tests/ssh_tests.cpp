@@ -1,5 +1,6 @@
 #include "sshmanager.h"
 #include "sshcredentials.h"
+#include "../../../src/core/network/networksnapshot.h"
 #include <QFile>
 #include <QSettings>
 #include <QScopeGuard>
@@ -30,11 +31,45 @@ private slots:
         qputenv("PATH", m_fixture.path().toUtf8() + ':' + m_oldPath);
     }
     void cleanupTestCase() { qputenv("PATH", m_oldPath); qunsetenv("PILON_TEST_SSH_MODE"); }
+    void x11ForwardingIsOptInAndOnlyForTerminals() {
+        qputenv("PILON_TEST_SSH_MODE", "x11-options");
+        const QString log = m_fixture.filePath("ssh-arguments");
+        qputenv("PILON_TEST_SSH_ARGUMENTS", log.toUtf8());
+        const auto oldDisplay = qgetenv("DISPLAY");
+        qputenv("DISPLAY", ":73");
+        auto restore = qScopeGuard([&] {
+            oldDisplay.isNull() ? qunsetenv("DISPLAY") : qputenv("DISPLAY", oldDisplay);
+            qunsetenv("PILON_TEST_SSH_ARGUMENTS");
+        });
+        SshManager manager;
+        const auto capture = [&](auto action, const QByteArray &expected) {
+            QFile file(log);
+            if (file.exists()) QVERIFY(file.remove());
+            action();
+            QTRY_VERIFY_WITH_TIMEOUT(!manager.running(), 3000);
+            QVERIFY(file.open(QIODevice::ReadOnly));
+            const auto arguments = file.readAll().split('\n');
+            QVERIFY(arguments.contains(expected));
+            QCOMPARE(arguments.contains("-Y"), expected == "-Y");
+        };
+        const auto terminal = [&] { manager.connectToHost("tester", "host.fixture.invalid"); };
+        capture(terminal, "-x");
+        QVERIFY(manager.setProperty("trustedX11Forwarding", true));
+        capture(terminal, "-Y");
+        capture([&] { manager.runCommand("tester", "host.fixture.invalid", "pwd"); }, "-x");
+        capture([&] { manager.transferFile("tester", "host.fixture.invalid", log, "/report", true); }, "ForwardX11=no");
+        qunsetenv("DISPLAY");
+        QVERIFY(!manager.x11DisplayAvailable());
+        capture(terminal, "-x");
+    }
     void forgettingPasswordsKeepsSecretsOnFailureAndWaitsForPendingStores() {
         const auto tool=m_fixture.filePath("secret-tool");
         const auto write=[&](const QByteArray &script) {QFile file(tool);if(!file.open(QIODevice::WriteOnly))return false;file.write(script);file.close();return file.setPermissions(QFile::ReadOwner|QFile::WriteOwner|QFile::ExeOwner);};
         auto restore=qScopeGuard([&]{write("#!/bin/sh\nexit 1\n");});
         QVERIFY(write("#!/bin/sh\nprintf 'locked wallet\\n' >&2\nexit 1\n"));
+        const auto sizes = NetworkSnapshot::path("sftp-sizes", {m_fixture.path()});
+        NetworkSnapshot::write(sizes, {{"fixture", 1}});
+        QVERIFY(QFile::exists(sizes));
         SshCredentials::put("fixture","user","fixture-password");
         SshManager manager;QVERIFY(!manager.forgetPasswords());
         QVERIFY(!manager.errorMessage().isEmpty());QCOMPARE(SshCredentials::get("fixture","user"),QString("fixture-password"));
@@ -44,6 +79,7 @@ private slots:
         pending.start("/nonexistent/pilon-test-process");QVERIFY(!pending.waitForStarted());
         QVERIFY(manager.cleanupBlockedReason().isEmpty());
         QVERIFY(manager.forgetPasswords());QVERIFY(manager.errorMessage().isEmpty());
+        QVERIFY(!QFile::exists(sizes));
         QVERIFY(SshCredentials::get("fixture","user").isEmpty());
         QVERIFY(write("#!/bin/sh\nexit 1\n"));QVERIFY(manager.forgetPasswords());
     }

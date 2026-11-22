@@ -15,6 +15,8 @@ PilonScrollView {
     ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
     property var deviceDraft: null
     property string deviceError: ""
+    property bool trustedX11: addon.setting("trustedX11Forwarding", false) === true
+    property string x11Error: ""
     readonly property bool editing: deviceDraft !== null
     readonly property bool addingDevice: editing && deviceDraft.id === ""
     readonly property string editingDeviceId: deviceDraft?.id || ""
@@ -62,6 +64,31 @@ PilonScrollView {
                 onEditingFinished: page.addon.preferences.defaultSshUsername = text.trim()
             }
         }
+        RoundedCheckBox {
+            id: x11
+            objectName: "sshTrustedX11"
+            Layout.fillWidth: true
+            text: qsTr("Trusted X11 forwarding")
+            enabled: page.addon.sshManager.x11DisplayAvailable
+            checked: enabled && page.trustedX11
+            onToggled: {
+                if (page.addon.setSetting("trustedX11Forwarding", checked)) {
+                    page.trustedX11 = checked
+                    page.x11Error = ""
+                } else {
+                    checked = Qt.binding(() => enabled && page.trustedX11)
+                    page.x11Error = qsTr("Could not save the X11 forwarding setting.")
+                }
+            }
+        }
+        Label {
+            Layout.fillWidth: true
+            visible: !!page.x11Error || !x11.enabled || x11.checked
+            text: page.x11Error || (x11.enabled ? qsTr("Remote programs can access your X11 display and input.")
+                : qsTr("No local X11 display is available."))
+            color: page.x11Error ? page.addon.selectedWarningColour : page.addon.selectedTextColour
+            wrapMode: Text.Wrap
+        }
         PilonSectionHeader { Layout.fillWidth: true; text: qsTr("Devices") }
         Repeater {
             id: devices
@@ -90,7 +117,7 @@ PilonScrollView {
                         leftPadding: 2
                         Accessible.name: qsTr("Include %1").arg(deviceRow.modelData.name)
                         checked: deviceRow.modelData.included === true
-                        enabled: !page.manager.busy
+                        enabled: !page.manager.busy && !deviceRow.modelData.cached
                         onToggled: {
                             if (deviceRow.modelData.saved || !page.discovery) page.manager.setDeviceIncluded(deviceRow.modelData.id, checked)
                             else page.discovery.setIncluded(deviceRow.modelData.id, checked)

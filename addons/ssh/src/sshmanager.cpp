@@ -1,4 +1,5 @@
 #include "sshmanager.h"
+#include "../../../src/core/network/networksnapshot.h"
 #include "sshcredentials.h"
 #include <QCoreApplication>
 
@@ -251,6 +252,8 @@ bool SshManager::forgetPasswords()
     }
 #endif
     SshCredentials::clear();
+    NetworkSnapshot::clear("sftp");
+    NetworkSnapshot::clear("sftp-sizes");
     setErrorMessage({});
     return true;
 }
@@ -258,6 +261,11 @@ bool SshManager::forgetPasswords()
 void SshManager::connectToHost(const QString &usernameInput, const QString &hostInput)
 {
     startConnection(usernameInput, hostInput, {});
+}
+
+bool SshManager::x11DisplayAvailable() const
+{
+    return !qEnvironmentVariableIsEmpty("DISPLAY");
 }
 
 void SshManager::connectToHostAt(const QString &usernameInput, const QString &hostInput,
@@ -376,7 +384,9 @@ void SshManager::startConnection(const QString &usernameInput, const QString &ho
     QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
     environment.insert(QStringLiteral("TERM"), QStringLiteral("xterm-256color"));
     m_process.setProcessEnvironment(environment);
-    QStringList arguments{m_taskMode ? QStringLiteral("-T") : QStringLiteral("-tt"),
+    const bool forwardX11 = !m_taskMode && m_trustedX11Forwarding && x11DisplayAvailable();
+    QStringList arguments{forwardX11 ? QStringLiteral("-Y") : QStringLiteral("-x"),
+                          m_taskMode ? QStringLiteral("-T") : QStringLiteral("-tt"),
                           QStringLiteral("-o"), QStringLiteral("ConnectTimeout=10"),
                           QStringLiteral("-o"), QStringLiteral("StrictHostKeyChecking=ask"),
                           QStringLiteral("-o"), QStringLiteral("PermitLocalCommand=yes"),
@@ -387,7 +397,8 @@ void SshManager::startConnection(const QString &usernameInput, const QString &ho
     if (transfer) {
         const QString address = host.contains(QLatin1Char(':')) ? '[' + host + ']' : host;
         const QString remote = username + '@' + address + ':' + remotePath;
-        arguments = {QStringLiteral("-o"), QStringLiteral("ConnectTimeout=10"),
+        arguments = {QStringLiteral("-o"), QStringLiteral("ForwardX11=no"),
+                     QStringLiteral("-o"), QStringLiteral("ConnectTimeout=10"),
                      QStringLiteral("-o"), QStringLiteral("StrictHostKeyChecking=ask"),
                      QStringLiteral("--")};
 #ifdef Q_OS_ANDROID

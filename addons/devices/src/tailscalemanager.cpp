@@ -1,4 +1,5 @@
 #include "tailscalemanager.h"
+#include "../../../src/core/network/networksnapshot.h"
 
 #include <QDesktopServices>
 #include <QDateTime>
@@ -107,7 +108,7 @@ TailscaleManager::TailscaleManager(QObject *parent)
         setStatusKnown(false);
         setServiceRunning(false);
         setLoggedIn(false);
-        setDevices({});
+        showSavedPeers();
         setErrorMessage(tr("Unable to run Tailscale."));
         setBusy(false);
     });
@@ -363,6 +364,7 @@ bool TailscaleManager::forgetUseReceipt()
     if (settings.status() != QSettings::NoError) {
         setErrorMessage(tr("Unable to clear the device account settings. Check the Pilon folder permissions.")); return false;
     }
+    NetworkSnapshot::clear("tailscale-status");
     emit usedByPilonChanged(); return true;
 }
 
@@ -405,13 +407,14 @@ void TailscaleManager::refresh(bool clearError)
     if (m_statusProcess.state() != QProcess::NotRunning || m_actionProcess.state() != QProcess::NotRunning)
         return;
 
+    if (m_devices.isEmpty()) showSavedPeers();
     const auto executable = QStandardPaths::findExecutable(QStringLiteral("tailscale"));
     if (executable != m_tailscaleExecutable) {
         m_tailscaleExecutable = executable;
         emit externalStatusChanged();
     }
     if (m_tailscaleExecutable.isEmpty()) {
-        setStatusKnown(false); setServiceRunning(false); setLoggedIn(false); setDevices({});
+        setStatusKnown(false); setServiceRunning(false); setLoggedIn(false); showSavedPeers();
         setErrorMessage(tr("Tailscale is not installed."));
         return;
     }
@@ -582,7 +585,7 @@ void TailscaleManager::rebuildIncludedDevices()
     QVariantList includedDevices;
     for (const QVariant &deviceValue : std::as_const(m_devices)) {
         const QVariantMap device = deviceValue.toMap();
-        if (device.value(QStringLiteral("included")).toBool())
+        if (device.value(QStringLiteral("included")).toBool() && !device.value("cached").toBool())
             includedDevices.append(device);
     }
 
@@ -643,6 +646,29 @@ void TailscaleManager::handleStatusFinished(int exitCode, QProcess::ExitStatus e
     applyStatus(output, error, exitStatus == QProcess::NormalExit && exitCode == 0);
 }
 
+void TailscaleManager::clearPeerSnapshots()
+{
+    NetworkSnapshot::clear("tailscale-discovery");
+    NetworkSnapshot::clear("tailscale-status");
+    m_discoveryDevices.clear();
+    setDevices({});
+}
+
+void TailscaleManager::showSavedPeers()
+{
+    const auto identity = PilonSettings().value("tailscale/usedIdentity").toString();
+    const auto file = identity.isEmpty() ? QString{} : NetworkSnapshot::path("tailscale-status", {identity});
+    auto peers = NetworkSnapshot::read(file).value("devices").toArray().toVariantList();
+    for (auto &entry : peers) {
+        auto peer = entry.toMap();
+        peer.insert("cached", true);
+        peer.insert("onlineKnown", false);
+        peer.insert("online", false);
+        entry = peer;
+    }
+    setDevices(peers);
+}
+
 void TailscaleManager::applyStatus(const QByteArray &output, const QString &error, bool success, bool serviceAvailable)
 {
     m_timeout.stop();
@@ -651,7 +677,7 @@ void TailscaleManager::applyStatus(const QByteArray &output, const QString &erro
         m_cleanupPending=false;
         setServiceRunning(false);
         setLoggedIn(false);
-        setDevices({});
+        showSavedPeers();
         if (!error.isEmpty()) setErrorMessage(error);
         else if (m_errorMessage.isEmpty()) setErrorMessage(tr("Unable to read the device account status. Check the service and try again."));
         setBusy(false);
@@ -664,7 +690,7 @@ void TailscaleManager::applyStatus(const QByteArray &output, const QString &erro
         m_cleanupPending=false;
         setServiceRunning(serviceAvailable);
         setLoggedIn(false);
-        setDevices({});
+        showSavedPeers();
         setErrorMessage(tr("Tailscale returned an unreadable device status."));
         setBusy(false);
         return;
@@ -714,6 +740,10 @@ void TailscaleManager::applyStatus(const QByteArray &output, const QString &erro
     }
     setServiceRunning(serviceAvailable);
     setLoggedIn(!needsLogin);
+    if (!needsLogin && settings.value("tailscale/usedIdentity").toString() == m_currentIdentity)
+        NetworkSnapshot::write(NetworkSnapshot::path("tailscale-status", {m_currentIdentity}),
+                               {{"devices", QJsonArray::fromVariantList(devices)}});
+    else NetworkSnapshot::clear("tailscale-status");
     setDevices(std::move(devices));
     setStatusKnown(true);
     setBusy(false);

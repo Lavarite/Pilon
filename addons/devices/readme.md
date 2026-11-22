@@ -1,7 +1,9 @@
 # Tailscale
 
-Enable Tailscale in Add-ons to discover peers. Manage which peers appear in SSH
-and Files under **SSH → Connections**. Direct SSH connections work independently.
+Enable Tailscale in Add-ons to discover peers. Open **SSH → Tailscale** to
+manage its connection. Choose which peers appear in SSH and Files under
+**SSH → Connections**. Saved peers appear during refresh. A successful
+discovery makes them available for connections. Direct SSH hosts work independently.
 
 ## Android
 
