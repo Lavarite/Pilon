@@ -128,17 +128,53 @@ esac
         QVERIFY(!manager.loggedIn());QVERIFY(!manager.usedByPilon());
         TailscaleManager restarted;restarted.restoreDiscovery();QTRY_VERIFY(!restarted.busy());
         QVERIFY(restarted.discoveryConnected());QCOMPARE(restarted.m_discoveryCredential,credential());
+        QCOMPARE(restarted.devices().size(), 1);
+        QCOMPARE(restarted.devices().first().toMap().value("name").toString(), QString("Fixture peer"));
+        QVERIFY(restarted.includedDevices().isEmpty()); // cached discovery cannot activate a connection
         restarted.disconnectDiscovery();QTRY_VERIFY(!restarted.busy());
         QVERIFY(!restarted.discoveryConnected());QVERIFY(credential().isEmpty());QVERIFY(restarted.devices().isEmpty());
+    }
+    void activeDiscoveryFailureOnlyRetainsReadOnlyPeersWhenAccessIsUncertain() {
+        TailscaleManager manager;
+        auto *http = network(manager);
+        http->responses = {{200, token()}, {200, peers()}};
+        manager.connectDiscovery("fixture-refresh", "fixture-client-secret-a");
+        QTRY_VERIFY(!manager.busy());
+        manager.setDeviceIncluded("api:peer-a", true);
+        QCOMPARE(manager.includedDevices().size(), 1);
+
+        http->responses = {{503, {}}};
+        manager.refreshDiscovery();
+        QTRY_VERIFY(!manager.busy());
+        QCOMPARE(manager.devices().size(), 1);
+        QVERIFY(manager.devices().first().toMap().value("cached").toBool());
+        QVERIFY(manager.includedDevices().isEmpty());
+
+        http->responses = {{200, token()}, {200, peers()}};
+        manager.refreshDiscovery();
+        QTRY_VERIFY(!manager.busy());
+        QCOMPARE(manager.includedDevices().size(), 1);
+
+        http->responses = {{403, {}}};
+        manager.refreshDiscovery();
+        QTRY_VERIFY(!manager.busy());
+        QVERIFY(manager.devices().isEmpty());
+        QVERIFY(manager.includedDevices().isEmpty());
+        TailscaleManager reopened;
+        reopened.restoreDiscovery();
+        QTRY_VERIFY(!reopened.busy());
+        QVERIFY(reopened.devices().isEmpty());
     }
     void failedReplacementCannotReuseTheNewAccountsToken() {
         TailscaleManager manager;auto *http=network(manager);
         http->responses={{200,token("token-a")},{200,peers()}};
         manager.connectDiscovery("client-a","fixture-client-secret-a");QTRY_VERIFY(!manager.busy());
         const auto previous=credential();
+        manager.setDeviceIncluded("api:peer-a",true);
         http->responses={{200,token("token-b")},{403,"{\"error\":\"do not expose this body\"}"}};
         manager.connectDiscovery("client-b","fixture-client-secret-b");QTRY_VERIFY(!manager.busy());
         QVERIFY(manager.discoveryConnected());QCOMPARE(credential(),previous);QVERIFY(manager.m_discoveryToken.isEmpty());
+        QCOMPARE(manager.includedDevices().size(),1);
         QVERIFY(!manager.errorMessage().contains("do not expose"));
         http->responses={{200,token("token-a-refreshed")},{200,peers()}};
         manager.refreshDiscovery();QTRY_VERIFY(!manager.busy());

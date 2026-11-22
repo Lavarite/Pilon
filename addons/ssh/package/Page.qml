@@ -34,14 +34,18 @@ Item {
         sshUsername.userEdited = false
     }
 
+    function connectTerminal(username, host, directory) {
+        addon.sshManager.trustedX11Forwarding = addon.setting("trustedX11Forwarding", false) === true
+        addon.sshManager.connectToHostAt(username, host, directory)
+    }
+
     function startPendingTerminalConnection() {
         if (pendingTerminalConnection === null || addon.sshManager.running)
             return
         const connection = pendingTerminalConnection
         pendingTerminalConnection = null
         sshTerminal.reset()
-        addon.sshManager.connectToHostAt(connection.username, connection.host,
-                                   connection.path)
+        connectTerminal(connection.username, connection.host, connection.path)
         activeHost = addon.sshManager.running ? connection.host : ""
     }
 
@@ -394,18 +398,14 @@ Item {
                 }
             }
 
-            PilonButton {
+            PilonPanelButton {
                 id: connectButton
                 objectName: "sshConnectButton"
                 x: parent.width - width
                 y: sshConnectionBar.compact ? sshConnectionBar.rowHeight + 8 : 0
 
-                property color actionColour: addon.sshManager.running
-                                                     ? addon.selectedWarningColour
-                                                     : addon.selectedAccentColour
-                property color actionTextColour: addon.contrastingText(actionColour, 0.96)
-                icon.color: actionTextColour
-
+                fillColour: addon.sshManager.running ? addon.selectedWarningColour : addon.selectedAccentColour
+                foregroundColour: addon.contrastingText(fillColour, 0.96)
                 width: 48
                 height: sshConnectionBar.rowHeight
                 text: addon.sshManager.running ? qsTr("Log out") : qsTr("Connect")
@@ -435,9 +435,7 @@ Item {
                             && !sshPage.canConnectToDevice(addon.discoveredDevices[sshDevice.currentIndex]))
                         return
                     sshTerminal.reset()
-                    addon.sshManager.connectToHost(sshUsername.text,
-                                             host === undefined || host === null
-                                             ? "" : host.toString())
+                    sshPage.connectTerminal(sshUsername.text, host?.toString() ?? "", "")
                     if (!addon.sshManager.running)
                         return
                     sshPage.activeHost = host.toString()
@@ -453,26 +451,6 @@ Item {
                     }
                 }
 
-                contentItem: ControlsImpl.IconLabel {
-                    spacing: connectButton.spacing
-                    mirrored: connectButton.mirrored
-                    display: connectButton.display
-                    icon: connectButton.icon
-                    defaultIconColor: connectButton.actionTextColour
-                    text: connectButton.text
-                    font: connectButton.font
-                    color: connectButton.actionTextColour
-                    alignment: Qt.AlignCenter
-                }
-
-                background: Rectangle {
-                    radius: 10
-                    color: connectButton.down
-                           ? Qt.darker(connectButton.actionColour, 1.12)
-                           : connectButton.hovered
-                             ? Qt.lighter(connectButton.actionColour, 1.08)
-                             : connectButton.actionColour
-                }
             }
         }
     }

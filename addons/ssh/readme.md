@@ -4,6 +4,14 @@ Enable SSH in **Settings → Add-ons**, then open its sidebar page. Set the host
 user and port before connecting. The page provides a remote terminal; connection
 defaults are configured in the add-on's settings.
 
+**SSH → Connections → Trusted X11 forwarding** enables OpenSSH `-Y` for new
+interactive terminals. A trusted remote application can read and control the
+local X11 display. The local session needs `DISPLAY` and, for cookie-based
+authentication, `xauth`. The remote SSH server must permit X11 forwarding.
+Android has no built-in X11 display. Pilon shows the setting as unavailable
+when the session supplies none. File transfers and background commands
+always disable X11 forwarding.
+
 Verify an unknown host fingerprint with the server owner before accepting it.
 A changed host key must be investigated rather than accepted automatically.
 Saved passwords use the platform credential store. Disconnection closes the

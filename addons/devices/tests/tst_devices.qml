@@ -63,6 +63,7 @@ TestCase {
         readonly property var tailscaleManager: manager
         property bool deviceDiscoveryEnabled: true
         readonly property var preferences: ({defaultSshUsername: ""})
+        function setting(key, fallback) { return fallback }
         readonly property var remoteFiles: ({localDevice: {username: "local"}})
         readonly property var fileWorkspace: QtObject {
             readonly property var deviceUsernames: ({})
@@ -70,7 +71,7 @@ TestCase {
             readonly property var deviceDiscovery: fakeAddon.deviceDiscoveryEnabled ? manager : null
             readonly property var sshDeviceOptions: deviceDiscovery ? manager.devices : manager.savedDevices
         }
-        readonly property var sshManager: ({errorMessage: ""})
+        readonly property var sshManager: ({errorMessage: "", x11DisplayAvailable: false})
         readonly property color selectedTextColour: "#eee8df"
         readonly property color selectedMainColour: "#24201c"
         readonly property color selectedSecondaryColour: "#37312a"

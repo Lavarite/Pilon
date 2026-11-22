@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 import os, sys, termios
 mode = os.environ.get('PILON_TEST_SSH_MODE') or next((arg.split('.')[0] for arg in sys.argv[1:] if arg.endswith('.fixture.invalid')), 'failure')
+if mode == 'x11-options':
+    with open(os.environ['PILON_TEST_SSH_ARGUMENTS'], 'w') as output:
+        output.write('\n'.join(sys.argv[1:]))
+    sys.exit(0)
 if mode == 'long-error':
     print('Additional SSH diagnostic output.\n' * 80 + 'Permission denied (publickey).', flush=True)
     sys.exit(255)

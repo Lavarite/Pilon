@@ -27,6 +27,8 @@ class SshManager : public QObject
     Q_PROPERTY(bool promptSecret READ promptSecret NOTIFY promptChanged)
     Q_PROPERTY(bool promptPassword READ promptPassword NOTIFY promptChanged)
     Q_PROPERTY(bool passwordSavingAvailable READ passwordSavingAvailable CONSTANT)
+    Q_PROPERTY(bool x11DisplayAvailable READ x11DisplayAvailable CONSTANT)
+    Q_PROPERTY(bool trustedX11Forwarding MEMBER m_trustedX11Forwarding NOTIFY trustedX11ForwardingChanged)
     Q_PROPERTY(QVariantList savedConnections READ savedConnections NOTIFY savedConnectionsChanged)
 
 public:
@@ -49,6 +51,7 @@ public:
     [[nodiscard]] bool promptSecret() const;
     [[nodiscard]] bool promptPassword() const;
     [[nodiscard]] bool passwordSavingAvailable() const;
+    [[nodiscard]] bool x11DisplayAvailable() const;
     [[nodiscard]] QVariantList savedConnections() const;
 
     void runCommand(const QString &username, const QString &host, const QString &command);
@@ -76,6 +79,7 @@ signals:
     void errorMessageChanged();
     void connectionTextChanged();
     void promptChanged();
+    void trustedX11ForwardingChanged();
     void terminalData(const QByteArray &data);
     void savedConnectionsChanged();
     void taskFinished(int exitCode, const QString &output);
@@ -101,6 +105,7 @@ private:
     void submitPromptInternal(const QString &input, bool savePassword);
 
     QString m_sshExecutable;
+    bool m_trustedX11Forwarding = false;
     QString m_secretToolExecutable;
     QProcess m_process;
     QProcess m_secretLookupProcess;

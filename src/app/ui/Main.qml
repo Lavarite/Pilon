@@ -403,11 +403,29 @@ Window {
         settingsMenu.openSection("addon:" + id + ":" + entry.id)
         return showAddonSettings()
     }
-    function showAddonSettings() {
+    function addonSettingsCategories(addons) {
+        const available = addons.filter(addon => addon.enabled && !addon.error)
+        const tailscale = available.find(addon => addon.id === "devices")
+        const categories = []
+        function add(owner, group) {
+            for (const section of owner.settings) {
+                categories.push({id: "addon:" + owner.id + ":" + section.id, title: section.name, group,
+                    selectorTitle: group === section.name ? section.name : group + ": " + section.name,
+                    objectName: owner.id + "-" + section.id + "Tab", addonId: owner.id, sectionId: section.id})
+            }
+        }
+        for (const addon of available) {
+            if (addon.id === "devices") continue
+            add(addon, addon.name)
+            if (addon.id === "ssh" && tailscale) add(tailscale, addon.name)
+        }
+        return categories
+    }
+    function showAddonSettings(background = false) {
         const section = settingsMenu.categories.find(item => item.id === settingsMenu.currentId)
         if (!section || !section.addonId) return true
         const host = addonHosts[section.addonId]
-        if (!host || !host.openSettings(section.sectionId, settingsMenu.pageArea)) return false
+        if (!host || !host.openSettings(section.sectionId, settingsMenu.pageArea, background)) return false
         host.settingsContent.visible = Qt.binding(() => settingsMenu.currentSection?.addonId === host.descriptor.id)
         return true
     }

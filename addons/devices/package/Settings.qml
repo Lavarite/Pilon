@@ -46,7 +46,7 @@ PilonScrollView {
         Flow {
             Layout.fillWidth: true
             spacing: 8
-            PilonWrapButton { objectName: "devicesRefresh"; text: qsTr("Refresh"); enabled: !page.manager.busy; onClicked: page.manager.refresh() }
+            PilonWrapButton { objectName: "devicesRefresh"; text: page.manager.busy ? qsTr("Working…") : qsTr("Refresh"); enabled: !page.manager.busy; onClicked: page.manager.refresh() }
             PilonWrapButton {
                 objectName: "devicesOpenExternal"
                 text: qsTr("Open Tailscale")

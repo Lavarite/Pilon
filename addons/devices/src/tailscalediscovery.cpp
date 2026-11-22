@@ -1,4 +1,5 @@
 #include "tailscalemanager.h"
+#include "../../../src/core/network/networksnapshot.h"
 #include "../../../src/platform/android/androidcredentials.h"
 #include "../../../src/core/workspace/pilonsettings.h"
 
@@ -21,6 +22,12 @@ constexpr auto scope = "devices:core:read";
 constexpr qsizetype maximumResponse = 4 * 1024 * 1024;
 QMutex credentialMutex;
 struct SecretResult { bool ok = false; QByteArray secret; bool recoveryFailed = false; };
+
+QString discoverySnapshot(const QByteArray &credential)
+{
+    const auto id = QJsonDocument::fromJson(credential).object().value("clientId").toString();
+    return id.isEmpty() ? QString{} : NetworkSnapshot::path("tailscale-discovery", {id});
+}
 
 bool credentialValid(const QJsonObject &credential)
 {
@@ -116,11 +123,35 @@ bool TailscaleManager::cancelDiscoveryRequest()
     return true;
 }
 
-void TailscaleManager::finishDiscovery(const QString &error)
+void TailscaleManager::markDiscoveryDevicesCached()
+{
+    for (auto &entry : m_discoveryDevices) {
+        auto device = entry.toMap();
+        device.insert("cached", true);
+        entry = device;
+    }
+}
+
+void TailscaleManager::finishDiscovery(const QString &error, bool accessDenied)
 {
     m_timeout.stop();
     m_discoveryCommitState.reset();
-    if (!error.isEmpty()) { m_discoveryToken.clear(); m_discoveryTokenExpiry = 0; }
+    if (!error.isEmpty()) {
+        m_discoveryToken.clear();
+        m_discoveryTokenExpiry = 0;
+        if (m_refreshingDiscovery) {
+            if (accessDenied) {
+                const auto file = discoverySnapshot(m_discoveryCredential);
+                if (!file.isEmpty()) QFile::remove(file);
+                m_discoveryDevices.clear();
+            } else {
+                markDiscoveryDevicesCached();
+            }
+            mergeExternalDevices();
+            emit discoveryChanged();
+        }
+    }
+    m_refreshingDiscovery = false;
     setErrorMessage(error);
     setBusy(false);
 }
@@ -149,6 +180,10 @@ void TailscaleManager::restoreDiscovery()
         if (!ok) { finishDiscovery(tr("The secure credential store could not be opened. Unlock it and retry.")); return; }
         m_discoveryConnected = !credential.isEmpty() && credentialValid(QJsonDocument::fromJson(credential).object());
         m_discoveryCredential = m_discoveryConnected ? credential : QByteArray();
+        m_discoveryDevices = NetworkSnapshot::read(discoverySnapshot(m_discoveryCredential))
+                                 .value("devices").toArray().toVariantList();
+        markDiscoveryDevicesCached();
+        mergeExternalDevices();
         finishDiscovery(credential.isEmpty() || m_discoveryConnected ? QString() : tr("The saved discovery credential is unreadable. Connect device discovery again."));
         emit discoveryChanged();
     });
@@ -158,16 +193,22 @@ void TailscaleManager::refreshDiscovery()
 {
     if (m_busy || !m_discoveryConnected) return;
     cancelDiscoveryRequest(); setBusy(true); m_timeout.start(15000);
+    m_refreshingDiscovery = true;
     m_discoveryCommitState = std::make_shared<std::atomic<DiscoveryCommit>>(DiscoveryCommit::Active);
     m_discoveryRefreshAt = QDateTime::currentMSecsSinceEpoch() + 60000;
     discoverySecret("lookup", {}, [this](bool ok, const QByteArray &credential) {
         if (!ok) { finishDiscovery(tr("The secure credential store could not be opened. Unlock it and retry.")); return; }
         if (!credentialValid(QJsonDocument::fromJson(credential).object())) {
-            m_discoveryConnected = false; m_discoveryDevices.clear(); m_discoveryCredential.clear();
-            mergeExternalDevices(); emit discoveryChanged();
-            finishDiscovery(tr("The saved discovery credential could not be read. Connect device discovery again.")); return;
+            m_discoveryConnected = false;
+            finishDiscovery(tr("The saved discovery credential could not be read. Connect device discovery again."), true);
+            m_discoveryCredential.clear();
+            return;
         }
-        if (credential != m_discoveryCredential) m_discoveryToken.clear();
+        if (credential != m_discoveryCredential) {
+            m_discoveryToken.clear();
+            m_discoveryDevices.clear();
+            mergeExternalDevices();
+        }
         m_discoveryCredential = credential;
         if (!m_discoveryToken.isEmpty() && QDateTime::currentMSecsSinceEpoch() < m_discoveryTokenExpiry)
             requestDiscoveryDevices(credential, false);
@@ -190,7 +231,7 @@ void TailscaleManager::requestDiscoveryToken(const QByteArray &credential, bool 
         if (token.isEmpty() || token.size() > 4096 || !bearer.match(QString::fromLatin1(token)).hasMatch()
             || result.value("token_type").toString().compare("Bearer", Qt::CaseInsensitive) != 0
             || (!granted.isEmpty() && granted.trimmed() != QLatin1String(scope))) {
-            finishDiscovery(tr("Tailscale did not grant read-only device access. Use devices:core:read and reconnect.")); return;
+            finishDiscovery(tr("Tailscale did not grant read-only device access. Use devices:core:read and reconnect."), true); return;
         }
         m_discoveryToken = token;
         m_discoveryTokenExpiry = QDateTime::currentMSecsSinceEpoch() + qBound(1, result.value("expires_in").toInt(3600), 3600) * 1000LL - 30000;
@@ -225,11 +266,10 @@ void TailscaleManager::discoveryRequest(const QString &path, const QByteArray &b
         m_discoveryReply = nullptr;
         bytes->append(reply->readAll());
         const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-        if (*oversized || bytes->size() > maximumResponse) { finishDiscovery(tr("Tailscale returned too much device data.")); return; }
         if (status == 400 || status == 401 || status == 403) {
-            m_discoveryToken.clear();
-            finishDiscovery(tr("Device discovery was denied. Check the OAuth client ID, secret and devices:core:read permission.")); return;
+            finishDiscovery(tr("Device discovery was denied. Check the OAuth client ID, secret and devices:core:read permission."), true); return;
         }
+        if (*oversized || bytes->size() > maximumResponse) { finishDiscovery(tr("Tailscale returned too much device data.")); return; }
         if (reply->error() != QNetworkReply::NoError || status != 200) {
             finishDiscovery(tr("Unable to read Tailscale devices. Check the connection and refresh.")); return;
         }
@@ -274,6 +314,8 @@ void TailscaleManager::requestDiscoveryDevices(const QByteArray &credential, boo
         }
         const auto accept = [this, devices] {
             m_discoveryDevices = devices; m_discoveryConnected = true;
+            NetworkSnapshot::write(discoverySnapshot(m_discoveryCredential),
+                                   {{"devices", QJsonArray::fromVariantList(devices)}});
             m_discoveryRefreshAt = QDateTime::currentMSecsSinceEpoch() + 60000;
             mergeExternalDevices(); finishDiscovery(); emit discoveryChanged();
         };
@@ -313,6 +355,7 @@ void TailscaleManager::disconnectDiscovery()
         m_discoveryCredential = previous;
         discoverySecret("clear", {}, [this](bool cleared, const QByteArray &) {
             if (!cleared) { finishDiscovery(tr("The secure credential store could not remove device discovery. Unlock it and retry.")); return; }
+            NetworkSnapshot::clear("tailscale-discovery");
             m_discoveryConnected = false; m_discoveryDevices.clear(); m_discoveryCredential.clear(); m_discoveryToken.clear();
             mergeExternalDevices(); finishDiscovery(); emit discoveryChanged();
         });
