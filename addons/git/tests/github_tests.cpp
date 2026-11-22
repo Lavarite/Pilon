@@ -97,6 +97,8 @@ if args[:2]==['auth','login']:
     while not (root/'approve').exists(): time.sleep(.02)
     (root/'signed-out').unlink(missing_ok=True)
 elif args[:2]==['auth','logout']: (root/'signed-out').touch()
+elif (root/'offline').exists():
+    print('Network unreachable',file=sys.stderr); sys.exit(1)
 elif (root/'signed-out').exists():
     print('Run gh auth login',file=sys.stderr); sys.exit(4)
 elif args==['api','user']: print('{"login":"tester"}')
@@ -346,6 +348,31 @@ else:sys.exit(3)
         write(root->path()+"/approve", {}); QTRY_VERIFY(!manager.busy()); QCOMPARE(manager.account(), QString("tester"));
         QCOMPARE(manager.repositories().size(), 2); QCOMPARE(manager.commitName(), QString("Test User"));
         manager.logout(); QTRY_VERIFY(!manager.busy()); QVERIFY(manager.account().isEmpty()); QVERIFY(manager.repositories().isEmpty());
+    }
+    void repositoryCacheSurvivesOfflineRefreshUntilSignOut() {
+        GitHubManager original;
+        original.refreshAccount();
+        QTRY_VERIFY(!original.busy());
+        const auto repos = original.repositories();
+        QCOMPARE(repos.size(), 2);
+        GitHubManager reopened;
+        QCOMPARE(reopened.repositories(), repos);
+        write(root->path()+"/offline", {});
+        reopened.refreshAccount();
+        QCOMPARE(reopened.repositories(), repos);
+        QTRY_VERIFY(!reopened.busy());
+        QVERIFY(!reopened.error().isEmpty());
+        QCOMPARE(reopened.repositories(), repos);
+        QCOMPARE(reopened.account(), QString("tester"));
+        const auto originalProvider = reopened.activeProvider();
+        reopened.addProvider("GitLab");
+        QVERIFY(reopened.repositories().isEmpty());
+        reopened.setActiveProvider(originalProvider);
+        QCOMPARE(reopened.repositories(), repos);
+        QVERIFY(QFile::remove(root->path()+"/offline"));
+        reopened.logout();
+        QTRY_VERIFY(!reopened.busy());
+        QVERIFY(GitHubManager().repositories().isEmpty());
     }
     void gitlabBrowserUrlIsScopedToTheSelectedProvider_data() {
         QTest::addColumn<QString>("url"); QTest::addColumn<bool>("valid");

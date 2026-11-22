@@ -13,6 +13,7 @@ class AssistantConnections : public QObject {
     Q_PROPERTY(QVariantList servers READ servers NOTIFY modelsChanged)
     Q_PROPERTY(QVariantMap serverUsage MEMBER m_serverUsage NOTIFY stateChanged)
     Q_PROPERTY(QVariantList usage READ usage NOTIFY stateChanged)
+    Q_PROPERTY(bool refreshingUsage READ refreshingUsage NOTIFY stateChanged)
     Q_PROPERTY(bool signingIn READ signingIn NOTIFY stateChanged)
     Q_PROPERTY(bool signingOut READ signingOut NOTIFY stateChanged)
     Q_PROPERTY(QString userCode READ userCode NOTIFY stateChanged)
@@ -28,8 +29,9 @@ public:
     QVariantList servers() const { return m_servers; }
     QVariantList models() const;
     QVariantList usage() const;
-    void updateServerUsage(const QString &id, const QVariantMap &limits);
+    void updateServerUsage(const QVariantMap &profile, const QVariantMap &limits);
     void updateRateLimits(const QJsonObject &result);
+    bool refreshingUsage() const { return m_usageGeneration && m_usageGeneration == m_accountGeneration; }
     Q_INVOKABLE void refreshUsage();
     bool signingIn() const { return m_signingIn; }
     bool signingOut() const { return m_signingOut; }
@@ -71,4 +73,5 @@ private:
     QList<QMetaObject::Connection> m_pendingStarts;
     bool m_signingIn = false, m_signingOut = false;
     quint64 m_accountGeneration = 0, m_loginGeneration = 0;
+    quint64 m_usageGeneration = 0;
 };

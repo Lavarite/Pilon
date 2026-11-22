@@ -8,7 +8,7 @@ import QtQuick.Controls.impl as ControlsImpl
 import "ui"
 import "ui/PilonStyle.js" as PilonStyle
 
-ScrollView {
+PilonScrollView {
     id: settings
     palette.window: mainColour; palette.base: secondaryColour; palette.button: secondaryColour
     palette.text: textColour; palette.windowText: textColour; palette.buttonText: textColour
@@ -71,61 +71,11 @@ ScrollView {
     }
 
     component Choice: PilonComboBox {
-        id: choice
         width: parent.width
-        implicitHeight: 40
         textRole: "name"
-        leftPadding: 12; rightPadding: 32
-        contentItem: Text {
-            text: choice.displayText
-            color: settings.textColour
-            verticalAlignment: Text.AlignVCenter
-            elide: Text.ElideRight
-        }
-        indicator: ControlsImpl.ColorImage {
-            x: choice.width - width - 10; y: (choice.height - height) / 2
-            width: 16; height: 16; rotation: 90
-            source: "icons/chevron-right.svg"; color: settings.textColour
-        }
-        background: Rectangle {
-            radius: 8; color: settings.secondaryColour
-            border.color: choice.activeFocus ? settings.accentColour : settings.alpha(settings.textColour, 0.2)
-        }
-        delegate: ItemDelegate {
-            id: option
-            required property var modelData
-            required property int index
-            width: choice.width
-            Accessible.name: modelData.name
-            highlighted: choice.highlightedIndex === index
-            contentItem: Text {
-                text: option.modelData.name
-                color: settings.textColour; elide: Text.ElideRight
-                verticalAlignment: Text.AlignVCenter
-            }
-            background: Rectangle {
-                radius: 8
-                color: option.highlighted ? settings.alpha(settings.accentColour, 0.28) : "transparent"
-            }
-        }
-
     }
 
-    component Action: PilonButton {
-        id: action
-        width: Math.min(implicitWidth, parent.width)
-        leftPadding: 12; rightPadding: 12
-        contentItem: Text {
-            text: action.text; color: settings.textColour
-            verticalAlignment: Text.AlignVCenter; horizontalAlignment: Text.AlignHCenter
-            wrapMode: Text.Wrap
-        }
-        background: Rectangle {
-            radius: 8
-            color: action.down ? Qt.darker(settings.secondaryColour, 1.12) : settings.secondaryColour
-            border.color: action.activeFocus ? settings.accentColour : settings.alpha(settings.textColour, 0.2)
-        }
-    }
+    component Action: PilonWrapButton {}
 
     component Nickname: Item {
         id: nameField
@@ -223,7 +173,7 @@ ScrollView {
             open()
         }
         onClosed: apiKey.text = ""
-        contentItem: ScrollView {
+        contentItem: PilonScrollView {
             implicitHeight: apiFields.implicitHeight; contentWidth: availableWidth; clip: true
             Column {
                 id: apiFields; width: parent.width; spacing: 8
@@ -289,7 +239,12 @@ ScrollView {
                 Action { objectName: "chatgptSignIn"; text: qsTr("Sign in with ChatGPT"); visible: !!settings.connections && !settings.hasChatGptSession; enabled: !settings.assistant.busy && !!settings.connections && !settings.connections.signingIn && !settings.connections.signingOut; onClicked: settings.connections.signIn() }
                 Action { objectName: "chatgptCancelSignIn"; text: qsTr("Cancel sign-in"); visible: !!settings.connections && settings.connections.signingIn; onClicked: settings.connections.cancelSignIn() }
                 Action { objectName: "chatgptSignOut"; text: qsTr("Sign out"); enabled: !settings.assistant.busy && !!settings.connections && !settings.connections.signingOut; visible: settings.hasChatGptSession; onClicked: settings.connections.signOut() }
-                Action { text: qsTr("Refresh account"); enabled: !settings.assistant.busy; visible: settings.hasChatGptSession; onClicked: settings.connections.refreshAccount() }
+                Action {
+                    objectName: "chatgptRefreshUsage"
+                    text: settings.connections?.refreshingUsage ? qsTr("Refreshing usage…") : qsTr("Refresh account")
+                    enabled: !settings.assistant.busy && !settings.connections?.refreshingUsage
+                    visible: settings.hasChatGptSession; onClicked: settings.connections.refreshAccount()
+                }
             }
             Column {
                 width: parent.width; spacing: 8
@@ -351,6 +306,12 @@ ScrollView {
                         }
                     }
                     Label { width: parent.width; wrapMode: Text.Wrap; text: parent.quota.text || ""; visible: !(parent.quota.windows || []).length && text.length > 0; color: settings.mutedTextColour }
+                    Label {
+                        objectName: "serverUsageTimestamp"
+                        width: parent.width; wrapMode: Text.Wrap; visible: !!parent.quota.updatedAt
+                        text: visible ? qsTr("Usage as of %1").arg(new Date(parent.quota.updatedAt * 1000).toLocaleString(Qt.locale(), Locale.ShortFormat)) : ""
+                        color: settings.mutedTextColour
+                    }
                 }
             }
 
@@ -703,7 +664,7 @@ ScrollView {
             color: settings.mutedTextColour
             wrapMode: Text.Wrap
         }
-        ScrollView {
+        PilonScrollView {
             width: parent.width
             height: 120
             PilonTextArea {

@@ -676,6 +676,7 @@ for line in sys.stdin:
     }
     void accountQuotaSupportsMultipleBucketsAndSparseUpdates() {
         AssistantConnections connections;
+        connections.m_account = {{"type", "chatgpt"}, {"email", "test@example.test"}};
         const QJsonObject first{{"limitId", "codex"}, {"primary", QJsonObject{{"usedPercent", 25}, {"windowDurationMins", 300}, {"resetsAt", 1800000000}}}};
         const QJsonObject second{{"limitId", "other"}, {"secondary", QJsonObject{{"usedPercent", 100}, {"windowDurationMins", 10080}}}};
         connections.updateRateLimits({{"rateLimitsByLimitId", QJsonObject{{"codex", first}, {"other", second}}}});
@@ -686,6 +687,53 @@ for line in sys.stdin:
         QCOMPARE(connections.usage().size(), 2);
         connections.updateRateLimits({{"rateLimitsByLimitId", QJsonObject{{"codex", QJsonObject{{"primary", QJsonValue::Null}}}}}});
         QVERIFY(connections.usage().isEmpty());
+    }
+    void accountQuotaCacheWaitsForVerifiedIdentity() {
+        QTemporaryDir directory;
+        QFile script(directory.filePath("codex"));
+        QVERIFY(script.open(QIODevice::WriteOnly));
+        script.write(R"PY(#!/usr/bin/env python3
+import sys,json,pathlib
+for line in sys.stdin:
+    req=json.loads(line)
+    if 'id' not in req: continue
+    email,quota=pathlib.Path(__file__).with_name('account').read_text().splitlines()
+    answer={'id':req['id'],'result':{}}
+    if req['method']=='account/read':
+        answer['result']={'account':{'type':'chatgpt','email':email} if email else None}
+    elif req['method']=='account/rateLimits/read':
+        if quota=='offline': answer={'id':req['id'],'error':{'code':-1,'message':'offline'}}
+        else: answer['result']={'rateLimits':{'primary':{'usedPercent':int(quota),'windowDurationMins':300}}}
+    print(json.dumps(answer),flush=True)
+)PY");
+        script.close();
+        QVERIFY(script.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+        const auto setAccount = [&](const QByteArray &email, const QByteArray &quota) {
+            QFile data(directory.filePath("account"));
+            QVERIFY(data.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            data.write(email + '\n' + quota);
+        };
+        const auto home = directory.filePath("home");
+        setAccount("one@example.test", "25");
+        {
+            AssistantConnections online;
+            online.configure(script.fileName(), home, false);
+            online.refreshAccount();
+            QTRY_COMPARE(online.usage().size(), 1);
+        }
+        setAccount("one@example.test", "offline");
+        AssistantConnections restored;
+        restored.configure(script.fileName(), home, false);
+        QVERIFY(restored.account().isEmpty());
+        QVERIFY(restored.usage().isEmpty());
+        restored.refreshAccount();
+        QTRY_COMPARE(restored.account().value("email").toString(), "one@example.test");
+        QTRY_COMPARE(restored.usage().size(), 1);
+        QCOMPARE(restored.usage().first().toMap().value("remaining").toDouble(), 75.0);
+        setAccount("two@example.test", "offline");
+        restored.refreshAccount();
+        QTRY_COMPARE(restored.account().value("email").toString(), "two@example.test");
+        QVERIFY(restored.usage().isEmpty());
     }
     void remoteResponsesUsesKeyAndContinuesAfterNativeTools() {
         QTemporaryDir directory;
@@ -1331,13 +1379,22 @@ elif sys.argv[1]=='clear': path.unlink(missing_ok=True)
         const auto id = connections.servers().first().toMap().value("id").toString();
         const auto registry = QJsonDocument::fromVariant(QSettings().value("assistant/apiServers")).toJson();
         QVERIFY(!registry.contains("fixture-key"));
+        const auto originalProfile = connections.servers().first().toMap();
+        const QVariantMap limits{{"text", "42 requests remaining"}, {"updatedAt", 1000}};
+        connections.updateServerUsage(originalProfile, limits);
         AssistantConnections restored; QCOMPARE(restored.apiKey(id), QByteArray("fixture-key"));
+        QCOMPARE(restored.m_serverUsage.value(id).toMap(), limits);
         QVERIFY(restored.servers().first().toMap().value("hasKey").toBool());
         QVERIFY(!restored.saveServer(id, "Different host", "https://another.example.test/v1", "model", {}, "chat", 32768, false));
         QCOMPARE(restored.servers().first().toMap().value("baseUrl").toString(), QString("https://example.test/v1"));
         QVERIFY(restored.saveServer(id, "Fixture", "https://example.test/v1", "model", "rotated-fixture", "chat", 32768, false));
         AssistantConnections rotated; QCOMPARE(rotated.apiKey(id), QByteArray("rotated-fixture"));
+        rotated.updateServerUsage(originalProfile, limits);
+        QVERIFY(!rotated.m_serverUsage.contains(id));
+        rotated.updateServerUsage(rotated.servers().first().toMap(), limits);
+        QVERIFY(rotated.m_serverUsage.contains(id));
         QVERIFY(rotated.removeServer(id)); QVERIFY(!QFileInfo::exists(directory.filePath("test-secret")));
+        QVERIFY(!rotated.m_serverUsage.contains(id));
     }
     void accountRemovalPreservesCredentialsOnKeyringOrLogoutFailure() {
         QTemporaryDir directory;
@@ -1519,6 +1576,8 @@ http.server.HTTPServer(('127.0.0.1', int(sys.argv[sys.argv.index('--port') + 1])
             manager.m_selectedModel.insert("provider", "chat"); manager.m_selectedModel.insert("remoteModel", "fixture-api");
             manager.m_selectedModel.insert("id", "api/chat-fixture"); manager.m_connections.m_keys["api/chat-fixture"] = "chat-fixture-key";
             manager.m_selectedModel.insert("baseUrl", QString("http://127.0.0.1:%1/v1").arg(server.serverPort()));
+            manager.m_selectedModel.insert("protocol", "chat");
+            manager.m_connections.m_servers = {manager.m_selectedModel};
         }
         manager.m_port = server.serverPort(); manager.m_yolo = true; manager.m_voiceMode = false; manager.m_busy = true;
         manager.m_history.append(QJsonObject{{"role", "user"}, {"content", "Earlier command."}});

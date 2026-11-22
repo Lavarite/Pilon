@@ -2,6 +2,7 @@
 #include "gitmanagedfiles.h"
 #include "gitfolderguard.h"
 #include "../../../src/core/workspace/pilonworkspace.h"
+#include "../../../src/core/network/networksnapshot.h"
 #include "../platform/android/androidgit.h"
 #ifdef Q_OS_ANDROID
 #include "gitcredentialserver.h"
@@ -31,6 +32,18 @@
 #include <QtConcurrentRun>
 
 namespace {
+QString repositoryCachePath(const QString &provider) {
+    return NetworkSnapshot::path("git-repositories", {provider});
+}
+
+QVariantList readRepositoryCache(const QVariantMap &provider) {
+    if (provider.value("account").toString().isEmpty()) return {};
+    const auto snapshot = NetworkSnapshot::read(repositoryCachePath(provider.value("id").toString()));
+    if (snapshot.value("host").toString() != provider.value("host").toString()
+        || snapshot.value("account").toString() != provider.value("account").toString()) return {};
+    return snapshot.value("repositories").toArray().toVariantList();
+}
+
 QString gitLine(const QByteArray &output) {
     auto line=QString::fromUtf8(output);
     if (line.endsWith('\n')) line.chop(1);
@@ -614,7 +627,7 @@ void GitHubManager::setActiveProvider(const QString &id) {
         saveProviders();
         m_activeProvider = id; m_provider = entry.value("type").toString();
         m_host = entry.value("host").toString(); m_sshKey = entry.value("sshKey").toString(); m_account = entry.value("account").toString();
-        m_repositories.clear(); m_repository.clear(); m_changes.clear(); m_error.clear(); m_notice.clear();
+        m_repositories = readRepositoryCache(entry); m_repository.clear(); m_changes.clear(); m_error.clear(); m_notice.clear();
         saveProviders(); emit changed(); return;
     }
 }
@@ -645,10 +658,11 @@ bool GitHubManager::removeProviderRecord(const QString &id) {
     const auto selected=id==m_activeProvider ? providers.isEmpty() ? QString{} : providers.first().toMap().value("id").toString() : m_activeProvider;
     if(!persistProviders(providers,selected))return false;
     m_providers=providers;
+    QFile::remove(repositoryCachePath(id));
     if(id==m_activeProvider){
         QVariantMap entry;for(const auto &value:providers)if(value.toMap().value("id").toString()==selected)entry=value.toMap();
         m_activeProvider=selected;m_provider=entry.value("type","Custom").toString();m_host=entry.value("host").toString();m_sshKey=entry.value("sshKey").toString();m_account=entry.value("account").toString();
-        m_repositories.clear();m_repository.clear();m_changes.clear();
+        m_repositories=readRepositoryCache(entry);m_repository.clear();m_changes.clear();
     }
     return true;
 }
@@ -667,6 +681,7 @@ void GitHubManager::setHost(const QString &host) {
         fail(tr("Enter a host name, such as gitlab.example.com.")); return;
     }
     if (clean == m_host) return;
+    QFile::remove(repositoryCachePath(m_activeProvider));
     m_host = clean;
     m_account.clear(); m_repositories.clear(); m_error.clear(); m_notice.clear(); saveProviders(); emit changed();
 }
@@ -680,18 +695,24 @@ void GitHubManager::refreshAccount() {
     if(busy() || m_worktreeLeaseActive)return;
     if (!providerAvailable()) { fail(tr("Install %1 for account browsing, or use a repository URL.").arg(m_provider == "GitLab" ? "glab" : "github-cli")); return; }
     if (!begin()) return;
+    m_phase = "refreshing-repositories"; emit changed();
     QStringList args{"api", "user"};
     if (m_provider == "GitLab" || m_host != "github.com") args += QStringList{"--hostname", m_host};
     run(m_provider == "GitLab" ? m_glab : m_gh, args, {}, [this](int code, const QByteArray &out, const QByteArray &err) {
         if (code) {
-            m_account.clear(); m_repositories.clear();
-            if (err.contains("auth login") || err.contains("not logged") || err.contains("HTTP 401") || err.contains("not authenticated")) finish();
-            else check(code, err);
+            if (err.contains("auth login") || err.contains("not logged") || err.contains("HTTP 401") || err.contains("not authenticated")) {
+                QFile::remove(repositoryCachePath(m_activeProvider));
+                m_account.clear(); m_repositories.clear(); finish();
+            } else check(code, err);
             return;
         }
         const auto user = QJsonDocument::fromJson(out).object();
-        m_account = user.value(m_provider == "GitLab" ? "username" : "login").toString();
-        if (m_account.isEmpty()) { fail(tr("The provider returned an invalid account.")); return; }
+        const auto account = user.value(m_provider == "GitLab" ? "username" : "login").toString();
+        if (account.isEmpty()) { fail(tr("The provider returned an invalid account.")); return; }
+        if (account != m_account) {
+            QFile::remove(repositoryCachePath(m_activeProvider));
+            m_repositories.clear(); m_account = account; saveProviders(); emit changed();
+        }
         run(m_git, {"config", "--global", "--get", "user.name"}, {}, [this](int, const QByteArray &out, const QByteArray &) {
             if (m_commitName.isEmpty()) m_commitName = QString::fromUtf8(out).trimmed();
             run(m_git, {"config", "--global", "--get", "user.email"}, {}, [this](int, const QByteArray &out, const QByteArray &) {
@@ -769,13 +790,13 @@ void GitHubManager::logout() {
         : QStringList{"auth", "logout", "--hostname", m_host, "--user", m_account}, {},
         [this](int code, const QByteArray &, const QByteArray &err) {
             if (!check(code, err)) return;
+            QFile::remove(repositoryCachePath(m_activeProvider));
             m_account.clear(); m_repositories.clear(); m_repository.clear(); m_changes.clear(); finish();
         });
     m_process.closeWriteChannel();
 }
 void GitHubManager::refreshRepositories() {
-    if (m_account.isEmpty()) { refreshAccount(); return; }
-    if (begin()) loadRepositories();
+    refreshAccount();
 }
 void GitHubManager::loadRepositories() {
     const bool gitlab = m_provider == "GitLab";
@@ -810,7 +831,10 @@ void GitHubManager::loadRepositories() {
             repository["webUrl"] = value.value(gitlab ? "web_url" : "html_url").toString("https://" + m_host + "/" + name);
             repos.append(repository);
         }
-        m_repositories = repos; finish();
+        m_repositories = repos;
+        NetworkSnapshot::write(repositoryCachePath(m_activeProvider), {{"host", m_host}, {"account", m_account},
+            {"repositories", QJsonArray::fromVariantList(repos)}});
+        finish();
     });
 }
 bool GitHubManager::validName(const QString &name) {

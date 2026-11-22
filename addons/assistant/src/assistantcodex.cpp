@@ -170,9 +170,7 @@ void AssistantManager::initializeCodex()
             m_codexProvider.complete(body);
         });
     });
-    connect(&m_codexProvider, &CodexProvider::rateLimits, this, [this](const QVariantMap &limits) {
-        m_connections.updateServerUsage(selectedModel().value("id").toString(), limits);
-    });
+    connect(&m_codexProvider, &CodexProvider::rateLimits, &m_connections, &AssistantConnections::updateServerUsage);
     connect(&m_codexProvider, &CodexProvider::activity, this, [this] { m_completionTimer.start(300000); });
     connect(&m_codexProvider, &CodexProvider::toolDelta, this, [this](int index, const QJsonObject &call) {
         if (!m_busy) return;
@@ -299,7 +297,7 @@ void AssistantManager::requestCompletion()
     parameters.insert("temperature", 1.0); parameters.insert("top_p", 0.95);
     parameters.insert("top_k", model.value("architecture") == "gemma4" ? 64 : 20); parameters.insert("min_p", 0.0);
     if (model.value("provider") == "chat")
-        m_codexProvider.configureRemote(QUrl(model.value("baseUrl").toString()), m_connections.apiKey(model.value("id").toString()), model.value("remoteModel").toString());
+        m_codexProvider.configureRemote(model, m_connections.apiKey(model.value("id").toString()));
     else m_codexProvider.configure(m_port, m_apiKey, parameters, AssistantModels::isLiteRt(model));
     if (!m_codexTurnId.isEmpty() && m_codexProvider.active()) { m_codexProvider.retry(); return; }
     if (!m_codex.ready()) { startCodexProcess(); return; }

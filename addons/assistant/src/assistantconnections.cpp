@@ -1,4 +1,5 @@
 #include "assistantconnections.h"
+#include "../../../src/core/network/networksnapshot.h"
 #include "../../../src/platform/android/androidcredentials.h"
 #include <QDir>
 #include <QDateTime>
@@ -12,9 +13,31 @@
 #include <algorithm>
 #include <utility>
 
+namespace {
+QString accountQuotaPath(const QString &home) {
+    return home.isEmpty() ? QString{} : NetworkSnapshot::path("assistant-account-usage", {home});
+}
+QString accountIdentity(const QVariantMap &account) {
+    const auto email = account.value("email").toString().trimmed();
+    if (email.isEmpty() || account.value("type") != "chatgpt") return {};
+    const QJsonArray identity{email, account.value("accountId").toString(), account.value("planType").toString()};
+    return NetworkSnapshot::digest(QJsonDocument(identity).toJson(QJsonDocument::Compact));
+}
+QString serverQuotaPath(const QVariantMap &profile) {
+    return NetworkSnapshot::path("assistant-server-usage", {profile.value("id").toString(),
+        profile.value("baseUrl").toString(), profile.value("remoteModel").toString(),
+        profile.value("protocol").toString(), profile.value("quotaRevision").toString()});
+}
+}
+
 AssistantConnections::AssistantConnections(QObject *parent) : QObject(parent)
 {
     m_servers = PilonSettings().value("assistant/apiServers").toList();
+    for (const auto &value : m_servers) {
+        const auto server = value.toMap();
+        const auto snapshot = NetworkSnapshot::read(serverQuotaPath(server));
+        if (!snapshot.isEmpty()) m_serverUsage[server.value("id").toString()] = snapshot.toVariantMap();
+    }
     if (PilonSettings().value("assistant/chatgptEnabled", false).toBool()) m_models = PilonSettings().value("assistant/chatgptModels").toList();
     for (auto &value : m_models) {
         auto model = value.toMap(); auto name = model.value("name").toString();
@@ -54,9 +77,11 @@ void AssistantConnections::configure(const QString &executable, const QString &h
 void AssistantConnections::suspend()
 {
     if (m_signingIn || m_signingOut) return;
+    const bool refreshing = refreshingUsage();
     ++m_accountGeneration; ++m_loginGeneration;
     for (const auto &connection : std::as_const(m_pendingStarts)) disconnect(connection);
     m_pendingStarts.clear(); m_client.shutdown();
+    if (refreshing) emit stateChanged();
 }
 void AssistantConnections::fail(const QString &error) { m_error = error; emit stateChanged(); }
 bool AssistantConnections::hasChatGptSession() const {
@@ -151,6 +176,7 @@ void AssistantConnections::signOut()
         if (generation != m_accountGeneration) return;
         m_signingOut = false;
         if (!error.isEmpty()) { fail(error); return; }
+        QFile::remove(accountQuotaPath(m_home));
         ++m_accountGeneration; m_account.clear(); m_rateLimits = {}; m_models.clear(); m_error.clear();
         PilonSettings().remove("assistant/chatgptEnabled"); PilonSettings().remove("assistant/chatgptModels");
         emit modelsChanged(); emit stateChanged(); emit authenticationChanged();
@@ -179,7 +205,16 @@ void AssistantConnections::refreshAccount()
                 settings.sync(); fail(tr("The ChatGPT account state could not be saved.")); return;
             }
         }
+        const auto previous = accountIdentity(m_account);
         m_account = account.value("type") == "chatgpt" ? account.toVariantMap() : QVariantMap{};
+        const auto identity = accountIdentity(m_account);
+        if (previous != identity || identity.isEmpty()) {
+            const auto path = accountQuotaPath(m_home);
+            const auto saved = NetworkSnapshot::read(path);
+            m_rateLimits = {};
+            if (!identity.isEmpty() && saved.value("owner") == identity) m_rateLimits = saved.value("buckets").toObject();
+            else if (!saved.isEmpty()) QFile::remove(path);
+        }
         m_error.clear(); emit stateChanged();
         if (m_account.isEmpty()) { m_rateLimits = {}; m_models.clear(); emit modelsChanged(); emit stateChanged(); }
         else { readModels(); refreshUsage(); }
@@ -290,7 +325,16 @@ bool AssistantConnections::saveServer(const QString &existingId, const QString &
     for (const auto &kind : {"vision", "audio", "video"})
         if (modalities.contains(kind)) entry[kind] = modalities.value(kind).toInt() == 1;
     bool replaced = false;
-    for (auto &value : m_servers) if (value.toMap().value("id") == id) { value = entry; replaced = true; break; }
+    for (auto &value : m_servers) if (value.toMap().value("id") == id) {
+        const auto old = value.toMap();
+        if (!key.isEmpty()) entry["quotaRevision"] = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        else if (old.contains("quotaRevision")) entry["quotaRevision"] = old.value("quotaRevision");
+        if (serverQuotaPath(old) != serverQuotaPath(entry)) {
+            QFile::remove(serverQuotaPath(old));
+            m_serverUsage.remove(id);
+        }
+        value = entry; replaced = true; break;
+    }
     if (!replaced) m_servers.append(entry);
     PilonSettings().setValue("assistant/apiServers", m_servers); m_error.clear(); emit modelsChanged(); emit stateChanged(); if (!key.isEmpty()) emit authenticationChanged();
     if (!modalities.isEmpty()) detectModalities(id);
@@ -315,6 +359,9 @@ bool AssistantConnections::removeServer(const QString &id)
         settings.setValue("assistant/apiServers", m_servers); settings.sync();
         fail(tr("Unable to remove this server's API key. Unlock your system keyring and try again.")); return false;
     }
+    for (const auto &value : m_servers)
+        if (value.toMap().value("id") == id) QFile::remove(serverQuotaPath(value.toMap()));
+    m_serverUsage.remove(id);
     m_servers = remaining;
     m_keys.remove(id);
     m_error.clear(); emit modelsChanged(); emit stateChanged(); return true;
@@ -322,15 +369,21 @@ bool AssistantConnections::removeServer(const QString &id)
 
 void AssistantConnections::refreshUsage()
 {
-    if (m_account.isEmpty()) return;
+    if (m_account.isEmpty() || refreshingUsage() || m_signingIn || m_signingOut) return;
     const auto generation = m_accountGeneration;
+    m_usageGeneration = generation;
+    emit stateChanged();
     request("account/rateLimits/read", {}, [this, generation](QJsonObject result, QString error) {
         if (generation != m_accountGeneration) return;
+        m_usageGeneration = 0;
         if (error.isEmpty()) updateRateLimits(result);
+        else emit stateChanged();
     });
+    if (!m_client.running() && m_usageGeneration) { m_usageGeneration = 0; emit stateChanged(); }
 }
 void AssistantConnections::updateRateLimits(const QJsonObject &result)
 {
+    if (m_account.isEmpty() || m_signingIn || m_signingOut) return;
     if (result.contains("rateLimitsByLimitId") && result.value("rateLimitsByLimitId").isObject())
         m_rateLimits = result.value("rateLimitsByLimitId").toObject();
     else {
@@ -341,6 +394,24 @@ void AssistantConnections::updateRateLimits(const QJsonObject &result)
             for (auto it = bucket.begin(); it != bucket.end(); ++it) if (!it.value().isNull()) merged[it.key()] = it.value();
             m_rateLimits[id] = merged;
         }
+    }
+    const auto identity = accountIdentity(m_account);
+    if (!identity.isEmpty() && !m_home.isEmpty()) {
+        QJsonObject buckets;
+        for (auto it = m_rateLimits.begin(); it != m_rateLimits.end(); ++it) {
+            const auto bucket = it.value().toObject();
+            QJsonObject saved;
+            if (bucket.value("limitName").isString()) saved["limitName"] = bucket.value("limitName").toString().left(128);
+            for (const auto &window : {"primary", "secondary"}) {
+                const auto source = bucket.value(window).toObject();
+                QJsonObject quota;
+                for (const auto &field : {"usedPercent", "windowDurationMins", "resetsAt"})
+                    if (source.value(field).isDouble()) quota[field] = source.value(field);
+                if (quota.contains("usedPercent")) saved[window] = quota;
+            }
+            if (!saved.isEmpty()) buckets[it.key().left(128)] = saved;
+        }
+        NetworkSnapshot::write(accountQuotaPath(m_home), {{"owner", identity}, {"buckets", buckets}});
     }
     emit stateChanged();
 }
@@ -366,10 +437,23 @@ QVariantList AssistantConnections::usage() const
     return rows;
 }
 
-void AssistantConnections::updateServerUsage(const QString &id, const QVariantMap &limits)
+void AssistantConnections::updateServerUsage(const QVariantMap &profile, const QVariantMap &limits)
 {
-    m_serverUsage[id] = limits;
-    emit stateChanged();
+    const auto path = serverQuotaPath(profile);
+    for (const auto &value : m_servers) {
+        const auto server = value.toMap();
+        if (server.value("id") != profile.value("id") || path != serverQuotaPath(server)) continue;
+        const auto id = server.value("id").toString();
+        if (limits.isEmpty()) {
+            QFile::remove(path);
+            m_serverUsage.remove(id);
+        } else {
+            m_serverUsage[id] = limits;
+            NetworkSnapshot::write(path, QJsonObject::fromVariantMap(limits));
+        }
+        emit stateChanged();
+        break;
+    }
 }
 
 void AssistantConnections::detectModalities(const QString &id, bool catalogFallback)

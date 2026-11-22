@@ -32,7 +32,7 @@ Control {
     readonly property bool needsRecovery: local && (worktreeLocked || !!repository.pendingOperation || !!repository.mergeInProgress || !!repository.hasConflicts)
     function operationText() {
         if (!manager) return ""
-        const phases = {preparing:qsTr("Saving files…"),fetching:qsTr("Fetching…"),materializing:qsTr("Preparing incoming files…"),
+        const phases = {"refreshing-repositories":qsTr("Refreshing repositories…"),preparing:qsTr("Saving files…"),fetching:qsTr("Fetching…"),materializing:qsTr("Preparing incoming files…"),
             validating:qsTr("Validating files…"),merging:qsTr("Merging…"),pushing:qsTr("Pushing…"),committing:qsTr("Committing…"),
             resolving:qsTr("Resolving conflict…"),aborting:qsTr("Aborting merge…"),conflicted:repository.hasConflicts ? qsTr("Resolve conflicts to continue.") : qsTr("Ready to continue merge."),
             recovery:qsTr("Git update requires recovery."),"awaiting-reload":qsTr("Reloading files…"),"reload-failed":qsTr("Files could not be reloaded."),failed:qsTr("Git operation failed.")}
@@ -218,7 +218,13 @@ Control {
                         onClicked: pane.manager.selectRemote(remoteUrl.text)
                     }
                 }
-                PilonWrapButton { objectName: "gitBrowseProvider"; text: qsTr("Browse account repositories"); enabled: pane.canManage; onClicked: pane.browseProvider = !pane.browseProvider }
+                PilonWrapButton {
+                    objectName: "gitBrowseProvider"; text: qsTr("Browse account repositories"); enabled: pane.canManage
+                    onClicked: {
+                        pane.browseProvider = !pane.browseProvider
+                        if (pane.browseProvider && pane.manager.providerAvailable) pane.manager.refreshRepositories()
+                    }
+                }
                 PilonComboBox {
                     objectName: "gitProviderPicker"
                     visible: pane.browseProvider && (pane.manager.providers || []).length > 0
@@ -227,7 +233,10 @@ Control {
                     textRole: "name"
                     currentIndex: (pane.manager.providers || []).findIndex(entry => entry.id === pane.manager.activeProvider)
                     enabled: pane.canManage
-                    onActivated: index => pane.manager.activeProvider = model[index].id
+                    onActivated: index => {
+                        pane.manager.activeProvider = model[index].id
+                        if (pane.manager.providerAvailable) pane.manager.refreshRepositories()
+                    }
                 }
                 GitTool {
                     objectName: "githubRefresh"; visible: pane.browseProvider && pane.manager.provider !== "Custom"
