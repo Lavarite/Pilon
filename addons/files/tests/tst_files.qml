@@ -168,6 +168,8 @@ TestCase {
         function reorderBookmarks(ordered) { bookmarks = ordered.slice() }
         function search(devices, username, query) { currentPath = query; searchMode = true; searching = true }
         function cancelPrompt() { promptKind = ""; promptText = ""; promptChanged() }
+        property int trustedHostKeys: 0
+        function acceptHostKey() { ++trustedHostKeys; cancelPrompt() }
         property int cancelledTransfers: 0
         function cancel() { searching = false; busy = false; ++cancelledTransfers }
         property var lastRename: ({})
@@ -1948,6 +1950,25 @@ TestCase {
     }
     function test_fileErrorsStayInlineAndCanRepeat_data() {
         return [{tag:"phone", width:320, font:24}, {tag:"desktop", width:900, font:16}]
+    }
+    function test_hostTrustStillRequiresExplicitConfirmation() {
+        const accepted = accessFiles.trustedHostKeys
+        accessFiles.promptKind = "hostKey"
+        accessFiles.promptText = "Trust fixture? SSH host key: SHA256:fixture"
+        accessFiles.promptChanged()
+        tryCompare(accessPopup, "opened", true)
+        verify(accessPopup.modal)
+        accessFiles.errorMessage = "Previous operation failed."
+        verify(accessPopup.opened)
+        compare(accessFiles.trustedHostKeys, accepted)
+        const trust = findChild(accessPopup, "confirmFileAccess")
+        compare(trust.text, "Trust")
+        accessPopup.dialogWindow.requestActivate()
+        tryCompare(accessPopup.dialogWindow, "active", true)
+        verify(waitForRendering(trust))
+        mouseClick(trust)
+        tryCompare(accessPopup, "opened", false)
+        compare(accessFiles.trustedHostKeys, accepted + 1)
     }
     function test_fileErrorsStayInlineAndCanRepeat(data) {
         const oldWidth = test.width
