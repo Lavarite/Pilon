@@ -64,12 +64,23 @@ public final class PilonWidgetScrollProbe extends Instrumentation {
             try { createHost(); } catch (Throwable failure) { hostFailure = failure.getClass().getSimpleName(); finish(); }
         }
         private void createHost() {
-            owner = new AppWidgetHost(this, 731); owner.deleteHost(); id = owner.allocateAppWidgetId();
+            owner = new AppWidgetHost(this, 731) {
+                @Override protected AppWidgetHostView onCreateView(Context context, int id, AppWidgetProviderInfo info) {
+                    return new AppWidgetHostView(context) {
+                        @Override public void setAppWidget(int widgetId, AppWidgetProviderInfo provider) {
+                            super.setAppWidget(widgetId, provider);
+                            // The sizes supplied below are content sizes, including after a provider rebind.
+                            setPadding(0, 0, 0, 0);
+                        }
+                    };
+                }
+            };
+            owner.deleteHost(); id = owner.allocateAppWidgetId();
             AppWidgetManager manager = AppWidgetManager.getInstance(this); AppWidgetProviderInfo info = null;
             for (AppWidgetProviderInfo candidate : manager.getInstalledProviders()) if (PilonWidgets.component(this).equals(candidate.provider)) info = candidate;
             if (info == null || !manager.bindAppWidgetIdIfAllowed(id, info.provider)) throw new IllegalStateException("Grant bind permission to this isolated probe package");
             if (!PilonWidgets.bind(this, id, new PilonWidgets.Binding(WORKSPACE, "calendar", "agenda"))) throw new IllegalStateException("Fixture binding failed");
-            host = owner.createView(this, id, info); host.setPadding(0, 0, 0, 0); owner.startListening();
+            host = owner.createView(this, id, info); owner.startListening();
             FrameLayout screen = new FrameLayout(this); setContentView(screen);
             FrameLayout.LayoutParams placement = new FrameLayout.LayoutParams((int)Math.ceil(PilonWidgets.dp(this, 288.4f)), (int)Math.ceil(PilonWidgets.dp(this, 429.6f))); placement.gravity = Gravity.CENTER;
             screen.addView(host, placement);
@@ -277,7 +288,12 @@ public final class PilonWidgetScrollProbe extends Instrumentation {
         Bundle result = new Bundle(); int resultCode = Activity.RESULT_CANCELED;
         android.app.UiAutomation automation = null; boolean adopted = false;
         try {
-        Context context = getTargetContext(); clockChecks(); JSONObject normal = ordinary(); write(context, normal);
+        Context context = getTargetContext();
+        // A restored widget must show its cached rows even if the collection service cannot be rebound.
+        if (android.os.Build.VERSION.SDK_INT >= 31)
+            context.getPackageManager().setComponentEnabledSetting(new ComponentName(context, PilonWidgetTimelineService.class),
+                android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED, android.content.pm.PackageManager.DONT_KILL_APP);
+        clockChecks(); JSONObject normal = ordinary(); write(context, normal);
         step = "production-host";
         automation = getUiAutomation(android.app.UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES);
         if (android.os.Build.VERSION.SDK_INT >= 29) { automation.adoptShellPermissionIdentity(android.Manifest.permission.BIND_APPWIDGET); adopted = true; }
@@ -286,7 +302,7 @@ public final class PilonWidgetScrollProbe extends Instrumentation {
         if (adopted) { automation.dropShellPermissionIdentity(); adopted = false; }
         ListView list = activity.host.findViewById(R.id.widget_timeline_list);
         for (int count = 0; count < 50 && (list == null || list.getChildCount() == 0); ++count) { SystemClock.sleep(100); waitForIdleSync(); list = activity.host.findViewById(R.id.widget_timeline_list); }
-        check(list != null && list.getAdapter().getCount() == 1 && list.getChildCount() == 1, "one continuous timeline");
+        check(list != null && list.getAdapter() != null && list.getAdapter().getCount() == 1 && list.getChildCount() == 1, "one continuous timeline");
         check(activity.hasWindowFocus(), "host focus"); View first = card(title(list, "First")); check(first != null, "first event");
         int height = first.getHeight(), width = first.getWidth(), rowHeight = list.getChildAt(0).getHeight(), headerTop = activity.host.findViewById(R.id.widget_title).getTop();
         check(rowHeight >= px(activity, 890), "full anchored day remains tall"); save("scroll-before"); step = "real-swipe"; swipe(list);
@@ -377,14 +393,18 @@ public final class PilonWidgetScrollProbe extends Instrumentation {
         int capacity2 = parcel(PilonWidgetTimeGrid.scrollItem(context, activity.id, binding, snapshot, frame, 2));
         ArrayList<SizeF> sizes = new ArrayList<>(); for (int index = 0; index < 16; ++index) sizes.add(new SizeF(180 + index * 20, 180 + index * 30));
         int outer = parcel(PilonWidgets.sizedViews(context, activity.id, binding, provider, snapshot, sizes));
-        check(capacity1 + capacity2 + outer < 800000, "two datasets below actual framework collection budget");
+        check(outer < 480 * 1024, "both lane datasets fit the launcher callback Binder budget: " + outer);
         main(() -> PilonWidgets.update(context, activity.id, PilonWidgetData.catalog(PilonWidgets.directory(context)))); SystemClock.sleep(700); waitForIdleSync(); int wide = cards(activity.host);
         resize(180); int narrow = cards(activity.host); check(wide == 64 && narrow == 42, "both complete datasets survive manager transport and resize " + wide + "," + narrow);
         step = "revoke-clears-factory"; Files.delete(new File(PilonWidgets.directory(context), "catalog.json").toPath());
         main(() -> PilonWidgets.refresh(context)); SystemClock.sleep(500); waitForIdleSync(); check(cards(activity.host) == 0 && PilonWidgetClock.operation(context, false) == null, "revoked provider clears view and clock operation");
-        result.putString("stream", "Widget scroll checks passed: " + checks + "; snapshotBytes=" + sourceBytes + "; collectionBytes=" + (capacity1 + capacity2 + outer) + "; item1=" + capacity1 + "; item2=" + capacity2 + "; outer=" + outer + "\n"); resultCode = Activity.RESULT_OK;
+        result.putString("stream", "Widget scroll checks passed: " + checks + "; snapshotBytes=" + sourceBytes + "; collectionBytes=" + outer + "; item1=" + capacity1 + "; item2=" + capacity2 + "; outer=" + outer + "\n"); resultCode = Activity.RESULT_OK;
         } catch (Throwable error) { result.putString("stream", "Widget scroll check failed: step=" + step + " checks=" + checks + " error=" + error.getClass().getSimpleName() + " detail=" + error.getMessage() + "\n"); }
-        finally { if (adopted && automation != null) automation.dropShellPermissionIdentity(); }
+        finally {
+            if (adopted && automation != null) automation.dropShellPermissionIdentity();
+            getTargetContext().getPackageManager().setComponentEnabledSetting(new ComponentName(getTargetContext(), PilonWidgetTimelineService.class),
+                android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DEFAULT, android.content.pm.PackageManager.DONT_KILL_APP);
+        }
         finish(resultCode, result);
     }
 }

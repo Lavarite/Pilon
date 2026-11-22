@@ -6,6 +6,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.graphics.Color;
 import android.net.Uri;
+import android.os.Build;
 import android.view.View;
 import android.widget.RemoteViews;
 import android.widget.RemoteViewsService;
@@ -61,7 +62,13 @@ public final class PilonWidgetTimelineService extends RemoteViewsService {
         views.setTextViewText(R.id.widget_status, footer); views.setViewVisibility(R.id.widget_status, showFooter && !footer.isEmpty() ? View.VISIBLE : View.GONE);
         views.setContentDescription(R.id.widget_title, frame.optString("title") + (!showFooter && !footer.isEmpty() ? "\n" + footer : ""));
         views.setOnClickPendingIntent(R.id.widget_root, PilonWidgets.launch(context, id, binding, snapshot, frame.optString("actionId", "open")));
-        views.setRemoteAdapter(R.id.widget_timeline_list, adapterIntent(context, id, binding, frame, capacity));
+        if (Build.VERSION.SDK_INT >= 31) {
+            RemoteViews body = PilonWidgetTimeGrid.scrollItem(context, id, binding, snapshot, frame, capacity);
+            views.setRemoteAdapter(R.id.widget_timeline_list, new RemoteViews.RemoteCollectionItems.Builder()
+                .setHasStableIds(true).setViewTypeCount(1).addItem(0, body).build());
+        } else {
+            views.setRemoteAdapter(R.id.widget_timeline_list, adapterIntent(context, id, binding, frame, capacity));
+        }
         Intent base = new Intent().setClassName(context, "org.pilon.PilonActivity").setPackage(context.getPackageName())
             .setAction(PilonWidgets.COLLECTION_CLICK).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP)
             .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id);
@@ -109,7 +116,7 @@ public final class PilonWidgetTimelineService extends RemoteViewsService {
                 if (selected == null) return unavailable(context);
                 return PilonWidgetTimeGrid.scrollItem(context, selected.id, selected.binding, selected.snapshot, selected.frame, selected.capacity);
             }
-            public RemoteViews getLoadingView() { return null; }
+            public RemoteViews getLoadingView() { return getViewAt(0); }
             public int getViewTypeCount() { return 1; }
             public long getItemId(int position) { return 0; }
             public boolean hasStableIds() { return true; }

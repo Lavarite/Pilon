@@ -180,18 +180,36 @@ public final class PilonWidgets {
             views = render(context, id, binding, provider, snapshot, Math.max(64, Math.min(width, 4096)), Math.max(64, Math.min(height, 4096)), false);
         }
         manager.updateAppWidget(id, views);
-        if (snapshot != null) {
+        if (Build.VERSION.SDK_INT < 31 && snapshot != null) {
             JSONObject frame = snapshot.frame(System.currentTimeMillis());
             if (frame != null && frame.has("timeGrid") && !emptyAgenda(binding, frame))
                 manager.notifyAppWidgetViewDataChanged(id, R.id.widget_timeline_list);
         }
     }
     static RemoteViews sizedViews(Context context, int id, Binding binding, PilonWidgetData.Provider provider, PilonWidgetData.Snapshot snapshot, List<?> sizes) {
-        LinkedHashMap<SizeF, RemoteViews> mappings = new LinkedHashMap<>(); long now = System.currentTimeMillis();
+        LinkedHashMap<SizeF, RemoteViews> mappings = new LinkedHashMap<>();
+        long now = System.currentTimeMillis();
+        JSONObject frame = snapshot == null ? null : snapshot.frame(now);
+        boolean scrolling = frame != null && frame.has("timeGrid") && !emptyAgenda(binding, frame) && owns(context, id);
+        SizeF[] byCapacity = new SizeF[2];
         for (int index = 0; index < Math.min(16, sizes.size()); ++index) {
-            Object candidate = sizes.get(index); if (!(candidate instanceof SizeF)) continue; SizeF size = (SizeF)candidate;
-            if (Float.isFinite(size.getWidth()) && Float.isFinite(size.getHeight()) && size.getWidth() >= 64 && size.getHeight() >= 64 && size.getWidth() <= 4096 && size.getHeight() <= 4096)
-                mappings.put(size, renderAt(context, id, binding, provider, snapshot, size.getWidth(), size.getHeight(), false, now));
+            Object candidate = sizes.get(index);
+            if (!(candidate instanceof SizeF)) continue;
+            SizeF size = (SizeF)candidate;
+            float width = size.getWidth(), height = size.getHeight();
+            if (!Float.isFinite(width) || !Float.isFinite(height) || width < 64 || height < 64 || width > 4096 || height > 4096) continue;
+            if (!scrolling) {
+                mappings.put(size, renderAt(context, id, binding, provider, snapshot, width, height, false, now));
+                continue;
+            }
+            // Timelines expand to fit the host. Send each lane count once to stay within Binder's budget.
+            int lane = PilonWidgetTimeGrid.scrollCapacity(context, width) - 1;
+            SizeF previous = byCapacity[lane];
+            byCapacity[lane] = previous == null ? size
+                : new SizeF(Math.min(width, previous.getWidth()), Math.min(height, previous.getHeight()));
+        }
+        for (SizeF size : byCapacity) {
+            if (size != null) mappings.put(size, PilonWidgetTimelineService.render(context, id, binding, snapshot, frame, size.getWidth(), size.getHeight()));
         }
         return mappings.isEmpty() ? null : new RemoteViews(mappings);
     }
