@@ -30,6 +30,10 @@ TestCase {
         function approveAction(approved) { approvals.push(approved); pendingAction = "" }
         property string workingChatId: ""
         property bool voiceMode: false
+        property bool previewingVoice: false
+        property string voicePrompt: ""
+        property int voiceSpeed: 5
+        signal voicePreviewReady(url url)
         property bool speaking: false
         property string currentChatId: "fixture"
         property string draftText: ""
@@ -44,6 +48,7 @@ TestCase {
         property var chats: [{id: "fixture", title: "Projects"}]
         property bool recording: false
         property string error: ""
+        function dismissError() { error = "" }
         property string status: ""
         property QtObject connection: QtObject {
             property string promptText: ""
@@ -66,7 +71,10 @@ TestCase {
         property string renamedProject: ""
         property string deletedProject: ""
         function renameProject(id, title) { renamedProject = id; renamedTitle = title; return true }
-        function deleteProject(id) { deletedProject = id; return true }
+        function deleteProject(id) {
+            if (!acceptsDelete) { error = "Unable to save projects."; return false }
+            deletedProject = id; return true
+        }
         function renameChat(id, title) { renamedChat = id; renamedTitle = title; return true }
         property bool acceptsDelete: true
         function deleteChat(id) {
@@ -598,12 +606,28 @@ TestCase {
             grabImage(test).save("/tmp/pilon-assistant-narrow.png")
         } finally { page.chatBrowserOpen = false; test.width = previous }
     }
+    function test_errorLeavesRecordingStatusAndComposerInPlace() {
+        backend.recording = true
+        const status = findChild(page, "assistantComposerStatus"), input = findChild(page, "assistantInput")
+        tryCompare(status, "text", qsTr("Recording…"))
+        const position = input.mapToItem(page, 0, 0)
+        backend.error = "A chat operation failed."
+        tryCompare(findChild(page, "assistantOperationError"), "opened", true)
+        compare(status.text, qsTr("Recording…")); compare(input.mapToItem(page, 0, 0), position)
+        backend.dismissError(); backend.recording = false
+    }
     function test_unsupportedAttachmentRetainedAndSendBlocked() {
         backend.attachments = [{name: "image.png", mime: "image/png", url: ""}]
         const input = findChild(page, "assistantInput")
         input.text = "Describe this"
         verify(!findChild(page, "assistantSend").enabled)
-        verify(findChild(page, "attachmentError").visible)
+        const error = findChild(page, "attachmentError")
+        tryCompare(error, "opened", true)
+        compare(error.message, "This model cannot read images")
+        const geometry = input.mapToItem(page, 0, 0)
+        error.dismiss()
+        tryCompare(error, "opened", false)
+        compare(input.mapToItem(page, 0, 0), geometry)
         compare(backend.attachments.length, 1)
         page.sendMessage()
         compare(backend.sentText, "")
@@ -1049,15 +1073,24 @@ TestCase {
         backend.busy = true
         backend.workingChatId = "fixture"
         backend.pendingAction = "This device /fixture\nprintf reviewed"
-        const run = findChild(page, "assistantConfirmAction")
+        const decision = findChild(page, "assistantToolApproval")
+        tryCompare(decision, "opened", true)
+        tryCompare(decision.cancelButton, "activeFocus", true)
+        const run = decision.confirmButton
         tryCompare(run, "visible", true)
         compare(run.text, "Run")
         verify(mode.enabled)
-        verify(tabletInput.saveWindow(page,"/tmp/pilon-assistant-approval.png"))
+        verify(tabletInput.saveWindow(decision.dialogWindow.contentItem,"/tmp/pilon-assistant-approval.png"))
         mouseClick(run)
         compare(backend.approvals.length, 1)
         compare(backend.approvals[0], true)
         compare(backend.pendingAction, "")
+        backend.pendingAction = "Run another command?"
+        tryCompare(decision, "opened", true)
+        keyClick(Qt.Key_Escape)
+        tryCompare(decision, "opened", false)
+        compare(backend.approvals.length, 2)
+        compare(backend.approvals[1], false)
     }
 
     function test_workingIndicatorsAndChatNavigation() {
@@ -1213,12 +1246,16 @@ TestCase {
         verify(waitForRendering(confirmation.dialogWindow.contentItem))
         verify(confirmation.height < 200, "A short confirmation follows its content height")
         verify(tabletInput.saveWindow(confirmation.dialogWindow.contentItem, "/tmp/pilon-assistant-delete-confirm.png"))
+        const before = Qt.size(confirmation.width, confirmation.height)
         mouseClick(findChild(page, "confirmDeleteChat"))
         compare(backend.deletedChat, "")
         compare(confirmation.opened, true)
         const message = findChild(page, "deleteChatError")
-        verify(message.visible)
-        compare(message.text, backend.error)
+        tryCompare(message, "visible", true)
+        compare(message.message, "Unable to delete this chat: permission denied.")
+        compare(backend.error, "")
+        compare(Qt.size(confirmation.width, confirmation.height), before)
+        message.dismiss()
         const cancel = findChild(page, "cancelDeleteChat")
         tryVerify(() => {
             const window = confirmation.dialogWindow
@@ -1238,6 +1275,46 @@ TestCase {
         mouseRelease(host.contentItem, point.x, point.y)
         verify(pressed, "A physical press reaches Cancel after an error")
         tryCompare(confirmation, "opened", false)
+        verifyDeletionErrorConsumed()
+    }
+    function test_failedProjectDeletionStaysInConfirmation() {
+        backend.acceptsDelete = false
+        backend.projects = [{id: "project", name: "Pilon"}]
+        backend.chatsChanged()
+        tryVerify(() => findChild(page, "projectInstructions_project") !== null)
+        mouseClick(findChild(page, "projectInstructions_project"))
+        tryCompare(findChild(page, "projectContextMenu"), "opened", true)
+        mouseClick(findChild(page, "deleteProjectAction"))
+        const confirmation = findChild(page, "deleteProjectPopup")
+        tryCompare(confirmation, "opened", true)
+        mouseClick(confirmation.confirmButton)
+        compare(confirmation.operationError, "Unable to save projects.")
+        compare(backend.error, "")
+        confirmation.reject()
+        tryCompare(confirmation, "opened", false)
+        verifyDeletionErrorConsumed()
+    }
+    function verifyDeletionErrorConsumed() {
+        const host = page.Window.window
+        host.requestActivate()
+        tryCompare(host, "active", true)
+        const pageError = findChild(page, "assistantOperationError")
+        compare(pageError.message, "")
+        compare(pageError.opened, false)
+        const component = Qt.createComponent("../addons/assistant/Voice.qml")
+        compare(component.status, Component.Ready, component.errorString())
+        const voice = createTemporaryObject(component, test, {addon: {
+            assistantManager: backend, selectedTextColour: page.textColour, selectedSecondaryColour: page.secondaryColour,
+            selectedAccentColour: page.accentColour, selectedAccentTextColour: page.accentTextColour,
+            withOpacity: (colour, opacity) => Qt.alpha(colour, opacity), isEnabled: () => true
+        }})
+        verify(voice)
+        const voiceMessage = findChild(voice, "pilonErrorMessage")
+        verify(voiceMessage)
+        compare(voiceMessage.text, "")
+        backend.error = "Voice preview failed."
+        tryCompare(voiceMessage, "text", "Voice preview failed.")
+        backend.dismissError()
     }
     function test_chatTouchHoldOpensMenuWithoutSwitchingChat() {
         const entry = findChild(page, "chatEntry_other")

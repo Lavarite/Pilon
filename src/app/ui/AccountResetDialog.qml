@@ -6,6 +6,7 @@ import "ui"
 PilonDialog {
     id: dialog
     objectName: "accountResetConfirmation"
+    contentSizedWindow: true
     signal confirmed(var keep)
     width: Math.min(520,parent ? parent.width-32 : 520)
     height: Math.min(topPadding + bottomPadding + body.implicitHeight, parent ? parent.height - 32 : 520)
@@ -14,7 +15,8 @@ PilonDialog {
     modal: true
     onOpened: {
         personal.checked = true; downloads.checked = true; addonData.checked = true
-        scroll.contentItem.contentY = 0; prompt.forceActiveFocus(Qt.PopupFocusReason)
+        cancelReset.forceActiveFocus(Qt.PopupFocusReason)
+        scroll.contentItem.contentY = 0
     }
     contentItem: PilonScrollView {
         id: scroll
@@ -40,7 +42,7 @@ PilonDialog {
             Label { Layout.fillWidth:true; wrapMode:Text.Wrap; text:qsTr("External files are always kept."); color:dialog.palette.windowText }
             Flow {
                 Layout.fillWidth: true; spacing: 8
-                PilonWrapButton { objectName:"cancelAccountReset"; text:qsTr("Cancel"); onClicked:dialog.close() }
+                PilonWrapButton { id: cancelReset; objectName:"cancelAccountReset"; text:qsTr("Cancel"); onClicked:dialog.close() }
                 PilonWrapButton {
                     objectName:"confirmAccountReset"; text:qsTr("Reset Pilon")
                     onClicked:{dialog.close();dialog.confirmed({personal:personal.checked,downloads:downloads.checked,addonData:addonData.checked})}

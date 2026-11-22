@@ -8,6 +8,23 @@ PilonScrollView {
     id: page
     required property var addon
     readonly property var manager: addon.tailscaleManager
+    property bool operationPending: false
+    function runAction(action) {
+        failure.message = ""
+        operationPending = true
+        action()
+        if (!manager.busy) finishAction()
+    }
+    function finishAction() {
+        if (!operationPending || manager.busy) return
+        operationPending = false
+        failure.message = manager.errorMessage
+    }
+    onVisibleChanged: if (!visible) { operationPending = false; failure.message = "" }
+    Connections {
+        target: page.manager
+        function onBusyChanged() { if (page.operationPending && !page.manager.busy) Qt.callLater(page.finishAction) }
+    }
     readonly property bool external: manager.externalApplication === true
     readonly property bool discoveryConnected: manager.discoveryConnected === true
     readonly property url downloadUrl: external ? "https://tailscale.com/download/android" : "https://tailscale.com/download/linux"
@@ -46,13 +63,13 @@ PilonScrollView {
         Flow {
             Layout.fillWidth: true
             spacing: 8
-            PilonWrapButton { objectName: "devicesRefresh"; text: page.manager.busy ? qsTr("Working…") : qsTr("Refresh"); enabled: !page.manager.busy; onClicked: page.manager.refresh() }
+            PilonWrapButton { objectName: "devicesRefresh"; text: page.manager.busy ? qsTr("Working…") : qsTr("Refresh"); enabled: !page.manager.busy; onClicked: page.runAction(() => page.manager.refresh()) }
             PilonWrapButton {
                 objectName: "devicesOpenExternal"
                 text: qsTr("Open Tailscale")
                 visible: page.external && page.manager.externalAppInstalled
                 enabled: !page.manager.busy
-                onClicked: page.manager.openExternalApplication()
+                onClicked: page.runAction(() => page.manager.openExternalApplication())
             }
             PilonWrapButton {
                 objectName: "devicesInstallExternal"
@@ -65,18 +82,18 @@ PilonScrollView {
                 text: qsTr("Connect")
                 visible: page.external && page.manager.externalAppInstalled
                 enabled: !page.manager.busy
-                onClicked: page.manager.startService()
+                onClicked: page.runAction(() => page.manager.startService())
             }
             PilonWrapButton {
                 objectName: "devicesDisconnectExternal"
                 text: qsTr("Disconnect")
                 visible: page.external && page.manager.externalAppInstalled
                 enabled: !page.manager.busy
-                onClicked: page.manager.disconnectExternalApplication()
+                onClicked: page.runAction(() => page.manager.disconnectExternalApplication())
             }
-            PilonWrapButton { objectName: "devicesStartService"; text: qsTr("Start service"); visible: !page.external && page.manager.externalAppInstalled !== false && !page.manager.serviceRunning; enabled: !page.manager.busy; onClicked: page.manager.startService() }
-            PilonWrapButton { text: qsTr("Sign in"); visible: !page.external && page.manager.serviceRunning && !page.manager.loggedIn; enabled: !page.manager.busy; onClicked: page.manager.login() }
-            PilonWrapButton { objectName: "devicesUseAccount"; text: qsTr("Use in Pilon"); visible: !page.external && page.manager.loggedIn && !page.manager.accountClaimed; enabled: !page.manager.busy && page.manager.statusKnown; onClicked: page.manager.useCurrentAccount() }
+            PilonWrapButton { objectName: "devicesStartService"; text: qsTr("Start service"); visible: !page.external && page.manager.externalAppInstalled !== false && !page.manager.serviceRunning; enabled: !page.manager.busy; onClicked: page.runAction(() => page.manager.startService()) }
+            PilonWrapButton { text: qsTr("Sign in"); visible: !page.external && page.manager.serviceRunning && !page.manager.loggedIn; enabled: !page.manager.busy; onClicked: page.runAction(() => page.manager.login()) }
+            PilonWrapButton { objectName: "devicesUseAccount"; text: qsTr("Use in Pilon"); visible: !page.external && page.manager.loggedIn && !page.manager.accountClaimed; enabled: !page.manager.busy && page.manager.statusKnown; onClicked: page.runAction(() => page.manager.useCurrentAccount()) }
             PilonWrapButton {
                 id: signOutButton
                 objectName: "devicesSignOut"
@@ -86,9 +103,11 @@ PilonScrollView {
                 onClicked: signOutConfirmation.open()
             }
         }
-        Label {
-            Layout.fillWidth: true; wrapMode: Text.Wrap; textFormat: Text.PlainText
-            visible: text.length > 0; text: page.manager.errorMessage; color: page.addon.selectedWarningColour
+        PilonErrorPopup {
+            id: failure
+            objectName: "tailscaleOperationError"
+            owner: page
+            onDismissed: message = ""
         }
         ColumnLayout {
             visible: page.external
@@ -137,14 +156,14 @@ PilonScrollView {
                 visible: !page.discoveryConnected
                 text: qsTr("Connect device discovery")
                 enabled: !page.manager.busy && !!discoveryId.text.trim() && !!discoverySecret.text.trim()
-                onClicked: page.manager.connectDiscovery(discoveryId.text, discoverySecret.text)
+                onClicked: page.runAction(() => page.manager.connectDiscovery(discoveryId.text, discoverySecret.text))
             }
             PilonWrapButton {
                 objectName: "devicesDisconnectDiscovery"
                 visible: page.discoveryConnected
                 text: qsTr("Disconnect device discovery")
                 enabled: !page.manager.busy
-                onClicked: page.manager.disconnectDiscovery()
+                onClicked: page.runAction(() => page.manager.disconnectDiscovery())
             }
         }
         Loader {
@@ -161,54 +180,20 @@ PilonScrollView {
         }
     }
 
-    PilonDialog {
+    PilonConfirmation {
         id: signOutConfirmation
         objectName: "devicesSignOutConfirmation"
         parent: page.Overlay.overlay
         title: qsTr("Sign out of Tailscale")
-        width: Math.min(480, parent.width - 32)
-        height: Math.min(implicitHeight, parent.height - 32)
-        modal: true
+        preferredWidth: 480
         palette: page.palette
-        onOpened: cancelSignOut.forceActiveFocus()
+        message: qsTr("Signing out also affects other apps using this system session.")
+        confirmText: qsTr("Sign out")
+        cancelButton.objectName: "devicesCancelSignOut"
+        confirmButton.objectName: "devicesConfirmSignOut"
+        confirmButton.enabled: signOutButton.visible && signOutButton.enabled
         onClosed: if (signOutButton.visible && signOutButton.enabled) signOutButton.forceActiveFocus()
-        onAccepted: if (signOutButton.visible && signOutButton.enabled) page.manager.logout()
-
-        contentItem: PilonScrollView {
-            implicitHeight: signOutContent.implicitHeight
-            contentWidth: availableWidth
-            clip: true
-            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-            ColumnLayout {
-                id: signOutContent
-                width: parent.width
-                spacing: 12
-                Label {
-                    Layout.fillWidth: true
-                    wrapMode: Text.Wrap
-                    text: qsTr("Signing out also affects other apps using this system session.")
-                    color: page.addon.selectedTextColour
-                }
-                Flow {
-                    Layout.fillWidth: true
-                    spacing: 8
-                    PilonWrapButton {
-                        id: cancelSignOut
-                        objectName: "devicesCancelSignOut"
-                        width: Math.min(implicitWidth, parent.width)
-                        text: qsTr("Cancel")
-                        onClicked: signOutConfirmation.reject()
-                    }
-                    PilonWrapButton {
-                        objectName: "devicesConfirmSignOut"
-                        width: Math.min(implicitWidth, parent.width)
-                        text: qsTr("Sign out")
-                        enabled: signOutButton.visible && signOutButton.enabled
-                        onClicked: signOutConfirmation.accept()
-                    }
-                }
-            }
-        }
+        onAccepted: if (signOutButton.visible && signOutButton.enabled) page.runAction(() => page.manager.logout())
     }
 
 }

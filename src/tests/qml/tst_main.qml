@@ -123,13 +123,21 @@ TestCase {
         verify(appWindow.addonHosts.calendar.context.widgets.available, "Resume retries a failed catalogue write")
     }
     function test_widgetNativeChangesRefreshOnlyLoadedOwners() {
+        waitForWorkspaceIdle()
+        tryCompare(appWindow, "active", true)
         const backend = createTemporaryObject(widgetBackendFixture, test)
         appWindow.widgetBackend = backend
         const api = appWindow.addonHosts.calendar.context.widgets
         const spy = createTemporaryObject(spyComponent, test, {target: api, signalName: "refreshRequested"})
-        wait(50); spy.clear()
+        let ready = false
+        Qt.callLater(() => ready = true)
+        tryVerify(() => ready)
+        spy.clear()
         backend.nativeConfigurationChanged()
-        wait(50); compare(spy.count, 0, "Publication notifications must not publish again")
+        let delivered = false
+        Qt.callLater(() => delivered = true)
+        tryVerify(() => delivered)
+        compare(spy.count, 0, "Publication notifications must not publish again")
         spy.clear()
         appWindow.refreshHomeWidgets()
         compare(backend.refreshes, 1)
@@ -819,7 +827,7 @@ TestCase {
             tryCompare(settings,"visible",true)
             compare(settings.currentId,"application")
             const status = findControl(recovery,"applicationErrorStatus")
-            verify(status.visible); compare(status.text,service.error)
+            tryCompare(status, "opened", true); compare(status.message, service.error)
         } finally { service.error = ""; recovery.close() }
     }
     function test_assistantQuestionOptionsWrapAndPreserveAnswer_data() {
@@ -865,21 +873,18 @@ TestCase {
             tabletInput.setScreenGeometry(originalScreen)
         }
     }
-    function test_assistantErrorHasOneCloseButton() {
-        const dialog = findControl(appWindow, "assistantErrorNotification")
-        dialog.message = "The server request failed."
-        dialog.open(); wait(60)
-        const buttons = []
-        function scan(item) {
-            for (const child of item.children || []) {
-                if (child.clicked !== undefined && child.text === "Close" && child.visible) buttons.push(child)
-                scan(child)
-            }
-        }
-        scan(dialog.dialogWindow.contentItem)
-        compare(buttons.length, 1)
-        tabletInput.saveWindow(dialog.dialogWindow.contentItem, "/tmp/pilon-assistant-error.png")
-        mouseClick(buttons[0]); tryCompare(dialog, "visible", false)
+    function test_backgroundAssistantFailureLeavesFilesFocused() {
+        verify(appWindow.selectPage("assistant"))
+        const assistant = findControl(appWindow, "assistantPane").assistant
+        verify(appWindow.selectPage("files"))
+        const previousFocus = appWindow.activeFocusItem
+        assistant.addAttachments(["file:///missing-pilon-ui-test-file"])
+        verify(assistant.error.length > 0)
+        renderWindow(appWindow)
+        compare(appWindow.selectedPage, "files")
+        compare(appWindow.activeFocusItem, previousFocus)
+        verify(!findControl(appWindow, "assistantErrorNotification"))
+        assistant.dismissError()
     }
     function test_settingsCloseDoesNotHideMainWindow() {
         const settings = findControl(appWindow, "settingsMenu")
@@ -888,7 +893,7 @@ TestCase {
         tryCompare(settings, "visible", false)
         verify(appWindow.visible)
     }
-    function test_workspaceErrorsKeepPageAndEmptyStateControlsSeparate_data() {
+    function test_workspaceErrorPreservesPageAndEmptyStateGeometry_data() {
         return [{tag:"narrow_touch",width:320,height:480,touch:true},{tag:"desktop",width:1024,height:768,touch:false}]
     }
     function test_settingsHeadingUsesWindowForegroundWhenNativeStyleDiffers() {
@@ -922,22 +927,37 @@ TestCase {
         label.palette.windowText = "#000000"
         fuzzyCompare(label.color, settings.palette.windowText, 1 / 65535)
     }
-    function test_workspaceErrorsKeepPageAndEmptyStateControlsSeparate(data) {
+    function test_workspaceErrorPreservesPageAndEmptyStateGeometry(data) {
         appWindow.touchMode=data.touch;tabletInput.configureWindow(appWindow,data.width,data.height)
         const area=findControl(appWindow,"addonArea"),host=appWindow.addonHosts.files
         const visibleIds=appWindow.pages.map(entry=>entry.id),selection=appWindow.selectedPage
         try {
-            appWindow.addonError="Unable to load an add-on. Check the add-on package. ".repeat(12)
-            const message=findControl(appWindow,"workspaceErrorStatus"),status=message.parent.parent
             renderWindow(appWindow)
-            const top=message.mapToItem(area,0,0).y
-            verify(host.y+host.height<=top-12,"The active page ends above its recovery message")
-            verify(status.height<=area.height*.25+1,"Long recovery messages keep page controls available")
-            for(const entry of appWindow.pages)verify(appWindow.addonRegistryObject.setPageVisible(entry.id,false))
+            const initial = Qt.rect(host.x, host.y, host.width, host.height)
+            const message = "Unable to load the add-on. Check the package. ".repeat(12)
+            appWindow.addonError = message
+            const popup = findControl(appWindow, "workspaceErrorStatus")
+            tryCompare(popup, "opened", true)
+            compare(Qt.rect(host.x, host.y, host.width, host.height), initial)
+            verify(popup.height < area.height)
+            if (appWindow.bottomNavigation) {
+                const lowerEdge = popup.contentItem.mapToItem(appWindow.contentItem, 0, popup.availableHeight).y
+                verify(lowerEdge + popup.bottomPadding * appWindow.uiScale <= appWindow.errorPopupBottom)
+                const pageBottom = area.mapToItem(appWindow.contentItem, 0, area.height).y
+                fuzzyCompare(appWindow.errorPopupBottom, pageBottom, 1)
+            }
+            compare(findChild(popup.contentItem, "pilonErrorMessage").Accessible.name, message)
+            popup.dismiss()
+            tryCompare(popup, "opened", false)
+            compare(Qt.rect(host.x, host.y, host.width, host.height), initial)
+            for (const entry of appWindow.pages) verify(appWindow.addonRegistryObject.setPageVisible(entry.id, false))
             renderWindow(appWindow)
-            const empty=findControl(appWindow,"emptyAddonsPage")
+            const empty = findControl(appWindow, "emptyAddonsPage")
             verify(empty.visible)
-            verify(empty.y+empty.height<=message.mapToItem(area,0,0).y-12,"The add-on grid scrolls above the recovery message")
+            const emptyBounds = Qt.rect(empty.x, empty.y, empty.width, empty.height)
+            appWindow.addonError = message
+            tryCompare(popup, "opened", true)
+            compare(Qt.rect(empty.x, empty.y, empty.width, empty.height), emptyBounds)
             verify(tabletInput.saveWindow(appWindow.contentItem,"/tmp/pilon-workspace-error-"+data.tag+".png"))
         } finally {
             appWindow.addonError=""
@@ -1092,21 +1112,21 @@ TestCase {
             compare(appWindow.addonError,"","Recovery status must retain its single owner")
             const workspaceStatus=findControl(appWindow,"workspaceErrorStatus")
             verify(workspaceStatus)
-            compare(workspaceStatus.text,recovery); verify(workspaceStatus.visible)
+            compare(workspaceStatus.message,recovery); verify(workspaceStatus.visible)
             verify(appWindow.openSettings("application"))
             const applicationStatus=findControl(appWindow,"applicationErrorStatus")
             verify(applicationStatus)
-            compare(applicationStatus.text,recovery); verify(applicationStatus.visible)
+            compare(applicationStatus.message,recovery); verify(applicationStatus.visible)
             coordinator.error=""
-            compare(workspaceStatus.text,""); verify(!workspaceStatus.visible)
-            compare(applicationStatus.text,""); verify(!applicationStatus.visible)
+            compare(workspaceStatus.message,""); verify(!workspaceStatus.visible)
+            compare(applicationStatus.message,""); verify(!applicationStatus.visible)
             appWindow.addonError=unrelated
             coordinator.error=recovery; coordinator.error=""
             compare(appWindow.addonError,unrelated)
-            compare(workspaceStatus.text,unrelated); compare(applicationStatus.text,unrelated)
+            compare(workspaceStatus.opened,false); compare(applicationStatus.message,unrelated)
             service.error="Unable to save application settings."
-            compare(applicationStatus.text,service.error)
-            compare(workspaceStatus.text,unrelated)
+            compare(applicationStatus.message,service.error)
+            compare(workspaceStatus.opened,false)
         } finally {
             coordinator.error=""; appWindow.addonError=""; service.error=serviceError
             findControl(appWindow,"settingsMenu").close()

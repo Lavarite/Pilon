@@ -23,6 +23,7 @@ TestCase {
         id: dialog
         parent: surface; palette: owner.palette
         errorMessage: test.saveError
+        onErrorDismissed: test.saveError = ""
         savePaper: (value, useDefault) => {
             if (!test.acceptedSave) { test.saveError="Cannot save the page template."; return false }
             test.savedPaper=value; test.savedDefault=useDefault; return true
@@ -61,10 +62,18 @@ TestCase {
     }
     function test_failedSaveKeepsDraftAndErrorVisible() {
         acceptedSave=false; dialog.pattern="lined"
-        click("noteApplyPaper")
+        const save = control("noteApplyPaper")
+        reveal(save)
+        tryCompare(dialog.dialogWindow, "height", Math.round(dialog.height))
+        const windowSize = Qt.size(dialog.dialogWindow.width, dialog.dialogWindow.height)
+        const position = save.mapToItem(dialog.contentItem, 0, 0)
+        mouseClick(save)
         verify(dialog.opened); compare(dialog.pattern,"lined")
-        const error=control("notePaperError"); reveal(error)
-        verify(error.visible); compare(error.text,"Cannot save the page template.")
+        const error = control("notePaperError")
+        tryCompare(error, "opened", true); compare(error.message, "Cannot save the page template.")
+        compare(Qt.size(dialog.dialogWindow.width, dialog.dialogWindow.height), windowSize)
+        compare(save.mapToItem(dialog.contentItem, 0, 0), position)
+        error.dismiss(); tryCompare(error, "opened", false); verify(dialog.opened)
     }
     function test_currentNoteCanApplyOrSetDefault_data() { return [{tag:"apply",control:"noteApplyPaper",expected:false},{tag:"default",control:"noteUseDefaultPaper",expected:true}] }
     function test_currentNoteCanApplyOrSetDefault(data) {

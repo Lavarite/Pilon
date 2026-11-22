@@ -37,5 +37,5 @@ ColumnLayout {
             Label { Layout.fillWidth:true; wrapMode:Text.Wrap; visible:!!text; text:modelData.reason || ""; color:settings.addon.selectedMutedTextColour }
         }
     }
-    Label { Layout.fillWidth:true; wrapMode:Text.Wrap; visible:!!text; text:settings.error; color:settings.addon.selectedTextColour }
+    PilonErrorPopup { owner: settings; message: settings.error; onDismissed: settings.error = "" }
 }

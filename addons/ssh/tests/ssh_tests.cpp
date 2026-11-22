@@ -71,7 +71,10 @@ private slots:
         NetworkSnapshot::write(sizes, {{"fixture", 1}});
         QVERIFY(QFile::exists(sizes));
         SshCredentials::put("fixture","user","fixture-password");
-        SshManager manager;QVERIFY(!manager.forgetPasswords());
+        SshManager manager;
+        QVERIFY(!manager.clearSavedPasswords().isEmpty());
+        QVERIFY(manager.errorMessage().isEmpty());
+        QVERIFY(!manager.forgetPasswords());
         QVERIFY(!manager.errorMessage().isEmpty());QCOMPARE(SshCredentials::get("fixture","user"),QString("fixture-password"));
         QProcess pending;SshCredentials::trackWrite(&pending);
         QVERIFY(!manager.cleanupBlockedReason().isEmpty());QVERIFY(!manager.forgetPasswords());

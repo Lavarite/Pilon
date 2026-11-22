@@ -190,6 +190,11 @@ Item {
         property string editingType: ""
         property url importSource: ""
         property string errorText: ""
+        PilonErrorPopup {
+            owner: editor.contentItem
+            message: editor.opened ? editor.errorText : ""
+            onDismissed: editor.errorText = ""
+        }
         property var pathDraft: ({})
         readonly property var devices: appearance.workspace.devices || []
         readonly property var entry: ({
@@ -395,13 +400,7 @@ Item {
                                 onClicked: editor.tint = ""
                             }
                         }
-                        Label {
-                            width: parent.width
-                            visible: text !== ""
-                            text: editor.errorText
-                            wrapMode: Text.Wrap
-                            color: appearance.workspace.warningColour
-                        }
+
                         PilonButton {
                             objectName: "saveFileAppearance"
                             width: Math.min(implicitWidth, parent.width)

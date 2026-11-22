@@ -16,7 +16,6 @@ PilonScrollView {
     required property color secondaryColour
     required property color accentColour
     required property color accentTextColour
-    required property color warningColour
     property string recordingId: ""
     property string error: ""
     property string expandedGroup: ""
@@ -44,7 +43,7 @@ PilonScrollView {
             selectByMouse: true; padding: 10
             background: Rectangle { radius: 8; color: settings.alpha(settings.textColour, .06); border.color: settings.alpha(settings.textColour, .2) }
         }
-        Label { width: parent.width; text: settings.error; visible: !!text; color: settings.warningColour; wrapMode: Text.Wrap }
+        PilonErrorPopup { owner: settings; message: settings.error; onDismissed: settings.error = "" }
         Repeater {
             model: [...new Set(Backend.KeyBindings.actions.map(action => action.group))]
             delegate: Column {

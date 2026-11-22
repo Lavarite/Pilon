@@ -22,7 +22,7 @@ Item {
                 checked=Qt.binding(() => settings.addon.setting("addAtTop",false) === true)
             }
         }
-        Label { Layout.fillWidth: true; text: settings.error; visible: text.length>0; wrapMode: Text.Wrap }
+        PilonErrorPopup { owner: settings; message: settings.error; onDismissed: settings.error = "" }
         Item { Layout.fillHeight: true }
     }
 }

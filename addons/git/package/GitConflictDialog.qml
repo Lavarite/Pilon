@@ -19,6 +19,13 @@ PilonDialog {
     property var messages: ({})
     property string readingSide: ""
     property string exportingSide: ""
+    property string exportError: ""
+    PilonErrorPopup {
+        objectName: "gitConflictExportError"
+        owner: dialog.contentItem
+        message: dialog.visible ? dialog.exportError : ""
+        onDismissed: dialog.exportError = ""
+    }
     readonly property string side: version.currentIndex === 1 ? "incoming" : "current"
     readonly property bool wide: scroll.availableWidth >= 640
     width: Math.min(1100, parent ? parent.width - 32 : 1100)
@@ -33,7 +40,7 @@ PilonDialog {
     }
     function review(path) {
         if (!manager || manager.busy || !manager.worktreeLeaseActive) return
-        generation++; conflictPath = path; repositoryRoot = manager.repository.localPath; operation = manager.operationId
+        exportError = ""; generation++; conflictPath = path; repositoryRoot = manager.repository.localPath; operation = manager.operationId
         version.currentIndex = 0; previews = ({}); filenames = ({}); messages = ({}); readingSide = ""; exportingSide = ""
         open(); readVersion("current")
     }
@@ -58,7 +65,7 @@ PilonDialog {
         const ticket = generation
         workspace.selectFolder(qsTr("Save version"), folder => {
             if (!visible || ticket !== generation || !validContext() || manager.busy) return
-            messages = Object.assign({},messages,{[selectedSide]:""}); exportingSide = selectedSide
+            exportError = ""; messages = Object.assign({},messages,{[selectedSide]:""}); exportingSide = selectedSide
             manager.exportConflictVersion(conflictPath, selectedSide, folder.replace(/\/+$/, "") + "/" + name.trim())
         }, dialogWindow)
     }
@@ -86,7 +93,7 @@ PilonDialog {
             if (!dialog.visible) return
             if (!dialog.validContext()) { dialog.close(); return }
             if (dialog.exportingSide && !dialog.manager.busy && dialog.manager.error) {
-                dialog.messages = Object.assign({},dialog.messages,{[dialog.exportingSide]:dialog.manager.error}); dialog.exportingSide = ""
+                dialog.exportError = dialog.manager.error; dialog.exportingSide = ""
             }
         }
     }
@@ -105,11 +112,11 @@ PilonDialog {
             text: dialog.readingSide === view.versionSide ? qsTr("Reading version…") : dialog.exportingSide === view.versionSide ? qsTr("Saving version…") : dialog.messages[view.versionSide] || ""
             color: dialog.palette.windowText
         }
-        PilonWrapButton {
-            visible: view.value.kind === "error" && !dialog.manager.busy
-            text: qsTr("Retry preview"); onClicked: dialog.readVersion(view.versionSide,true)
+        Git.GitFilePreview {
+            width: view.width; preview: view.value; errorOwner: dialog.contentItem
+            retryText: view.value.kind === "error" && !dialog.manager.busy ? qsTr("Retry preview") : ""
+            onRetryRequested: dialog.readVersion(view.versionSide, true)
         }
-        Git.GitFilePreview { width: view.width; preview: view.value }
         PilonFormRow {
             width: view.width; visible: view.saveAvailable; label: qsTr("Filename")
             PilonTextField {

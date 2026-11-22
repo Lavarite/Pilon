@@ -19,7 +19,7 @@ PilonDialog {
     property string error: ""
     width: 190 + padding * 2
     height: Math.min(600, topPadding + bottomPadding + preview.implicitHeight
-        + 12 + settingsButton.height + 10 + (errorStatus.visible ? errorStatus.implicitHeight + 12 : 0))
+        + 12 + settingsButton.height + 10)
     topPadding: 16 + 42 + 8
     rightPadding: padding
     modal: true
@@ -98,12 +98,10 @@ PilonDialog {
                 onClicked: dialog.close()
             }
         }
-        Label {
-            id: errorStatus
-            Layout.fillWidth: true; Layout.minimumWidth: 0
-            visible: text.length > 0
-            text: dialog.error; textFormat: Text.PlainText; wrapMode: Text.Wrap
-            color: dialog.palette.windowText
+        PilonErrorPopup {
+            owner: preview
+            message: dialog.error
+            onDismissed: dialog.error = ""
         }
     }
 }

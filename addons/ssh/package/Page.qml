@@ -85,6 +85,15 @@ Item {
         queueTerminalConnection(device.ip, username, path)
     }
 
+    PilonErrorPopup {
+        objectName: "sshConnectionError"
+        owner: sshPage
+        message: sshPage.addon.sshManager.errorMessage
+        details: sshPage.addon.sshManager.errorDetails
+        actionText: sshPage.addon.sshManager.canRetry && !sshPage.addon.sshManager.running ? qsTr("Retry") : ""
+        onActionRequested: sshPage.addon.sshManager.retryConnection()
+        onDismissed: sshPage.addon.sshManager.dismissError()
+    }
     anchors.fill: parent
 
     Rectangle {

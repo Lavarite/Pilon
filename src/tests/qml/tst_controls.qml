@@ -80,6 +80,7 @@ TestCase {
         Item { implicitWidth: 100; implicitHeight: 36 }
     } }
     SignalSpy { id: dialogAccepted; signalName: "accepted" }
+    SignalSpy { id: decisionRejected; signalName: "rejected" }
     Component { id: pickerComponent; App.FilePickerWindow {
         transientParent: owner; width: 380; height: 280
         minimumWidth: Math.min(280 * uiScale, placementBounds.width)
@@ -218,6 +219,55 @@ TestCase {
         tryCompare(host, "width", 360); tryCompare(host, "height", 840)
         tryCompare(host, "x", 0); tryCompare(host, "y", 0)
         form.close()
+    }
+    Component {
+        id: decisionComponent
+        UI.PilonConfirmation {
+            parent: surface
+            message: "Delete this item?"
+            confirmText: "Delete"
+        }
+    }
+    function test_confirmationUsesContentSizeAndKeepsSafeChoice_data() {
+        return [{tag: "cover", scale: 1, pane: Qt.rect(0, 0, 320, 640)},
+                {tag: "scaled-fold", scale: 1.4, pane: Qt.rect(388, 24, 348, 640)}]
+    }
+    function test_confirmationUsesContentSizeAndKeepsSafeChoice(data) {
+        owner.x = 0; owner.y = 0; owner.uiScale = data.scale
+        owner.hasDisplayFold = data.tag === "scaled-fold"
+        owner.width = owner.hasDisplayFold ? 800 : data.pane.width
+        owner.height = owner.hasDisplayFold ? 700 : data.pane.height
+        tabletInput.setScreenGeometry(Qt.rect(0, 0, owner.width, owner.height))
+        owner.usableGeometry = data.pane
+        const dialog = createTemporaryObject(decisionComponent, surface)
+        dialog.open()
+        const host = dialog.dialogWindow
+        tryCompare(host, "visible", true)
+        verify(host.width < data.pane.width)
+        verify(host.height < data.pane.height / 2)
+        verify(Math.abs(host.x - owner.x - data.pane.x - (data.pane.width - host.width) / 2) <= 1)
+        verify(Math.abs(host.y - owner.y - data.pane.y - (data.pane.height - host.height) / 2) <= 1)
+        tryCompare(dialog.cancelButton, "activeFocus", true)
+        dialogAccepted.target = dialog; dialogAccepted.clear()
+        decisionRejected.target = dialog; decisionRejected.clear()
+        keyClick(Qt.Key_Escape); tryCompare(dialog, "opened", false)
+        compare(decisionRejected.count, 1)
+        dialog.open(); tryCompare(host, "visible", true)
+        mouseClick(findChild(host.contentItem, "windowCloseButton"))
+        tryCompare(dialog, "opened", false)
+        compare(decisionRejected.count, 2)
+        compare(dialogAccepted.count, 0)
+        dialog.open(); tryCompare(host, "visible", true)
+        dialog.details = "Long detail ".repeat(1200)
+        tabletInput.setScreenGeometry(Qt.rect(0, 0, 800, 700))
+        owner.width = 800; owner.height = 700; owner.hasDisplayFold = true
+        owner.usableGeometry = Qt.rect(20, 390, 320, 260)
+        tryVerify(() => host.height <= Math.ceil(260 - 2 * 16 * data.scale))
+        tryVerify(() => dialog.contentItem.contentHeight > dialog.contentItem.availableHeight)
+        dialog.contentItem.contentItem.contentY = dialog.contentItem.contentHeight - dialog.contentItem.availableHeight
+        tryVerify(() => dialog.confirmButton.mapToGlobal(0, dialog.confirmButton.height).y <= host.y + host.height + 1)
+        mouseClick(dialog.confirmButton); tryCompare(dialog, "opened", false)
+        compare(dialogAccepted.count, 1)
     }
     function test_compactPickerRestoresItsRequestedSizeWhenReopenedWide() {
         owner.width = 1200; owner.height = 900; owner.hasDisplayFold = true

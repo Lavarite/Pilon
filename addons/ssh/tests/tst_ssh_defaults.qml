@@ -40,8 +40,10 @@ TestCase {
         property bool running: false
         property bool authenticated: false
         property string errorMessage: ""
+        property string errorDetails: ""
+        property bool canRetry: false
         property int forgetCalls: 0
-        function forgetPasswords() { forgetCalls++; return true }
+        function clearSavedPasswords() { forgetCalls++; return "" }
         property string connectedUser: ""
         property string connectedHost: ""
         property int connectionCalls: 0

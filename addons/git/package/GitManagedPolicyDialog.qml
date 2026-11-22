@@ -47,6 +47,12 @@ PilonDialog {
             dialog.finishIfReady()
         }
     }
+    PilonErrorPopup {
+        objectName: "gitManagedPolicyError"
+        owner: dialog.contentItem
+        message: dialog.visible ? dialog.operationError : ""
+        onDismissed: dialog.operationError = ""
+    }
     contentItem: PilonScrollView {
         id: scroll
         objectName: "gitManagedPolicyScroll"
@@ -78,8 +84,8 @@ PilonDialog {
             Label {
                 objectName: "gitManagedPolicyStatus"
                 width: body.width; wrapMode: Text.Wrap; textFormat: Text.PlainText
-                visible: dialog.applying || !!dialog.operationError
-                text: dialog.operationError || qsTr("Applying sync rules…")
+                visible: dialog.applying
+                text: qsTr("Applying sync rules…")
                 color: dialog.palette.windowText
             }
             PilonWrapButton {

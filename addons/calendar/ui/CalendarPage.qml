@@ -225,7 +225,7 @@ Control {
         const changed = calendar.moveEvent(g.event.id, g.event.occurrence, g.days, g.minutes, g.resize ? g.duration : -1)
         gesture = null
         if (changed && g.edge) selectedDate = g.targetDate
-        if (!changed && calendar.error) { operationIssue.message = calendar.error; operationIssue.open() }
+        if (!changed && calendar.error) { operationIssue.message = calendar.error }
     }
     Keys.onEscapePressed: gesture = null
     Keys.onLeftPressed: event => handlePeriodArrow(event, -1)
@@ -783,13 +783,11 @@ Control {
             initialFrom: page.iso(page.rangeStart); initialThrough: page.iso(page.addDays(page.rangeStart, page.dayCount - 1))
         }
     }
-    PilonDialog {
+    PilonErrorPopup {
         id: operationIssue
-        property string message: ""
-        palette: page.palette
-        parent: page.Overlay.overlay; x: (parent.width-width)/2; y: (parent.height-height)/2
-        width: Math.min(480, parent.width-32); modal: true; title: qsTr("Event could not be changed")
-        contentItem: Label { text: operationIssue.message; color: page.textColour; wrapMode: Text.Wrap }
+        objectName: "calendarOperationError"
+        owner: page
+        onDismissed: message = ""
     }
     CalendarDatePicker {
         id: datePicker

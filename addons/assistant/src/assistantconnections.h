@@ -39,6 +39,7 @@ public:
     QUrl verificationUrl() const { return m_verificationUrl; }
     bool hasChatGptSession() const;
     QString error() const { return m_error; }
+    Q_INVOKABLE void dismissError() { if (!m_error.isEmpty()) { m_error.clear(); emit stateChanged(); } }
     QByteArray apiKey(const QString &id);
     Q_INVOKABLE void signIn();
     Q_INVOKABLE void continueSignIn();

@@ -47,9 +47,11 @@ TestCase {
         appWindow.width = data.width - 40; appWindow.height = data.height - 80
         appWindow.show(); appWindow.requestActivate()
         const manager = findChild(appWindow, "sshManager")
-        manager.connectToHost("tester", host + ".fixture.invalid")
+        verify(appWindow.selectPage("ssh"))
+        tryVerify(() => findChild(appWindow, "sshConnectionError") !== null)
+        findChild(appWindow, "sshConnectionError").owner.connectTerminal("tester", host + ".fixture.invalid", "")
         const dialog = findChild(appWindow, "sshLoginNotification")
-        tryCompare(dialog, "visible", true)
+        if (host !== "long-error" && host !== "changed-key") tryCompare(dialog, "visible", true)
         return dialog
     }
     function waitForConnectionPrompt(dialog) {
@@ -89,7 +91,9 @@ TestCase {
         verify(details.text.indexOf("192.0.2.1") >= 0)
         verify(!findChild(dialog, "sshPromptInput").visible)
         const trust = contained(dialog, "sshContinueConnection")
-        contained(dialog, "sshCancelConnection")
+        const cancel = contained(dialog, "sshCancelConnection")
+        verify(dialog.contentSizedWindow)
+        tryCompare(cancel, "activeFocus", true)
         verify(trust.highlighted)
         tabletInput.saveWindow(dialog.dialogWindow.contentItem, "/tmp/pilon-ssh-trust-" + data.tag + ".png")
         mouseClick(trust)
@@ -98,6 +102,20 @@ TestCase {
         appWindow.update()
         verify(waitForRendering(appWindow.contentItem))
         verify(manager.running && manager.authenticated, "Closing the login dialog keeps the authenticated session running")
+    }
+    function test_dismissingHostTrustCancelsTheConnection_data() {
+        return [{tag: "escape"}, {tag: "close-button"}, {tag: "cancel"}]
+    }
+    function test_dismissingHostTrustCancelsTheConnection(data) {
+        const dialog = openConnection("host", {width: 400, height: 600, touch: true})
+        const manager = waitForConnectionPrompt(dialog)
+        renderConnectionDialog(dialog)
+        if (data.tag === "escape") keyClick(Qt.Key_Escape)
+        else if (data.tag === "close-button") mouseClick(findChild(dialog.dialogWindow, "windowCloseButton"))
+        else mouseClick(contained(dialog, "sshCancelConnection"))
+        tryCompare(dialog, "visible", false)
+        tryCompare(manager, "running", false)
+        verify(!manager.authenticated && !manager.errorMessage)
     }
     function test_browserApprovalIsVisibleWithoutAnInputField() {
         const dialog = openConnection("approval", {width: 800, height: 600, touch: false})
@@ -221,34 +239,31 @@ TestCase {
     function test_longErrorHasSummaryAndScrollablePersistentDetails(data) {
         const dialog = openConnection("long-error", data)
         tryCompare(findChild(appWindow, "sshManager"), "running", false)
-        compare(findChild(dialog, "sshErrorSummary").text, "SSH authentication failed.")
-        verify(!findChild(dialog, "sshConnectionDetailsScroll").visible)
-        const toggle = contained(dialog, "sshErrorDetailsToggle")
-        mouseClick(toggle)
-        const scroll = findChild(dialog, "sshConnectionDetailsScroll")
-        tryVerify(() => scroll.visible && scroll.contentHeight > scroll.availableHeight)
-        verify(findChild(dialog, "sshConnectionDetails").text.includes("Permission denied (publickey)."))
-        contained(dialog, "sshErrorDetailsToggle")
-        const position = scroll.contentHeight - scroll.availableHeight
-        scroll.contentItem.contentY = position
-        verify(scroll.contentItem.contentY > 0)
-        tabletInput.saveWindow(dialog.dialogWindow.contentItem, "/tmp/pilon-ssh-error-" + data.tag + ".png")
-        mouseClick(toggle)
-        verify(!scroll.visible)
-        verify(dialog.visible)
+        const failure = findChild(appWindow, "sshConnectionError")
+        tryCompare(failure, "opened", true)
+        tryCompare(dialog, "visible", false)
+        compare(failure.message, "SSH authentication failed.")
+        verify(!failure.focus && !failure.modal && !failure.dim && !failure.detailsExpanded)
+        verify(failure.details.includes("Permission denied (publickey)."))
+        const toggle = findChild(failure.contentItem,"pilonErrorDetailsToggle")
+        verify(toggle); mouseClick(toggle); tryCompare(failure,"detailsExpanded",true)
+        const detail = findChild(failure.contentItem,"pilonErrorDetails")
+        verify(detail.selectByMouse && detail.readOnly && detail.visible)
+        appWindow.update(); verify(waitForRendering(appWindow.contentItem))
+        mouseClick(toggle); tryCompare(failure,"detailsExpanded",false)
+        verify(failure.opened)
     }
     function test_changedHostKeyCanOnlyBeDismissed() {
         const dialog = openConnection("changed-key", {width: 400, height: 600, touch: true})
         const manager = findChild(appWindow, "sshManager")
         tryCompare(manager, "running", false)
-        compare(findChild(dialog, "sshErrorSummary").text,
-                "The SSH host key changed. Verify the new key with the device owner.")
-        verify(!findChild(dialog, "sshRetryConnection").visible)
-        verify(!findChild(dialog, "sshContinueConnection").visible)
-        const dismiss = contained(dialog, "sshCancelConnection")
-        compare(dismiss.text, "Dismiss")
-        mouseClick(dismiss)
-        tryCompare(dialog, "visible", false)
+        const failure = findChild(appWindow, "sshConnectionError")
+        tryCompare(failure, "opened", true)
+        compare(failure.message, "The SSH host key changed. Verify the new key with the device owner.")
+        compare(failure.actionText, "")
+        verify(!dialog.opened)
+        mouseClick(findChild(failure.contentItem,"dismissPilonError"))
+        tryCompare(failure, "opened", false)
         compare(manager.errorMessage, "")
     }
     function test_visibleChallengeAndCancel() {

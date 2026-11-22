@@ -5,6 +5,18 @@ import Pilon
 
 Item {
     id: content
+    property Item errorOwner: content
+    property string retryText: ""
+    signal retryRequested()
+    property string imageError: ""
+    onPreviewChanged: imageError = ""
+    PilonErrorPopup {
+        objectName: "gitPreviewError"
+        owner: content.errorOwner
+        message: content.visible ? content.preview.error || content.imageError : ""
+        actionText: content.retryText
+        onActionRequested: content.retryRequested()
+    }
     required property var preview
     readonly property real naturalContentWidth: preview.diff === true ? diffMeasure.implicitWidth + textPreview.leftPadding + textPreview.rightPadding : 0
     implicitWidth: naturalContentWidth
@@ -23,11 +35,6 @@ Item {
             width: content.width; wrapMode: Text.Wrap; textFormat: Text.PlainText
             visible: content.preview.kind === "loading"
             text: qsTr("Loading…")
-            color: content.Window.window ? content.Window.window.palette.windowText : palette.windowText
-        }
-        Label {
-            width: content.width; wrapMode: Text.Wrap; textFormat: Text.PlainText
-            visible: !!content.preview.error; text: content.preview.error || ""
             color: content.Window.window ? content.Window.window.palette.windowText : palette.windowText
         }
         Label {
@@ -73,15 +80,11 @@ Item {
                 Label { width: page.width; text: qsTr("Page %1").arg(page.index + 1); color:content.Window.window ? content.Window.window.palette.windowText : palette.windowText; textFormat: Text.PlainText; wrapMode: Text.Wrap }
                 Image {
                     id: image
+                    onStatusChanged: if (status === Image.Error) content.imageError = qsTr("Unable to display page %1.").arg(page.index + 1)
                     objectName: "gitFilePreviewPage_" + page.index
                     width: page.width; height: width * page.modelData.height / Math.max(1,page.modelData.width)
                     source: page.modelData.source; fillMode: Image.PreserveAspectFit
                     Accessible.role: Accessible.Graphic; Accessible.name: qsTr("Page %1").arg(page.index + 1)
-                }
-                Label {
-                    width: page.width; visible: image.status === Image.Error
-                    text: qsTr("Unable to display this page."); textFormat: Text.PlainText; wrapMode: Text.Wrap
-                    color: content.Window.window ? content.Window.window.palette.windowText : palette.windowText
                 }
             }
         }

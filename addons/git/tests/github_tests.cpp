@@ -73,6 +73,21 @@ class GitHubTests : public QObject {
         return state;
     }
 private slots:
+    void repeatedRemoteValidationReportsEachRejectedAttempt() {
+        GitHubManager manager;
+        manager.saveRemote("oops");
+        QCOMPARE(manager.error(), QStringLiteral("Enter a repository URL using HTTPS, SSH, or a local path."));
+        const auto first = manager.errorRevision();
+        manager.setCommitName("Test committer");
+        QCOMPARE(manager.errorRevision(), first);
+        manager.saveRemote("still-invalid");
+        QVERIFY(manager.errorRevision() > first);
+        QCOMPARE(manager.error(), QStringLiteral("Enter a repository URL using HTTPS, SSH, or a local path."));
+        const auto afterSave = manager.errorRevision();
+        manager.readChange("missing-file");
+        QCOMPARE(manager.changePreview().value("kind").toString(), QStringLiteral("error"));
+        QCOMPARE(manager.errorRevision(), afterSave);
+    }
     void initTestCase() {
         oldPath = qgetenv("PATH"); oldHome = qgetenv("HOME"); oldConfig = qgetenv("XDG_CONFIG_HOME");
         QCoreApplication::setOrganizationName("PilonTests"); QCoreApplication::setApplicationName("GitHub");

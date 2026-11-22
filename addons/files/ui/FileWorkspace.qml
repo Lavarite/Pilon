@@ -45,6 +45,7 @@ Item {
     readonly property var destinationManager: fileManagerComponent.createObject(fileWorkspace)
     readonly property var shareManager: fileManagerComponent.createObject(fileWorkspace)
     property bool sharingNote: false
+    readonly property bool exportingNote: exportDialog.opened
     property var shareErrorOwner: null
     property string shareDeviceId: ""
     readonly property bool filePickerOpen: uploadDialog.opened || selectionDialog.opened
@@ -220,9 +221,26 @@ const tile = uploadDialog.destination, entries = uploadDialog.picker.selectedEnt
             }
         }
     }
+    PilonConfirmation {
+        id: replaceFile
+        objectName: "replaceExistingFile"
+        property var picker: null
+        property string filename: ""
+        property var replace: null
+        parent: picker ? picker.contentItem : null
+        palette: picker ? picker.palette : fileWorkspace.ownerWindow.palette
+        message: qsTr("Replace “%1”?").arg(filename)
+        confirmText: qsTr("Replace")
+        perform: () => { if (picker?.opened && replace) replace() }
+        onClosed: replace = null
+        function ask(origin, name, action) {
+            picker = origin; filename = name; replace = action
+            open()
+        }
+    }
     function saveFiles(tile, entries) {
         destinationDialog.sourceTile = tile
-        destinationDialog.overwritePending = false
+        destinationDialog.nameConflict = false
         destinationDialog.entries = entries.map(entry => tile.entryWithAccount(entry))
         destinationName.text = entries.length === 1 ? entries[0].name : ""
         destinationManager.browse(destinationManager.localDevice, destinationManager.localDevice.username,
@@ -233,7 +251,7 @@ const tile = uploadDialog.destination, entries = uploadDialog.picker.selectedEnt
         id: destinationDialog
         objectName: "connectedFileDestination"
         property var sourceTile: null
-        property bool overwritePending: false
+        property bool nameConflict: false
         property var entries: []
         title: qsTr("Save file")
         transientParent: fileWorkspace.ownerWindow
@@ -241,7 +259,14 @@ const tile = uploadDialog.destination, entries = uploadDialog.picker.selectedEnt
         workspace: fileWorkspace; remoteFiles: fileWorkspace.destinationManager
         pickerName: ""
         pickerLoaderName: ""
-        onClosed: fileWorkspace.destinationManager.cancel()
+        onClosed: {
+            if (replaceFile.picker === destinationDialog && replaceFile.opened) replaceFile.close()
+            fileWorkspace.destinationManager.cancel()
+        }
+        Connections {
+            target: fileWorkspace.destinationManager
+            function onLocationChanged() { destinationDialog.nameConflict = false }
+        }
 
         Column {
             id: destinationBottom
@@ -252,16 +277,15 @@ const tile = uploadDialog.destination, entries = uploadDialog.picker.selectedEnt
                 width: parent.width
                 visible: destinationDialog.entries.length === 1
                 color: fileWorkspace.textColour; selectByMouse: true
-                onTextEdited: destinationDialog.overwritePending = false
+                onTextEdited: destinationDialog.nameConflict = false
                 background: Rectangle { radius: 8; color: fileWorkspace.secondaryColour }
             }
-            Label {
-                width: parent.width; visible: destinationDialog.overwritePending
-                text: fileWorkspace.destinationManager.currentDeviceId === "local"
-                    ? qsTr("A file with this name exists. Choose Save again to replace it.")
-                    : qsTr("A file with this name exists. Choose a different file name.")
-                color: fileWorkspace.warningColour; wrapMode: Text.Wrap
-            }
+        }
+        PilonErrorPopup {
+            objectName: "destinationNameError"
+            owner: destinationDialog.contentItem
+            message: destinationDialog.opened && destinationDialog.nameConflict ? qsTr("A file with this name exists. Choose a different file name.") : ""
+            onDismissed: destinationDialog.nameConflict = false
         }
 
         acceptText: qsTr("Save")
@@ -270,21 +294,23 @@ const tile = uploadDialog.destination, entries = uploadDialog.picker.selectedEnt
                         && !!fileWorkspace.destinationManager.currentPath
                         && (destinationDialog.entries.length !== 1 || (!!destinationName.text.trim() && !/[\\/]/.test(destinationName.text)))
         onAccepted: {
-const entries = destinationDialog.entries.map(entry => Object.assign({}, entry))
-                        if (entries.length === 1) entries[0].name = destinationName.text.trim()
-                        const manager = destinationDialog.sourceTile.remoteFiles
-                        if (entries.length === 1 && fileWorkspace.destinationManager.entries.some(entry => entry.name === entries[0].name)) {
-                            if (!destinationDialog.overwritePending || fileWorkspace.destinationManager.currentDeviceId !== "local") {
-                                destinationDialog.overwritePending = true; return
-                            }
-                            const folder = fileWorkspace.destinationManager.currentPath.split("/").map(encodeURIComponent).join("/")
-                            manager.downloadFile(entries[0], entries[0].username,
-                                "file://" + folder + (folder.endsWith("/") ? "" : "/") + encodeURIComponent(entries[0].name))
-                            destinationDialog.close(); return
-                        }
-                        manager.pasteEntries(entries, fileWorkspace.deviceForId(fileWorkspace.destinationManager.currentDeviceId),
-                            destinationDialog.picker.operationUsername(), fileWorkspace.destinationManager.currentPath, false)
-                        destinationDialog.close()
+            const entries = destinationDialog.entries.map(entry => Object.assign({}, entry))
+            const destination = fileWorkspace.destinationManager
+            const manager = destinationDialog.sourceTile.remoteFiles
+            if (entries.length === 1) entries[0].name = destinationName.text.trim()
+            if (entries.length === 1 && destination.entries.some(entry => entry.name === entries[0].name)) {
+                if (destination.currentDeviceId !== "local") { destinationDialog.nameConflict = true; return }
+                const folder = destination.currentPath.split("/").map(encodeURIComponent).join("/")
+                const url = "file://" + folder + (folder.endsWith("/") ? "" : "/") + encodeURIComponent(entries[0].name)
+                replaceFile.ask(destinationDialog, entries[0].name, () => {
+                    manager.downloadFile(entries[0], entries[0].username, url)
+                    destinationDialog.close()
+                })
+                return
+            }
+            manager.pasteEntries(entries, fileWorkspace.deviceForId(destination.currentDeviceId),
+                destinationDialog.picker.operationUsername(), destination.currentPath, false)
+            destinationDialog.close()
         }
     }
 
@@ -316,7 +342,7 @@ const entries = destinationDialog.entries.map(entry => Object.assign({}, entry))
         if (!notes.save()) return
         exportDialog.note = notes
         exportName.text = notes.title.replace(/[\\/:*?"<>|]/g, "_") + ".pdf"
-        exportDialog.overwritePending = false
+        exportDialog.nameConflict = false
         exportDialog.uploading = false
         exportDialog.shareError = ""
         exportFirstPageHeading.checked = true
@@ -348,11 +374,25 @@ const entries = destinationDialog.entries.map(entry => Object.assign({}, entry))
         pickerLoaderName: ""
         onSelectionChanged: if (picker && picker.selectedEntry && !picker.selectedEntry.directory) exportName.text = picker.selectedEntry.name
         property var note: null
-        property bool overwritePending: false
+        property bool nameConflict: false
         property bool uploading: false
         property bool sharing: false
         property string shareError: ""
+        PilonErrorPopup {
+            objectName: "notePdfShareError"
+            owner: exportDialog.contentItem
+            message: !exportDialog.opened ? "" : exportDialog.nameConflict
+                ? qsTr("A file with this name exists. Choose a different file name.") : exportDialog.shareError || exportDialog.note?.errorMessage || ""
+            onDismissed: {
+                if (exportDialog.nameConflict) exportDialog.nameConflict = false
+                else if (exportDialog.shareError) {
+                    exportDialog.shareError = ""
+                    fileWorkspace.shareManager.dismissError()
+                } else if (exportDialog.note?.errorMessage) exportDialog.note.clearError()
+            }
+        }
         onClosed: {
+            if (replaceFile.picker === exportDialog && replaceFile.opened) replaceFile.close()
             uploading = false
             if (sharing) {
                 sharing = false
@@ -366,7 +406,7 @@ const entries = destinationDialog.entries.map(entry => Object.assign({}, entry))
         readonly property bool canSaveToFolder: validFilename && fileWorkspace.exportManager !== null && fileWorkspace.exportManager.cachedListing !== true
             && fileWorkspace.exportManager.currentPath.length > 0 && !fileWorkspace.exportManager.busy && !sharing
             && !fileWorkspace.exportManager.promptText
-            && (!overwritePending || fileWorkspace.exportManager.currentDeviceId === "local")
+            && !nameConflict
         readonly property bool canShare: !!note && validFilename && !uploading && !sharing
             && !fileWorkspace.shareManager.busy && !fileWorkspace.shareManager.promptText
         function sharePdf() {
@@ -381,11 +421,15 @@ const entries = destinationDialog.entries.map(entry => Object.assign({}, entry))
         }
         function acceptExport() {
             if (!note || !canSaveToFolder) return
-            if (!overwritePending && fileWorkspace.exportManager.entries.some(entry => entry.name === filename)) {
-                overwritePending = true; return
-            }
-            if (fileWorkspace.exportManager.currentDeviceId === "local") {
-                if (note.exportToFolder(fileWorkspace.exportManager.currentPath, filename, exportOptions)) close()
+            const manager = fileWorkspace.exportManager
+            const name = filename, folder = manager.currentPath, options = exportOptions
+            const exists = manager.entries.some(entry => entry.name === name)
+            if (manager.currentDeviceId === "local") {
+                const save = () => { if (note.exportToFolder(folder, name, options)) close() }
+                if (exists) replaceFile.ask(exportDialog, name, save)
+                else save()
+            } else if (exists) {
+                nameConflict = true
             } else {
                 const source = note.preparePdf(filename, exportOptions)
                 if (source.toString().length === 0) return
@@ -403,12 +447,6 @@ const entries = destinationDialog.entries.map(entry => Object.assign({}, entry))
             height: Math.min(exportBottom.implicitHeight, Math.max(40, exportDialog.availableHeight - 176))
             contentWidth: availableWidth; clip: true
             ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-            function revealFeedback() {
-                Qt.callLater(() => {
-                    if (exportDialog.opened)
-                        contentItem.contentY = Math.max(0, contentHeight - availableHeight)
-                })
-            }
             Column {
                 id: exportBottom
                 width: exportOptionsScroll.availableWidth
@@ -421,7 +459,7 @@ const entries = destinationDialog.entries.map(entry => Object.assign({}, entry))
                     color: fileWorkspace.textColour; placeholderTextColor: fileWorkspace.mutedTextColour
                     selectionColor: fileWorkspace.accentColour; selectedTextColor: fileWorkspace.accentTextColour
                     selectByMouse: true
-                    onTextEdited: { exportDialog.overwritePending = false; exportDialog.shareError = "" }
+                    onTextEdited: { exportDialog.nameConflict = false; exportDialog.shareError = "" }
                     onAccepted: if (exportDialog.acceptEnabled) exportDialog.accepted()
                     background: Rectangle { radius: 8; color: fileWorkspace.secondaryColour; border.color: fileWorkspace.withOpacity(fileWorkspace.textColour, .22) }
                 }
@@ -458,26 +496,7 @@ const entries = destinationDialog.entries.map(entry => Object.assign({}, entry))
                         }
                     }
                 }
-                Label {
-                    id: saveFeedback
-                    width: parent.width
-                    visible: text.length > 0
-                    text: exportDialog.overwritePending ? (fileWorkspace.exportManager.currentDeviceId === "local"
-                        ? qsTr("A file with this name exists. Choose Save to… again to replace it.")
-                        : qsTr("A file with this name exists. Choose a different file name."))
-                        : exportDialog.note ? exportDialog.note.errorMessage : ""
-                    onTextChanged: if (saveFeedback.text) exportOptionsScroll.revealFeedback()
-                    color: fileWorkspace.warningColour; wrapMode: Text.Wrap
-                }
-                Label {
-                    id: shareFeedback
-                    objectName: "notePdfShareError"
-                    width: parent.width
-                    visible: text.length > 0
-                    text: exportDialog.shareError
-                    onTextChanged: if (shareFeedback.text) exportOptionsScroll.revealFeedback()
-                    color: fileWorkspace.warningColour; wrapMode: Text.Wrap
-                }
+
             }
         }
 
@@ -516,7 +535,7 @@ const entries = destinationDialog.entries.map(entry => Object.assign({}, entry))
 
         Connections {
             target: fileWorkspace.exportManager
-            function onLocationChanged() { exportDialog.overwritePending = false }
+            function onLocationChanged() { exportDialog.nameConflict = false }
             function onBusyChanged() {
                 if (exportDialog.uploading && !fileWorkspace.exportManager.busy) {
                     if (fileWorkspace.exportManager.promptText.length > 0) return

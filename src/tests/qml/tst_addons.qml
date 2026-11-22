@@ -94,8 +94,19 @@ TestCase {
         settings.palette.windowText = "#d8c7b7"
         page.checkedOverrides = {notes: false}
         page.notices = {notes: "Saved activation notice"}
-        page.operationErrors = {notes: "Fixture activation failed"}
-        page.importError = "Fixture import failed"
+        page.report("notes", "Fixture activation failed")
+        const popup = findChild(page, "addonOperationError")
+        tryCompare(popup, "opened", true)
+        verify(popup.message.includes("Fixture activation failed"))
+        const message = findChild(popup.contentItem, "pilonErrorMessage")
+        compare(message.Accessible.name, popup.message)
+        fuzzyCompare(message.color, popup.palette.buttonText, 1 / 65535)
+        page.report("calendar", "Another activation failed")
+        verify(popup.message.includes("Another activation failed") && popup.message.includes("Fixture activation failed"))
+        page.report("calendar", "")
+        verify(popup.opened && !popup.message.includes("Another activation failed"))
+        page.report("notes", "")
+        tryCompare(popup, "opened", false)
         function labelWithText(item, text) {
             if (item.text === text && item.color !== undefined) return item
             for (const child of item.children || []) {
@@ -106,9 +117,7 @@ TestCase {
         }
         const labels = [
             labelWithText(page, qsTr("Recovery mode: activation changes apply after restarting Pilon.")),
-            labelWithText(page, "Saved activation notice"),
-            labelWithText(page, "Fixture activation failed"),
-            findChild(page, "addonImportError")
+            labelWithText(page, "Saved activation notice")
         ]
         for (const label of labels) {
             verify(label)

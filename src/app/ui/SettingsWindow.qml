@@ -39,7 +39,7 @@ FilePickerWindow {
         id: footer
         anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
         sourceComponent: settings.footerComponent
-        height: item ? item.implicitHeight : 0
+        height: item && item.visible ? item.implicitHeight : 0
     }
     Item {
         anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top

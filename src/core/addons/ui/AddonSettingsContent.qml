@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
+import "ui"
 
 Item {
     id: content
@@ -38,13 +39,10 @@ Item {
     }
     onCurrentIdChanged: loadSection()
     Component.onCompleted: { componentReady = true; loadSection() }
-    Label {
+    PilonErrorPopup {
         objectName: "addonSettingsErrorStatus"
-        z: 1
-        anchors.fill: parent; wrapMode: Text.Wrap
-        color: content.Window.window ? content.Window.window.palette.windowText : palette.windowText
-        visible: text.length > 0
-        text: content.currentLoader && content.currentLoader.status === Loader.Error
+        owner: content
+        message: content.currentLoader && content.currentLoader.status === Loader.Error
             ? qsTr("Unable to load these settings. Check the add-on package.")
             : content.currentLoader ? content.currentLoader.integrationError : ""
     }

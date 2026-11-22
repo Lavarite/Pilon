@@ -24,6 +24,8 @@ Use `import Pilon` and shared components from [src/ui](../../src/ui):
 | Scrollable form/list | `PilonScrollView` |
 | Scrollbar on a custom list, grid or document view | `PilonScrollBar` |
 | Context/action menu | `PilonMenu`, `PilonMenuItem` |
+| Short confirmation | `PilonConfirmation` with a message and a specific action |
+| Operation failure | `PilonErrorPopup` owned by the initiating page or form |
 | Existing task popup | `PilonPopup` with the appropriate owning window |
 
 Use inherited palette and font rather than hardcoded colours/type sizes. Give
@@ -85,8 +87,7 @@ separate Name and Email inputs in a `Name <Email>` row; SSH keeps the editable
 username beside `@` and a read-only device/address. Reflow these complete groups
 at narrow widths rather than hiding required fields.
 
-Persist before claiming success. An error should explain the failed action and
-the recovery available, with enough wrapping/scrolling to read it. Empty-state
+Show an operation failure over its owning view. Bind `message` to the error, clear it on dismissal or a new attempt, and use `details` or a recovery action when needed. Opening or dismissing the popup must preserve focus, selection, scroll position and layout. Empty-state
 copy should identify the state only when needed, such as Checklist's No items.
 Do not use decorative bullet characters or middle-dot separators.
 

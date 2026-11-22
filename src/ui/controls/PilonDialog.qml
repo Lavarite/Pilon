@@ -12,9 +12,12 @@ Basic.Dialog {
         contentHasCloseButton ? 0 : 16 + 42 + 16)
     popupType: Basic.Popup.Item
     dim: false
+    property bool contentSizedWindow: false
     property bool contentHasCloseButton: false
     closePolicy: Basic.Popup.CloseOnEscape
     readonly property var dialogWindow: windowFrame.window
+    readonly property real maximumContentWidth: windowFrame.maximumContentWidth
+    readonly property real maximumContentHeight: windowFrame.maximumContentHeight
     PilonWindowFrame { id: windowFrame; popup: control }
     padding: 16
     topPadding: padding

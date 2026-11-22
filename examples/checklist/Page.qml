@@ -129,11 +129,11 @@ Item {
                 }
             }
         }
-        Label {
+        PilonErrorPopup {
             objectName: "checklistError"
-            Layout.fillWidth: true
-            text: page.error; visible: text.length>0
-            wrapMode: Text.Wrap
+            owner: page
+            message: page.error
+            onDismissed: page.error = ""
         }
     }
 }

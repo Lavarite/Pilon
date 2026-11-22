@@ -20,6 +20,7 @@ TestCase {
         property real progress: 0
         property string status: ""
         property string error: ""
+        function dismissError() { error = "" }
         property string inspectedLink: ""
         property string downloadNickname: ""
         property int downloadProjector: -1
@@ -79,6 +80,7 @@ TestCase {
         property int signOuts: 0
         function signOut() {signOuts++;hasChatGptSession=false;account=({})}
         property string error: ""
+        function dismissError() { error = "" }
         property var saved: []
         function signIn() { signingIn = true }
         function cancelSignIn() { signingIn = false; userCode = ""; verificationUrl = "" }
@@ -243,6 +245,22 @@ TestCase {
         connectionFixture.serverUsage = {}
         verify(!timestamp.visible)
         connectionFixture.servers = []
+    }
+    function test_providerErrorPreservesTheEditorAndDraft() {
+        assistant.connections = connectionFixture
+        const editor = findChild(settings, "apiServerEditor")
+        editor.edit(null); tryCompare(editor, "opened", true)
+        const model = findChild(editor, "apiServerModel")
+        model.text = "unfinished model"
+        const position = model.mapToItem(editor.contentItem, 0, 0)
+        const size = Qt.size(editor.dialogWindow.width, editor.dialogWindow.height)
+        connectionFixture.error = "Cannot save this provider."
+        const error = findChild(settings, "modelOperationError")
+        tryCompare(error, "opened", true); compare(error.owner.Window.window, editor.dialogWindow)
+        compare(model.mapToItem(editor.contentItem, 0, 0), position)
+        compare(Qt.size(editor.dialogWindow.width, editor.dialogWindow.height), size)
+        error.dismiss(); tryCompare(error, "opened", false)
+        compare(model.text, "unfinished model"); verify(editor.opened); editor.close()
     }
     function test_providerOptionsExposeTheirAccessibleNames() {
         assistant.connections=connectionFixture

@@ -83,8 +83,13 @@ ColumnLayout {
         Layout.fillWidth: true
         color: form.Window.window ? form.Window.window.palette.windowText : palette.windowText
         visible: text.length > 0
-        text: form.calendar.sharingConfigurationError || (form.calendar.sharingConfigured ? qsTr("Sharing is configured.") : "")
+        text: form.calendar.sharingConfigured ? qsTr("Sharing is configured.") : ""
         wrapMode: Text.Wrap
         Accessible.name: text
+    }
+    PilonErrorPopup {
+        objectName: "sharingConfigurationError"
+        owner: form
+        message: form.saving ? "" : form.calendar.sharingConfigurationError
     }
 }

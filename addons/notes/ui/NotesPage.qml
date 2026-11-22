@@ -1317,8 +1317,8 @@ Control {
             id: status
             anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
             visible: text.length > 0
-            text: page.notes.errorMessage || (page.notes.loading ? qsTr("Loading notes…") : page.notes.importing ? qsTr("Importing…") : page.notice)
-            color: page.notes.errorMessage.length > 0 ? page.warningColour : page.mutedTextColour
+            text: page.notes.loading ? qsTr("Loading notes…") : page.notes.importing ? qsTr("Importing…") : page.notice
+            color: page.mutedTextColour
             wrapMode: Text.Wrap
         }
     }
@@ -1343,7 +1343,6 @@ Control {
                 spacing: 12
                 Label { text: folderDialog.noteId ? qsTr("Rename note") : folderDialog.folderId ? qsTr("Rename folder") : qsTr("New folder"); color: page.textColour }
                 StyledField { id: folderName; objectName: "noteFolderName"; width: parent.width; placeholderText: folderDialog.noteId ? qsTr("Note name") : qsTr("Folder name"); onAccepted: saveFolder.clicked() }
-                Label { width: parent.width; text: page.notes.errorMessage; visible: text.length > 0; color: page.warningColour; wrapMode: Text.Wrap }
                 Flow {
                     width: parent.width; spacing: 8
                     StyledButton { text: qsTr("Cancel"); onClicked: folderDialog.close() }
@@ -1416,45 +1415,34 @@ Control {
             }
         }
     }
-    StyledPopup {
+    LocalComponents.PilonConfirmation {
         id: deleteDialog
         objectName: "noteDeleteDialog"
         property var entries: []
-        height: Math.min(deleteOptions.implicitHeight + topPadding + bottomPadding, maximumContentHeight)
-        contentItem: PilonScrollView {
-            id: deleteDialogScroller
-            objectName: "deleteDialogScroller"
-            clip: true
-            contentWidth: availableWidth
-            Column {
-                id: deleteOptions
-                width: deleteDialogScroller.availableWidth
-                spacing: 12
-                Label {
-                    objectName: "noteDeleteDescription"
-                    width: parent.width
-                    text: deleteDialog.entries.length === 1
-                        ? (deleteDialog.entries[0].directory ? qsTr("Delete %1 and everything inside?") : qsTr("Delete %1?")).arg(deleteDialog.entries[0].title)
-                        : qsTr("Delete %1 items and their contents?").arg(deleteDialog.entries.length)
-                    color: page.textColour; wrapMode: Text.Wrap
-                }
-                Flow {
-                    width: parent.width; spacing: 8
-                    StyledButton { objectName: "cancelDeleteNote"; text: qsTr("Cancel"); onClicked: deleteDialog.close() }
-                    StyledButton {
-                        objectName: "confirmDeleteNote"
-                        text: qsTr("Delete")
-                        onClicked: {
-                            ink.finishStroke()
-                            for (const entry of deleteDialog.entries) {
-                                if (!(entry.directory ? page.notes.removeFolder(entry.id) : page.notes.removeNote(entry.id))) return
-                            }
-                            deleteDialog.close()
-                        }
-                    }
-                }
-            }
+        parent: page.Overlay.overlay
+        palette: page.palette
+        preferredWidth: 380
+        message: entries.length === 1
+            ? (entries[0].directory ? qsTr("Delete %1 and everything inside?") : qsTr("Delete %1?")).arg(entries[0].title)
+            : qsTr("Delete %1 items and their contents?").arg(entries.length)
+        messageLabel.objectName: "noteDeleteDescription"
+        cancelButton.objectName: "cancelDeleteNote"
+        confirmButton.objectName: "confirmDeleteNote"
+        confirmText: qsTr("Delete")
+        perform: () => {
+            ink.finishStroke()
+            for (const entry of entries)
+                if (!(entry.directory ? page.notes.removeFolder(entry.id) : page.notes.removeNote(entry.id))) return false
+            return true
         }
+    }
+    PilonErrorPopup {
+        objectName: "notesOperationError"
+        owner: folderDialog.opened ? folderDialog.contentItem : moveDialog.opened ? moveDialog.contentItem
+            : deleteDialog.opened ? deleteDialog.contentItem : page
+        message: page.visible && !paperDialog.opened && !page.fileWorkspace?.exportingNote
+            && owner.Window.window?.active ? page.notes.errorMessage : ""
+        onDismissed: page.notes.clearError()
     }
     NotePaperDialog {
         id: paperDialog
@@ -1462,7 +1450,7 @@ Control {
         palette: page.palette
         hasNote: page.hasNote
         errorMessage: page.notes.errorMessage
-        warningColour: page.warningColour
+        onErrorDismissed: page.notes.clearError()
         savePaper: (value, useDefault) => {
             page.notes.clearError()
             if (useDefault || !page.hasNote) {

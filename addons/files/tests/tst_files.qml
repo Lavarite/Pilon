@@ -36,6 +36,7 @@ TestCase {
         property string title: "Export fixture"
         property string errorMessage: ""
         property var exported: ({})
+        function clearError() { errorMessage = "" }
         function save() { return true }
         function exportToFolder(folder, filename, options) { exported = {folder: folder, filename: filename, options: options}; return true }
         function preparePdf(filename, options) { exported = {filename: filename, options: options}; return "file:///tmp/" + filename }
@@ -45,6 +46,8 @@ TestCase {
         property bool busy: false
         property string account: "tester"
         property string error: ""
+        property int errorRevision: 0
+        onErrorChanged: if (error) ++errorRevision
         property string notice: ""
         property string provider: "GitHub"
         property string activeProvider: "github"
@@ -153,6 +156,8 @@ TestCase {
         function viewFile(entry, username) { opened++; lastView = {entry: entry, username: username} }
         function copyToClipboard(entries, cut) { clipboard.entries = entries.slice(); clipboard.cut = cut }
         property var lastPaste: ({})
+        property var lastDownload: ({})
+        function downloadFile(entry, username, url) { lastDownload = {entry: entry, url: url} }
         function pasteFromClipboard(device, username, path) {
             lastPaste = {entries: clipboard.entries.slice(), device: device, username: username, path: path, move: clipboard.cut}
         }
@@ -172,6 +177,8 @@ TestCase {
         function acceptHostKey() { ++trustedHostKeys; cancelPrompt() }
         property int cancelledTransfers: 0
         function cancel() { searching = false; busy = false; ++cancelledTransfers }
+        property var deletions: []
+        function deleteEntries(entries, username) { deletions = deletions.concat([{entries: entries, username: username}]) }
         property var lastRename: ({})
         property var lastMove: ({})
         function renameEntry(entry, username, name) { lastRename = {entry: entry, username: username, name: name} }
@@ -1189,6 +1196,7 @@ TestCase {
         fakeGithub.openedPath = ""
         findChild(page, "fileContextMenu").close()
         findChild(page, "fileActionPopup").close()
+        findChild(page, "fileDeleteConfirmation").close()
         findChild(page, "bookmarkContextMenu").close()
         findWorkspaceChild("filePreview").close()
         findWorkspaceChild("fileUploadWindow").close()
@@ -1728,7 +1736,7 @@ TestCase {
         compare(exportNote.exported.options.pageNumbers,true)
         compare(manager.shared.file,"file:///tmp/Shared note.pdf")
         verify(manager.shared.pdf)
-        verify(findWorkspaceChild("notePdfShareError").text.includes("Save to…"))
+        verify(findWorkspaceChild("notePdfShareError").message.includes("Save to…"))
         manager.shareSucceeds=true
         share.clicked()
         tryCompare(dialog,"visible",false)
@@ -1774,8 +1782,13 @@ TestCase {
         compare(button.text, "Save to…")
         grabImage(picker.Window.window.contentItem).save("/tmp/pilon-note-export-window.png")
         mouseClick(button)
-        verify(dialog.overwritePending); verify(dialog.opened)
-        mouseClick(button)
+        const confirmation = findWorkspaceChild("replaceExistingFile")
+        tryCompare(confirmation, "opened", true); verify(dialog.opened)
+        compare(confirmation.message, "Replace “Export fixture.pdf”?")
+        confirmation.reject(); tryCompare(confirmation, "opened", false)
+        compare(nameField.text, "Export fixture.pdf"); verify(dialog.opened)
+        mouseClick(button); tryCompare(confirmation, "opened", true)
+        mouseClick(confirmation.confirmButton)
         verify(!dialog.opened)
         compare(exportNote.exported.folder, "/destination")
         compare(exportNote.exported.filename, "Export fixture.pdf")
@@ -1824,9 +1837,11 @@ TestCase {
                 const tap = touchEvent(share)
                 tap.press(0, share).commit(); tap.release(0, share).commit()
             } else mouseClick(share)
-            tryCompare(findChild(dialog, "notePdfShareError"), "visible", true)
+            const shareError = findChild(dialog, "notePdfShareError")
+            tryCompare(shareError, "opened", true)
             compare(shareManager.shared.file, "file:///tmp/Export fixture.pdf")
             verify(dialog.opened)
+            shareError.dismiss()
             mouseClick(save)
             tryCompare(dialog, "visible", false)
             compare(exportNote.exported.folder, "/source/Destination")
@@ -1948,7 +1963,7 @@ TestCase {
         mouseClick(input)
         tryCompare(input, "activeFocus", true)
     }
-    function test_fileErrorsStayInlineAndCanRepeat_data() {
+    function test_fileErrorsFloatWithoutMovingList_data() {
         return [{tag:"phone", width:320, font:24}, {tag:"desktop", width:900, font:16}]
     }
     function test_hostTrustStillRequiresExplicitConfirmation() {
@@ -1958,6 +1973,7 @@ TestCase {
         accessFiles.promptChanged()
         tryCompare(accessPopup, "opened", true)
         verify(accessPopup.modal)
+        tryCompare(findChild(accessPopup, "cancelFileAccess"), "activeFocus", true)
         accessFiles.errorMessage = "Previous operation failed."
         verify(accessPopup.opened)
         compare(accessFiles.trustedHostKeys, accepted)
@@ -1965,46 +1981,40 @@ TestCase {
         compare(trust.text, "Trust")
         accessPopup.dialogWindow.requestActivate()
         tryCompare(accessPopup.dialogWindow, "active", true)
-        verify(waitForRendering(trust))
+        accessPopup.dialogWindow.update()
+        verify(waitForRendering(accessPopup.dialogWindow.contentItem))
         mouseClick(trust)
         tryCompare(accessPopup, "opened", false)
         compare(accessFiles.trustedHostKeys, accepted + 1)
     }
-    function test_fileErrorsStayInlineAndCanRepeat(data) {
+    function test_fileErrorsFloatWithoutMovingList(data) {
         const oldWidth = test.width
         test.width = data.width
         try {
             const list = findChild(page, "fileEntriesView")
             const error = findChild(page, "fileOperationError")
             verify(error !== null)
-            const text = findChild(error, "fileOperationErrorMessage")
-            const close = findChild(error, "dismissFileOperationError")
-            const scroll = findChild(error, "fileOperationErrorScroll")
+            const text = findChild(error, "pilonErrorMessage")
+            const close = findChild(error, "dismissPilonError")
             const originalFont = text.font
             try {
                 text.font = Qt.font({pixelSize:data.font})
                 list.forceActiveFocus()
                 tryCompare(list, "activeFocus", true)
-                const message = "Cannot delete /" + "a-long-directory-name/".repeat(85) + "file: permission denied."
+                const position = list.mapToItem(page, 0, 0), size = Qt.size(list.width, list.height)
+                const message = "Cannot delete /" + "a-long-directory-name/".repeat(20) + "file: permission denied."
                 for (let attempt = 0; attempt < 2; ++attempt) {
                     files.errorMessage = message
-                    tryCompare(error, "visible", true)
-                    verify(list.activeFocus)
+                    tryCompare(error, "opened", true)
                     compare(text.text, message)
-                    verify(list.height >= error.height)
-                    verify(scroll.contentItem.contentHeight > scroll.contentItem.height)
-                    verify(!accessPopup.opened)
-                    verify(close.width >= 32 && close.height >= 32)
-                    if (attempt === 0) {
-                        verify(tabletInput.saveWindow(page, "/tmp/pilon-files-inline-error-" + data.tag + ".png"))
-                        mouseWheel(scroll.contentItem, 4, 4, 0, -120)
-                        tryVerify(() => scroll.contentItem.contentY > 0)
-                    }
-                    if (attempt === 0) mouseClick(close)
-                    else { close.forceActiveFocus(Qt.TabFocusReason); keyClick(Qt.Key_Space) }
-                    tryCompare(error, "visible", false)
-                    compare(files.errorMessage, "")
                     verify(list.activeFocus)
+                    compare(list.mapToItem(page, 0, 0), position)
+                    compare(Qt.size(list.width, list.height), size)
+                    verify(!accessPopup.opened)
+                    mouseClick(close)
+                    tryCompare(error, "opened", false)
+                    compare(files.errorMessage, "")
+                    compare(Qt.size(list.width, list.height), size)
                 }
             } finally { text.font = originalFont }
         } finally { files.errorMessage = ""; test.width = oldWidth }
@@ -2019,7 +2029,7 @@ TestCase {
             sharedFiles.uploadManager.errorMessage = "Unable to open the upload source folder."
             tryCompare(pickerError, "visible", true)
             verify(!pageError.visible)
-            const close = findChild(pickerError, "dismissFileOperationError")
+            const close = findChild(pickerError, "dismissPilonError")
             mouseClick(close)
             tryCompare(pickerError, "visible", false)
             verify(upload.opened)
@@ -2030,8 +2040,8 @@ TestCase {
         try {
             sharedFiles.shareManager.errorMessage = "Unable to open the system share menu."
             tryCompare(pageError, "visible", true)
-            compare(findChild(pageError, "fileOperationErrorMessage").text, sharedFiles.shareManager.errorMessage)
-            mouseClick(findChild(pageError, "dismissFileOperationError"))
+            compare(pageError.message, sharedFiles.shareManager.errorMessage)
+            mouseClick(findChild(pageError, "dismissPilonError"))
             tryCompare(sharedFiles.shareManager, "errorMessage", "")
         } finally { sharedFiles.shareManager.dismissError() }
     }
@@ -2198,6 +2208,29 @@ TestCase {
         compare(files.lastPaste.entries[0].path, files.entries[0].path)
         verify(!dialog.visible)
     }
+    function test_connectedSaveConfirmsOnlyLocalReplacement() {
+        const entry = {name:"draft copy.txt", deviceId:"local", deviceName:"This device", path:"/source/draft copy.txt", directory:false}
+        sharedFiles.saveFiles(page, [entry])
+        const picker = findWorkspaceChild("connectedFileDestination")
+        tryCompare(picker, "opened", true)
+        const manager = sharedFiles.destinationManager
+        manager.currentDeviceId = "fixture"; manager.currentPath = "/target"; manager.entries = [entry]
+        const button = findWorkspaceChild("confirmConnectedFileDestination")
+        button.clicked()
+        const error = findWorkspaceChild("destinationNameError")
+        tryCompare(error, "opened", true); verify(picker.opened)
+        error.dismiss()
+        manager.currentDeviceId = "local"; manager.currentPath = "/target folder"
+        button.clicked()
+        const confirmation = findWorkspaceChild("replaceExistingFile")
+        tryCompare(confirmation, "opened", true)
+        confirmation.reject(); tryCompare(confirmation, "opened", false); verify(picker.opened)
+        files.lastDownload = ({})
+        button.clicked(); tryCompare(confirmation, "opened", true)
+        mouseClick(confirmation.confirmButton); tryCompare(picker, "opened", false)
+        compare(files.lastDownload.url, "file:///target%20folder/draft%20copy.txt")
+        compare(files.lastDownload.entry.path, entry.path)
+    }
     function test_transfer_progress() {
         const progress = findChild(page, "fileTransferProgress")
         files.busy = true
@@ -2326,15 +2359,34 @@ TestCase {
             scaledViewerHost.close(); tabletInput.setScreenGeometry(originalScreen)
         }
     }
+    function test_multipleFileDeleteRequiresConfirmation() {
+        const decision = findChild(page, "fileDeleteConfirmation")
+        const selected = [{name: "A", path: "/A", deviceId: "fixture", username: "fixture"},
+                          {name: "B", path: "/B", deviceId: "fixture", username: "fixture"}]
+        files.deletions = []
+        decision.showDelete(selected)
+        tryCompare(decision, "opened", true)
+        verify(decision.message.includes("2 selected items"))
+        decision.cancelButton.clicked()
+        tryCompare(decision, "opened", false)
+        compare(files.deletions.length, 0)
+        decision.showDelete(selected)
+        tryCompare(decision, "opened", true)
+        decision.confirmButton.clicked()
+        tryCompare(decision, "opened", false)
+        compare(files.deletions.length, 1)
+        compare(files.deletions[0].entries.map(entry => entry.path), ["/A", "/B"])
+        compare(files.deletions[0].username, "fixture")
+    }
     function test_longDeleteConfirmationScrollsToActions() {
-        const originalScreen = tabletInput.screenGeometry(), popup = findChild(page, "fileActionPopup"), owner = popup.parent
+        const originalScreen = tabletInput.screenGeometry(), popup = findChild(page, "fileDeleteConfirmation"), owner = popup.parent
         try {
             tabletInput.setScreenGeometry(Qt.rect(0, 0, 360, 440))
             scaledViewerHost.uiScale = 1.4; scaledViewerHost.show(); popup.parent = scaledViewerHost.contentItem
             popup.showDelete([{name: "long-filename-".repeat(18).slice(0, 240), directory: true, deviceId: "fixture", path: "/fixture/long"}])
             tryCompare(popup, "opened", true); verify(waitForRendering(popup.contentItem))
-            const action = findChild(popup, "confirmFileAction"), scroller = popup.contentItem
-            for(const name of ["cancelFileAction","confirmFileAction"])
+            const action = findChild(popup, "confirmFileDelete"), scroller = popup.contentItem
+            for(const name of ["cancelFileDelete","confirmFileDelete"])
                 compare(findChild(popup,name).contentItem.truncated,false,"Action labels remain readable on a narrow scaled window")
             if (scroller.contentItem && scroller.contentItem.contentY !== undefined)
                 scroller.contentItem.contentY = scroller.contentHeight - scroller.availableHeight
@@ -2343,7 +2395,7 @@ TestCase {
             verify(action.mapToGlobal(0, 0).y >= host.y)
             verify(action.mapToGlobal(0, action.height).y <= host.y + host.height + 1, "Delete stays reachable below a long name")
             tabletInput.saveWindow(popup.contentItem, "/tmp/pilon-delete-long-name-fixed.png")
-            mouseClick(findChild(popup, "cancelFileAction")); tryCompare(popup, "opened", false)
+            mouseClick(findChild(popup, "cancelFileDelete")); tryCompare(popup, "opened", false)
         } finally {
             popup.close(); popup.parent = owner; scaledViewerHost.close(); tabletInput.setScreenGeometry(originalScreen)
         }

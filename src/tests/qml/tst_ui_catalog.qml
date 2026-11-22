@@ -107,6 +107,98 @@ TestCase {
         }
     }
     Component {
+        id: errorComponent
+        UI.PilonErrorPopup { owner: surface }
+    }
+    Component {
+        id: secondaryWindow
+        ApplicationWindow {
+            width: 360; height: 480
+            property rect usableGeometry: Qt.rect(24, 32, 300, 390)
+            property alias field: input
+            UI.PilonTextField { id: input; text: "Unsaved draft"; width: 200 }
+        }
+    }
+    function test_errorUsesInitiatingWindowAndItsUsablePane() {
+        owner.show()
+        const other = createTemporaryObject(secondaryWindow, test)
+        verify(other)
+        other.show(); other.requestActivate()
+        other.field.forceActiveFocus()
+        tryCompare(other.field, "activeFocus", true)
+        const popup = createTemporaryObject(errorComponent, other.field,
+            {owner: other.field, message: "Unable to save these settings."})
+        verify(popup)
+        tryCompare(popup, "opened", true)
+        compare(popup.parent.Window.window, other)
+        const pane = other.usableGeometry
+        verify(popup.x >= pane.x && popup.x + popup.width <= pane.x + pane.width)
+        verify(popup.y >= pane.y && popup.y + popup.height <= pane.y + pane.height)
+        other.usableGeometry = Qt.rect(60, 16, 260, 290)
+        verify(waitForPolish(other.contentItem))
+        verify(popup.x >= 60 && popup.x + popup.width <= 320)
+        verify(popup.y >= 16 && popup.y + popup.height <= 306)
+        verify(other.field.activeFocus)
+        other.hide()
+        tryCompare(popup, "opened", false)
+        verify(owner.visible)
+    }
+    function test_errorPopupKeepsDraftFocusAndGeometry_data() {
+        return [{tag: "desktop", w: 900, h: 640, size: 14},
+                {tag: "cover", w: 320, h: 560, size: 18},
+                {tag: "landscape", w: 560, h: 320, size: 22}]
+    }
+    function test_errorPopupKeepsDraftFocusAndGeometry(data) {
+        owner.width = data.w; owner.height = data.h; owner.typeSize = data.size; owner.uiScale = 1
+        owner.show(); owner.requestActivate()
+        const popup = createTemporaryObject(errorComponent, surface)
+        verify(popup)
+        reveal(field)
+        field.forceActiveFocus(); field.select(0, 2)
+        tryCompare(field, "activeFocus", true)
+        verify(waitForPolish(surface))
+        const view = scroll.contentItem
+        const bounds = Qt.rect(field.x, field.y, field.width, field.height)
+        const scrollY = view.contentY, scrollHeight = view.contentHeight
+        const selection = field.selectedText
+        popup.message = "Could not save the file."
+        tryCompare(popup, "opened", true)
+        compare(popup.font.pixelSize, surface.font.pixelSize)
+        compare(popup.modal, false)
+        compare(popup.focus, false)
+        compare(findChild(popup.contentItem, "pilonErrorMessage").Accessible.name, popup.message)
+        function checkForm() {
+            compare(Qt.rect(field.x, field.y, field.width, field.height), bounds)
+            compare(view.contentY, scrollY); compare(view.contentHeight, scrollHeight)
+            compare(field.selectedText, selection); verify(field.activeFocus)
+        }
+        checkForm()
+        popup.message = "Could not open " + "path/".repeat(170)
+        popup.details = "File access denied. ".repeat(50)
+        verify(waitForPolish(surface))
+        verify(popup.height <= owner.height - 32 && popup.width <= owner.width - 32)
+        verify(popup.y >= 16 && popup.y + popup.height <= owner.height - 16)
+        checkForm()
+        mouseClick(findChild(popup.contentItem, "dismissPilonError"))
+        tryCompare(popup, "opened", false)
+        checkForm()
+        surface.visible = false; surface.visible = true
+        verify(!popup.visible)
+        const failure = popup.message
+        popup.message = ""; popup.message = failure
+        tryCompare(popup, "opened", true)
+        surface.visible = false
+        tryCompare(popup, "opened", false)
+        surface.visible = true
+        tryCompare(popup, "opened", true)
+        field.forceActiveFocus()
+        const dismiss = findChild(popup.contentItem, "dismissPilonError")
+        dismiss.forceActiveFocus(Qt.TabFocusReason)
+        keyClick(Qt.Key_Space)
+        tryCompare(popup, "opened", false)
+        verify(field.activeFocus)
+    }
+    Component {
         id: navigationComponent
         App.AppNavigation {
             width: 150; height: 340; expanded: true

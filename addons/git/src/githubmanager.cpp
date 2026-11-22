@@ -249,7 +249,7 @@ GitHubManager::GitHubManager(QObject *parent) : QObject(parent),
     }
     m_timeout.setSingleShot(true);
     connect(&m_timeout, &QTimer::timeout, this, [this] {
-        m_error = tr("Git did not finish in time. Please try again.");
+        recordError(tr("Git did not finish in time. Please try again."));
         m_process.kill();
     });
     connect(&m_process,&QProcess::readyReadStandardOutput,this,&GitHubManager::readProcessOutput);
@@ -285,6 +285,7 @@ GitHubManager::GitHubManager(QObject *parent) : QObject(parent),
         if(result.value("root").toString()!=root || result.value("operationId").toULongLong()!=m_operationId)
             result=previewFailure(result,tr("The repository changed while its preview was being read."),{});
         m_busy=false;m_phase=m_previewReturnPhase;
+        // The preview pane and export dialog present their own result.
         m_error=result.value("kind")=="error" && !result.value("cancelled").toBool()?result.value("error").toString():QString{};
         if(phase=="reading-version"){m_conflictPreview=publicPreview(result);emit conflictPreviewChanged();}
         else if(phase=="reading-change"){m_changePreview=publicPreview(result);emit changePreviewChanged();}
@@ -436,13 +437,19 @@ void GitHubManager::git(const QStringList &args, Done done) {
     options += args;
     run(m_git, options, m_repository.value("localPath").toString(), std::move(done));
 }
+void GitHubManager::recordError(const QString &message)
+{
+    m_error = message;
+    if (!message.isEmpty()) ++m_errorRevision;
+}
+
 void GitHubManager::fail(const QString &message) {
 #ifdef Q_OS_ANDROID
     if (m_gitCredentialServer) m_gitCredentialServer->clearScope();
 #endif
     m_temporaryIndex.clear();
     m_busy = false; m_authenticating = false; m_loginCode.clear(); m_loginUrl.clear();
-    m_error = message.trimmed();
+    recordError(message.trimmed());
     if (m_worktreeLeaseActive) endWorktreeUpdate(m_cancelled ? "cancelled" : "failed");
     else { m_phase="failed"; emit changed(); }
 }
@@ -482,7 +489,7 @@ bool GitHubManager::persistProviders(const QVariantList &providers,const QString
     if(settings.status()==PilonSettings::NoError)return true;
     if(previous.isValid())settings.setValue("Git/providers",previous);else settings.remove("Git/providers");
     if(previousActive.isValid())settings.setValue("Git/activeProvider",previousActive);else settings.remove("Git/activeProvider");
-    settings.sync();m_error=tr("Unable to save Git account settings. Check your settings folder permissions and try again.");return false;
+    settings.sync();recordError(tr("Unable to save Git account settings. Check your settings folder permissions and try again."));return false;
 }
 bool GitHubManager::saveProviders() {
     for (auto &value : m_providers) {
@@ -602,9 +609,9 @@ void GitHubManager::exportConflictVersion(const QString &path,const QString &sid
     if(m_busy)return;
     if(privateFile(m_worktreeRoot,path)){previewError(path,side,tr("Pilon private state cannot be previewed or exported through Git."));return;}
     const auto context=conflictContext(path,side);
-    if(context.isEmpty() || !context.value("exists").toBool()){m_error=tr("Choose an existing current or incoming conflict version to save.");emit changed();return;}
+    if(context.isEmpty() || !context.value("exists").toBool()){recordError(tr("Choose an existing current or incoming conflict version to save."));emit changed();return;}
     QString error;const auto target=exportTarget(destination,context,error);
-    if(target.isEmpty()){m_error=error;emit changed();return;}
+    if(target.isEmpty()){recordError(error);emit changed();return;}
     startPreviewTask("exporting-version",[context,target](const auto &cancel){return inspectVersion(context,target,cancel);});
 }
 void GitHubManager::readChange(const QString &path) {
@@ -763,7 +770,7 @@ void GitHubManager::readProcessOutput() {
     const auto output=m_process.readAllStandardOutput(),errors=m_process.readAllStandardError();
     if(m_outputExceeded)return;
     if(m_output.size()+output.size()>16*1024*1024 || m_errors.size()+errors.size()>65536){
-        m_outputExceeded=true;m_output.clear();m_errors.clear();m_error=tr("Git returned too much output. Check the repository or provider response and try again.");
+        m_outputExceeded=true;m_output.clear();m_errors.clear();recordError(tr("Git returned too much output. Check the repository or provider response and try again."));
         if(m_process.state()!=QProcess::NotRunning)m_process.kill();return;
     }
     m_output+=output;m_errors+=errors;readLoginOutput();
@@ -1172,7 +1179,7 @@ QVariantList GitHubManager::pendingWorktrees() const {
 }
 bool GitHubManager::repositorySwitchBlocked() {
     if (!m_worktreeLeaseActive) return false;
-    m_error=tr("Finish or recover the current repository update before switching repositories."); emit changed(); return true;
+    recordError(tr("Finish or recover the current repository update before switching repositories.")); emit changed(); return true;
 }
 bool GitHubManager::storePendingWorktrees(const QVariantMap &records) {
     PilonSettings settings; const auto previous=settings.value("Git/pendingWorktrees");
@@ -1180,7 +1187,7 @@ bool GitHubManager::storePendingWorktrees(const QVariantMap &records) {
     settings.sync();
     if (settings.status()!=PilonSettings::NoError) {
         if (previous.isValid()) settings.setValue("Git/pendingWorktrees",previous); else settings.remove("Git/pendingWorktrees");
-        settings.sync(); m_error=tr("Unable to save Git recovery state. Check your settings folder permissions and try again."); return false;
+        settings.sync(); recordError(tr("Unable to save Git recovery state. Check your settings folder permissions and try again.")); return false;
     }
     m_pendingWorktrees=records; return true;
 }
@@ -1212,7 +1219,7 @@ void GitHubManager::resumeWorktreeUpdate(quint64 id,bool allowed,const QStringLi
     if (id!=m_operationId || !m_worktreeLeaseActive || m_phase!="preparing") return;
     if (!allowed) {
         m_afterPreparation={}; m_worktreeLeaseActive=false; m_busy=false; m_phase="failed";
-        m_error=reason.isEmpty() ? tr("Save or finish the current work before updating this folder.") : reason;
+        recordError(reason.isEmpty() ? tr("Save or finish the current work before updating this folder.") : reason);
         emit changed(); return;
     }
     m_managedFolders=folders;
@@ -1244,7 +1251,7 @@ bool GitHubManager::finishWorktreeUpdate(quint64 id,bool succeeded,const QString
     if (id!=m_operationId || !m_worktreeLeaseActive || !m_awaitingReload) return false;
     if (!succeeded) {
         m_pushAfterReload=false;
-        m_error=reason.isEmpty() ? tr("The updated folder could not be reloaded. It remains paused.") : reason;
+        recordError(reason.isEmpty() ? tr("The updated folder could not be reloaded. It remains paused.") : reason);
         m_phase="reload-failed"; m_busy=false; emit changed(); return false;
     }
     const auto pending=m_pendingWorktrees.value(m_worktreeRoot).toMap();
@@ -1287,7 +1294,7 @@ void GitHubManager::verifyMergeState(std::function<void()> ready) {
     });
 }
 void GitHubManager::rejectRepositoryDrift(const QString &message) {
-    m_busy=false;m_awaitingReload=false;m_phase="recovery";m_error=message;m_afterPreparation={};m_afterValidation={};emit changed();
+    m_busy=false;m_awaitingReload=false;m_phase="recovery";recordError(message);m_afterPreparation={};m_afterValidation={};emit changed();
 }
 void GitHubManager::fetchCurrent(std::function<void()> ready) {
     if (m_repository.value("remote").toString().isEmpty()) { fail(tr("Set a repository remote before fetching.")); return; }
@@ -1377,7 +1384,7 @@ void GitHubManager::applyIncoming() {
     git(arguments,[this](int code,const QByteArray &,const QByteArray &err) {
         const auto error=QString::fromUtf8(err).trimmed();
         loadStatus([this,code,error] {
-            if (m_repository.value("hasConflicts").toBool()) { m_error=tr("Resolve the conflicts before completing synchronization."); endWorktreeUpdate("conflicted"); return; }
+            if (m_repository.value("hasConflicts").toBool()) { recordError(tr("Resolve the conflicts before completing synchronization.")); endWorktreeUpdate("conflicted"); return; }
             if (code) { fail(error); return; }
             requestValidation(m_worktreeRoot,[this] {
                 if (m_updateKind=="merge") commitMerge(); else pushAfterUpdate();
@@ -1503,9 +1510,9 @@ void GitHubManager::continueMerge() {
         loadStatus([this] {
             if (!m_repository.value("mergeInProgress").toBool()) { m_busy=false;recoverMerge();return; }
             verifyMergeState([this]{
-                if (m_repository.value("hasConflicts").toBool()) { m_error=tr("Resolve all conflicts before completing the merge.");endWorktreeUpdate("conflicted");return; }
+                if (m_repository.value("hasConflicts").toBool()) { recordError(tr("Resolve all conflicts before completing the merge."));endWorktreeUpdate("conflicted");return; }
                 git({"diff","--quiet","--"},[this](int code,const QByteArray &,const QByteArray &err) {
-                    if (code==1) { m_error=tr("Stage your resolved changes before completing the merge.");endWorktreeUpdate("conflicted");return; }
+                    if (code==1) { recordError(tr("Stage your resolved changes before completing the merge."));endWorktreeUpdate("conflicted");return; }
                     if (!check(code,err)) return;
                     requestValidation(m_worktreeRoot,[this]{commitMerge();});
                 });
@@ -1539,12 +1546,12 @@ void GitHubManager::abortMerge() {
     });
 }
 void GitHubManager::resolveConflict(const QString &path,const QString &side) {
-    if (side!="current" && side!="incoming") { m_error=tr("Choose the current or incoming version of this file.");emit changed();return; }
+    if (side!="current" && side!="incoming") { recordError(tr("Choose the current or incoming version of this file."));emit changed();return; }
     ensureMergeLease([this,path,side] {
         verifyMergeState([this,path,side] {
             QVariantMap selected;
             for (const auto &entry:conflicts()) if (entry.toMap().value("path").toString()==path) selected=entry.toMap();
-            if (selected.isEmpty() || !m_repository.value("mergeInProgress").toBool()) { m_error=tr("This file is not part of the current merge conflicts.");endWorktreeUpdate("conflicted");return; }
+            if (selected.isEmpty() || !m_repository.value("mergeInProgress").toBool()) { recordError(tr("This file is not part of the current merge conflicts."));endWorktreeUpdate("conflicted");return; }
             if (selected.value("resolved").toBool() && selected.value("selectedSide").toString()==side
                 && !selected.value(side=="current" ? "currentExists" : "incomingExists").toBool()
                 && !QFileInfo::exists(QDir(m_worktreeRoot).filePath(path))) {endWorktreeUpdate("conflicted");return;}
@@ -1566,7 +1573,7 @@ void GitHubManager::resolveConflict(const QString &path,const QString &side) {
 void GitHubManager::cancel() {
     if (!m_busy || m_awaitingReload || m_phase=="credentials" || m_credentialsWatcher.isRunning()) return;
     if(m_phase=="reading-version" || m_phase=="exporting-version" || m_phase=="reading-change"){if(m_cancelPreview)m_cancelPreview->store(true);return;}
-    m_cancelled=true;m_error=tr("Git operation cancelled.");
+    m_cancelled=true;recordError(tr("Git operation cancelled."));
     if(m_phase=="preparing") {
         m_afterPreparation={};m_afterValidation={};m_worktreeLeaseActive=false;m_awaitingReload=false;m_busy=false;m_phase="failed";
         emit changed();emit worktreeUpdateFinished(m_operationId,m_worktreeRoot,"preparation-cancelled");return;

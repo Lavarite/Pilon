@@ -19,7 +19,6 @@ Control {
     property bool contextPending: false
     property bool resolvingContext: false
     property alias selectedPaths: changesPane.selectedPaths
-    property string lastError: ""
     property bool cloneRequested: false
     property bool browseProvider: false
     property var openSettings: function() { pane.currentTab = 2 }
@@ -35,13 +34,14 @@ Control {
         const phases = {"refreshing-repositories":qsTr("Refreshing repositories…"),preparing:qsTr("Saving files…"),fetching:qsTr("Fetching…"),materializing:qsTr("Preparing incoming files…"),
             validating:qsTr("Validating files…"),merging:qsTr("Merging…"),pushing:qsTr("Pushing…"),committing:qsTr("Committing…"),
             resolving:qsTr("Resolving conflict…"),aborting:qsTr("Aborting merge…"),conflicted:repository.hasConflicts ? qsTr("Resolve conflicts to continue.") : qsTr("Ready to continue merge."),
-            recovery:qsTr("Git update requires recovery."),"awaiting-reload":qsTr("Reloading files…"),"reload-failed":qsTr("Files could not be reloaded."),failed:qsTr("Git operation failed.")}
-        return manager.error || phases[manager.phase] || (manager.busy ? qsTr("Working…") : needsRecovery ? qsTr("Git update requires recovery.") : manager.notice || "")
+            recovery:qsTr("Git update requires recovery."),"awaiting-reload":qsTr("Reloading files…")}
+        return phases[manager.phase] || (manager.busy ? qsTr("Working…") : needsRecovery ? qsTr("Git update requires recovery.") : manager.notice || "")
     }
-    function revealOperationError() {
-        if (!manager || !manager.error || !pane.Window.window || !pane.Window.window.visible) return
-        operationStatus.forceActiveFocus(Qt.OtherFocusReason)
-        scroll.contentItem.cancelFlick(); scroll.contentItem.contentY = 0
+    Git.GitManagerError {
+        objectName: "gitOperationError"
+        owner: pane
+        manager: pane.manager
+        receiving: pane.visible && !conflictDialog.visible && !gitSettings.reviewingPolicy
     }
     function openContext(path) {
         contextPath = path
@@ -51,7 +51,7 @@ Control {
     }
     function resolveContext() {
         if (!contextPending || !manager) return
-        if (worktreeLocked) { contextPending=false; resolvingContext=false; currentTab=1; Qt.callLater(pane.revealOperationError); return }
+        if (worktreeLocked) { contextPending=false; resolvingContext=false; currentTab=1; return }
         if (manager.busy) return
         contextPending = false
         resolvingContext = true
@@ -66,9 +66,6 @@ Control {
     Connections {
         target: pane.manager
         function onChanged() {
-            const error = pane.manager.error || ""
-            if (error && error !== pane.lastError) Qt.callLater(pane.revealOperationError)
-            pane.lastError = error
             if (pane.contextPending && !pane.manager.busy) pane.resolveContext()
             if (pane.resolvingContext && !pane.manager.busy) {
                 pane.resolvingContext = false
@@ -276,6 +273,7 @@ Control {
                 onReviewConflict: path => conflictDialog.review(path)
             }
             Git.GitHubSettings {
+                id: gitSettings
                 visible: pane.currentTab === 2
                 enabled: !pane.manager.busy && !pane.changingFolder
                 identityOnly: pane.worktreeLocked

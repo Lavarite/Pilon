@@ -325,10 +325,9 @@ TestCase {
     function test_settingsDialogExplanationsFollowTheProvidedForeground() {
         settings.visible = true
         page.mainColour = "#24201c"
-        for (const name of ["calendarSyncDetails", "calendarIcloudDialog", "calendarFeedDialog", "calendarSignOutConfirmation"]) {
+        for (const name of ["calendarIcloudDialog", "calendarFeedDialog", "calendarSignOutConfirmation"]) {
             page.textColour = "#d8c7b7"
             const dialog = findChild(settings, name)
-            if (name === "calendarSyncDetails") dialog.message = "Fixture sync failed"
             dialog.open()
             tryCompare(dialog, "visible", true)
             const labels = []
@@ -373,14 +372,12 @@ TestCase {
             }
             recurrenceWindow.palette.windowText="#f1e7d8"
             for (const label of labels) compare(label.color,recurrenceWindow.palette.windowText)
-            const issue=Array.from(page.data).find(item=>item.title==="Event could not be changed")
-            verify(issue);issue.message="Fixture operation failed";issue.open()
-            tryCompare(issue,"visible",true)
-            issue.contentItem.palette.windowText="#000000";issue.contentItem.palette.text="#000000"
-            compare(issue.contentItem.color,page.textColour)
-            page.textColour="#f1e7d8"
-            compare(issue.contentItem.color,page.textColour)
-            issue.close()
+            const issue = findChild(page, "calendarOperationError")
+            issue.message = "Fixture operation failed"
+            tryCompare(issue, "opened", true)
+            compare(findChild(issue.contentItem, "pilonErrorMessage").text, issue.message)
+            verify(!issue.modal && !issue.dim && !issue.focus)
+            issue.dismiss()
         } finally {
             if (recurrenceWindow) recurrenceWindow.palette.windowText=recurrenceForeground
             window.palette.windowText=foreground
@@ -874,38 +871,27 @@ TestCase {
             connectedEditor.dialogWindow.maximumHeight = 500
             connectedEditor.show(testCalendar.newEvent("2026-11-04", 540))
             tryCompare(connectedEditor, "opened", true)
-            connectedCalendar.error = "The calendar could not save this event. ".repeat(60)
-            mouseClick(editorChild(connectedEditor, "calendarEventSave"))
-            compare(connectedEditor.message, connectedCalendar.error)
-            waitForRendering(connectedEditor.contentItem)
             const host = connectedEditor.dialogWindow
             const form = editorChild(connectedEditor, "calendarEventForm")
             const save = editorChild(connectedEditor, "calendarEventSave")
-            verifyItemFitsWindow(save, connectedEditor)
-            verifyItemFitsWindow(editorChild(connectedEditor, "calendarEventCancel"), connectedEditor)
-            const message = editorChild(connectedEditor, "calendarEventMessage")
-            compare(message.text, connectedEditor.message)
-            tryVerify(() => Math.abs(message.mapToItem(form, 0, 0).y) <= 1)
-            verify(form.height > 0)
-            capture(host.contentItem, "/tmp/pilon-calendar-long-error-start.png")
-            const saveY = save.mapToItem(host.contentItem, 0, 0).y
-            form.contentItem.contentY = form.contentItem.contentHeight - form.height
-            waitForRendering(form)
-            verify(message.mapToItem(form, 0, message.height).y <= form.height + 1)
-            compare(save.mapToItem(host.contentItem, 0, 0).y, saveY)
-            capture(host.contentItem, "/tmp/pilon-calendar-long-error-end.png")
-            wait(300)
-            form.contentItem.contentY = 0
-            waitForRendering(form)
-            const start = editorChild(connectedEditor, "calendarEventStartDateTime")
-            verify(start.mapToItem(form, 0, start.height).y <= form.height + 1)
-            verify(message.mapToItem(form, 0, 0).y > form.height)
-            editorChild(connectedEditor, "calendarEventTitle").forceActiveFocus()
-            keyClick(Qt.Key_A)
+            verify(waitForRendering(connectedEditor.contentItem))
+            const viewport = form.height, saveY = save.mapToItem(host.contentItem, 0, 0).y
+            const scrollY = form.contentItem.contentY
+            connectedCalendar.error = "The calendar could not save this event. ".repeat(60)
             mouseClick(save)
-            compare(connectedEditor.message, connectedCalendar.error)
-            tryVerify(() => Math.abs(message.mapToItem(form, 0, 0).y) <= 1)
-            capture(host.contentItem, "/tmp/pilon-calendar-long-error-retry.png")
+            const failure = findChild(connectedEditor, "calendarEventMessage")
+            tryCompare(failure, "opened", true)
+            compare(failure.message, connectedCalendar.error)
+            verify(!failure.modal && !failure.dim && !failure.focus)
+            compare(form.height, viewport); compare(form.contentItem.contentY, scrollY)
+            compare(save.mapToItem(host.contentItem,0,0).y, saveY)
+            capture(host.contentItem, "/tmp/pilon-calendar-long-error.png")
+            failure.dismiss()
+            const title = editorChild(connectedEditor,"calendarEventTitle")
+            title.forceActiveFocus(); title.text = "Draft kept after failure"
+            mouseClick(save)
+            tryCompare(failure, "opened", true)
+            compare(title.text, "Draft kept after failure")
         } finally {
             connectedEditor.close()
             connectedEditor.dialogWindow.maximumHeight = oldMaximumHeight
@@ -960,9 +946,9 @@ TestCase {
         const confirmation = findChild(settings, "calendarSignOutConfirmation")
         tryCompare(confirmation, "opened", true)
         compare(confirmation.title, "Remove Timetable.ics?")
-        compare(confirmation.standardButton(Dialog.Ok).text, "Remove source")
+        compare(confirmation.confirmButton.text, "Remove source")
         waitForRendering(confirmation.contentItem)
-        mouseClick(confirmation.standardButton(Dialog.Ok))
+        mouseClick(confirmation.confirmButton)
         compare(connectedCalendar.signedOut, "ics")
         verify(!connectedCalendar.accounts.some(a => a.id === "ics"))
     }
@@ -1486,7 +1472,7 @@ TestCase {
         tryCompare(details, "opened", true)
         verify(details.message.indexOf("Personal: Provider detail") >= 0)
         capture(details.contentItem,"/tmp/pilon-calendar-sync-issue.png")
-        details.close()
+        details.dismiss()
     }
     function test_conflictAndOperationIssueNativeSurfaces_data() {
         return [{tag:"desktop",width:1024},{tag:"narrow",width:320}]
@@ -1513,10 +1499,10 @@ TestCase {
             const last=list.itemAtIndex(19), bottom=last.mapToItem(list,0,last.height)
             verify(bottom.y<=list.height+1,"The last conflict remains reachable by scrolling")
             dialog.close()
-            const issue=Array.from(page.data).find(item=>item.title==="Event could not be changed")
-            verify(issue);issue.message="The event could not be changed.";issue.open();tryCompare(issue,"opened",true)
+            const issue=findChild(page,"calendarOperationError")
+            verify(issue);issue.message="The event could not be changed.";tryCompare(issue,"opened",true)
             capture(issue.contentItem,"/tmp/pilon-calendar-operation-error-"+data.tag+".png")
-            issue.close()
+            issue.dismiss()
         } finally {page.calendar=testCalendar;connectedCalendar.conflicts=[];connectedCalendar.error=""}
     }
     function test_localFolderActions() {
@@ -2123,22 +2109,22 @@ TestCase {
         tryCompare(popup, "opened", true)
         connectedCalendar.sharingError = "Schedule sharing is not configured on this device."
         connectedCalendar.sharingBusy = false
-        const result = findChild(popup.contentItem, "calendarShareResult")
-        tryCompare(result, "text", connectedCalendar.sharingError)
-        verify(result.visible); verify(form.opened)
-        verifyDialogFrame(popup.dialogWindow)
-        tryVerify(() => result.height >= result.implicitHeight && result.width > 0)
-        verify(result.mapToItem(popup.contentItem, 0, result.height).y <= popup.contentItem.height)
-        verifyItemFitsWindow(result, popup)
-        verify(!findChild(popup.contentItem, "calendarCopyShare").visible)
-        capture(popup.dialogWindow.contentItem, "/tmp/pilon-share-error-popup.png")
-        popup.close(); tryCompare(popup, "opened", false)
+        const error = findChild(form, "calendarShareCreationError")
+        tryCompare(error, "opened", true)
+        compare(error.message, connectedCalendar.sharingError)
+        tryCompare(popup, "opened", false)
+        verify(form.opened); verify(!error.focus && !error.modal)
+        compare(findChild(form.contentItem, "calendarShareName").text, "Schedule")
+        capture(form.dialogWindow.contentItem, "/tmp/pilon-share-error-popup.png")
+        error.dismiss()
         mouseClick(revealShareControl(form, "calendarCreateShare"))
         tryCompare(popup, "opened", true)
         connectedCalendar.finishShare("retried")
         tryCompare(form, "opened", false)
         compare(findChild(popup.contentItem, "calendarShareLink").text, "https://example.com/calendar#retried")
         verifyItemFitsWindow(findChild(popup.contentItem, "calendarCopyShare"), popup)
+        popup.close(); tryCompare(popup, "opened", false)
+        verify(!findChild(manager, "calendarSharesError").opened)
     }
     function test_unpublishedSharesKeepStatusAndRevocation_data() {
         return [{tag: "pending", pending: true, unavailable: false, error: ""},
@@ -2153,15 +2139,25 @@ TestCase {
         const link = findChild(selectionShares.contentItem, "calendarSharedLink-pending-link")
         verify(link !== null)
         const status = findChild(selectionShares.contentItem, "calendarShareStatus-pending-link")
-        verify(status.visible)
-        compare(status.text, data.error || "Waiting to publish this link.")
+        compare(status.visible, data.pending)
+        if (status.visible) compare(status.text, "Waiting to publish this link.")
         verify(waitForRendering(selectionShares.contentItem))
         mouseClick(link)
         const menu = findChild(link, "calendarShareActions-pending-link")
         tryCompare(menu, "opened", true)
         verify(!findChild(menu, "calendarShowShare-pending-link").enabled)
+        const errorAction = findChild(menu, "calendarShareError-pending-link")
+        compare(errorAction.shown, !!data.error)
+        if (data.error) {
+            mouseClick(errorAction)
+            const error = findChild(selectionShares,"calendarSharesError")
+            tryCompare(error,"opened",true); compare(error.message,data.error); error.dismiss()
+            mouseClick(link); tryCompare(menu,"opened",true)
+        }
         const revoke = findChild(menu, "calendarRevokeShare-pending-link")
         verify(revoke.visible && revoke.enabled)
+        menu.contentItem.positionViewAtEnd()
+        verify(waitForRendering(menu.contentItem))
         mouseClick(revoke)
         compare(connectedCalendar.revokedShare, "pending-link")
         compare(connectedCalendar.shares.length, 0)
@@ -2413,7 +2409,7 @@ TestCase {
         waitForRendering(confirmation.contentItem)
         capture(confirmation.contentItem,"/tmp/pilon-calendar-signout-confirmation.png")
         grabImage(window.contentItem).save("/tmp/pilon-calendar-signout-full.png")
-        mouseClick(confirmation.standardButton(Dialog.Ok))
+        mouseClick(confirmation.confirmButton)
         compare(connectedCalendar.signedOut, "google")
         compare(connectedCalendar.accounts.length, 1)
         compare(connectedCalendar.accounts[0].id, "microsoft")

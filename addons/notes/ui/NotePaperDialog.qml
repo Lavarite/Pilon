@@ -8,7 +8,13 @@ PilonPopup {
     required property var savePaper
     property bool hasNote: false
     property string errorMessage: ""
-    property color warningColour: palette.text
+    signal errorDismissed()
+    PilonErrorPopup {
+        objectName: "notePaperError"
+        owner: paperDialog.contentItem
+        message: paperDialog.opened ? paperDialog.errorMessage : ""
+        onDismissed: paperDialog.errorDismissed()
+    }
     property string colourTarget: "background"
     function show(value) {
         pattern=value.pattern; backgroundColour=value.background; lineColour=value.lines
@@ -104,13 +110,7 @@ PilonPopup {
                 onClicked: { paperDialog.colourTarget = "lines"; colourDialog.selectedColor = paperDialog.lineColour; colourDialog.open() }
                 Rectangle { anchors.right: parent.right; anchors.rightMargin: 10; anchors.verticalCenter: parent.verticalCenter; width: 20; height: 20; radius: 3; color: paperDialog.lineColour; border.color: Qt.alpha(paperDialog.palette.text, .3) }
             }
-            Label {
-                objectName: "notePaperError"
-                width: parent.width; wrapMode: Text.Wrap
-                text: paperDialog.errorMessage; visible: text.length > 0
-                color: paperDialog.warningColour
-                Accessible.name: text
-            }
+
             Flow {
                 width: parent.width; spacing: 8
                 PaperButton {

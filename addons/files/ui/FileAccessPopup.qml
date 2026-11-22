@@ -6,6 +6,7 @@ import "ui"
 
 PilonPopup {
     id: dialog
+    contentSizedWindow: prompting && !credentialPrompt
     required property var workspace
     required property var remoteFiles
     readonly property bool prompting: remoteFiles !== null && remoteFiles.promptText.length > 0
@@ -17,7 +18,7 @@ PilonPopup {
     height: Math.min(implicitHeight, maximumContentHeight)
     padding: 16
     modal: prompting; focus: prompting
-    closePolicy: prompting ? Popup.NoAutoClose : Popup.CloseOnEscape | Popup.CloseOnPressOutside
+    closePolicy: credentialPrompt ? Popup.NoAutoClose : Popup.CloseOnEscape
     palette.window: workspace.mainColour
     palette.button: workspace.secondaryColour
     palette.text: workspace.textColour; palette.buttonText: workspace.textColour
@@ -30,6 +31,7 @@ PilonPopup {
             credential.clear(); savePassword.checked = false
             open()
             if (credentialPrompt) credential.forceActiveFocus()
+            else cancelAccess.forceActiveFocus(Qt.PopupFocusReason)
         } else close()
     }
     function submit() {
@@ -75,7 +77,7 @@ PilonPopup {
         }
         Flow {
             Layout.fillWidth: true; spacing: 8; visible: dialog.prompting
-            PilonWrapButton { objectName: "cancelFileAccess"; text: qsTr("Cancel"); onClicked: dialog.remoteFiles.cancelPrompt() }
+            PilonWrapButton { id: cancelAccess; objectName: "cancelFileAccess"; text: qsTr("Cancel"); onClicked: dialog.remoteFiles.cancelPrompt() }
             PilonWrapButton { objectName: "confirmFileAccess"; text: dialog.credentialPrompt ? qsTr("Continue") : qsTr("Trust"); highlighted: true; onClicked: dialog.submit() }
         }
     }

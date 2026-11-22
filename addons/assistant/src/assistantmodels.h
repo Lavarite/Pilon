@@ -37,6 +37,7 @@ public:
     double progress() const;
     QString status() const { return m_status; }
     QString error() const { return m_error; }
+    Q_INVOKABLE void dismissError() { if (!m_error.isEmpty()) { m_error.clear(); emit stateChanged(); } }
     Q_INVOKABLE void inspect(const QString &link);
     Q_INVOKABLE void download(int variant, int projector = -1, const QString &nickname = {});
     Q_INVOKABLE bool setNickname(const QString &id, const QString &nickname);
