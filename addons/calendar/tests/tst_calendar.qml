@@ -273,6 +273,7 @@ TestCase {
         findChild(selectionShare, "calendarShareThroughPicker").close()
         selectionShare.close()
         for (const menu of [selectionShares, findChild(page, "calendarSharesDialog")]) {
+            if (!menu) continue
             menu.close()
             findChild(menu, "calendarShareDialog").close()
             findChild(menu, "calendarShareLinkPopup").close()
@@ -2321,7 +2322,7 @@ TestCase {
     }
     function test_refreshAndShareHaveMatchingIconsAndAccessibleActions() {
         const previous=page.calendar
-        const manager=findChild(page,"calendarSharesDialog")
+        let manager
         try {
             page.calendar=connectedCalendar
             window.requestActivate();tryCompare(window,"active",true)
@@ -2338,10 +2339,11 @@ TestCase {
             refresh.forceActiveFocus();keyClick(Qt.Key_Space)
             compare(connectedCalendar.refreshes,before+2)
             share.forceActiveFocus();keyClick(Qt.Key_Space)
+            manager=findChild(page,"calendarSharesDialog")
             tryCompare(manager,"opened",true)
             verifyDialogFrame(manager.dialogWindow)
             manager.close();tryCompare(manager,"opened",false)
-        } finally { manager.close();connectedCalendar.syncing=false;page.calendar=previous }
+        } finally { if (manager) manager.close();connectedCalendar.syncing=false;page.calendar=previous }
     }
     function test_calendarActionsUseIconsOnOneRow() {
         window.width = 400; window.height = 760

@@ -45,7 +45,7 @@ TestCase {
     }
     property var app: null
     function init() {
-        failOnWarning(/(Binding loop|ReferenceError|TypeError|Cannot assign|Unable to assign)/)
+        failOnWarning(/(Binding loop|ReferenceError|TypeError|Cannot assign|Unable to assign|Required property .* was not initialized)/)
         app = createTemporaryObject(mainFactory, test)
         verify(app)
         for (const id of ["files","ssh","assistant","notes","calendar"]) verify(app.addonRegistryObject.setEnabled(id,true))
@@ -682,8 +682,10 @@ TestCase {
         const host = createTemporaryObject(hostFactory,app.contentItem,{descriptor:descriptor,enabled:true,selected:false,
             context:app.addonHosts.files.context,settingsContext:app.addonHosts.files.settingsContext})
         const settings = findChild(app,"settingsMenu")
+        verify(host.openSettings("one",settings.pageArea,true))
         verify(host.openSettings("one",settings.pageArea))
         const content = host.settingsContent, first = content.entry
+        verify(first && first.addon === host.settingsContext)
         compare(findChild(host,"org.example.formsSettingsContent"),content,"The host owns retained settings independently of their visual parent")
         content.visible = true; settings.open()
         compare(content.Window.window,settings)
@@ -712,6 +714,12 @@ TestCase {
         verify(host.openSettings("one",settings.pageArea)); verify(host.settingsContent.entry !== first)
         compare(host.page,null); compare(host.runtime,null)
         settings.close()
+    }
+    function test_programmaticOpenDuringBackgroundPageLoad() {
+        const host = createTemporaryObject(hostFactory,test,{enabled:true})
+        verify(host.ensurePage(true))
+        verify(host.ensurePage())
+        verify(host.page && host.page.addon === fixtureContext)
     }
     function test_sidebarToggleHasPageInset() {
         const toggle = findChild(app,"sidebarToggle")

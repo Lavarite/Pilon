@@ -90,7 +90,7 @@ Control {
             Layout.minimumHeight: 32; Layout.preferredHeight: Math.min(contentHeight, 144)
             model: prompt.proposal.changes
             clip: true; spacing: 8
-            ScrollBar.vertical: ScrollBar {}
+            ScrollBar.vertical: PilonScrollBar {}
             delegate: PilonButton {
                 id: change
                 required property var modelData
@@ -122,7 +122,7 @@ Control {
                 onClicked: prompt.eventRequested(prompt.proposal.id, index)
             }
         }
-        ScrollView {
+        PilonScrollView {
             id: warningScroll
             Layout.fillWidth: true
             Layout.preferredHeight: Math.min(warnings.implicitHeight, 72)

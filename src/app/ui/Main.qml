@@ -77,9 +77,10 @@ Window {
     function contrastingText(colour, opacity) { return PilonStyle.contrastingText(colour, opacity) }
 
     property string selectedPage: "files"
+    property string navigationTarget: ""
     onSelectedPageChanged: if (mobilePlatform && addonsReady && workspaceActive) {
         persistentSettings.lastSelectedPage = selectedPage
-        persistentSettings.sync()
+        Qt.callLater(persistentSettings.sync)
     }
     function restoreLastPage(id) { selectedPage = id; lastVisiblePageIds = null; syncAddonHosts() }
     property var lastVisiblePageIds: null
@@ -312,7 +313,7 @@ Window {
         if (!selectedAvailable || justHidden) selectedPage = visibleEntries.length ? visibleEntries[0].id : ""
         lastVisiblePageIds = visibleIds
         const current = addonHosts[selectedPage]
-        if (current && workspaceActive) current.ensurePage()
+        if (current && workspaceActive && selectedPage !== navigationTarget) current.ensurePage()
         pageRevision++
         updateWorkspaceLocks()
         syncingAddons = false
@@ -328,14 +329,32 @@ Window {
         }
         if (!window.addonEnabled(id)) { addonError = qsTr("Enable this add-on in Settings to use it."); return false }
         const host = addonHosts[id]
-        if (!host || !host.ensurePage()) { addonError = host ? host.error : qsTr("Add-on unavailable."); return false }
+        if (!host || !host.enabled || host.preparing || !host.descriptor.page || !host.descriptor.page.toString()) {
+            addonError = qsTr("Add-on unavailable.")
+            return false
+        }
         addonError = ""
+        if (fromNavigation) {
+            navigationTarget = id
+            selectedPage = id
+            if (host.page) finishNavigation(host)
+            else Qt.callLater(host.loadSelectedPage)
+            return true
+        }
+        navigationTarget = ""
+        if (!host.ensurePage()) { addonError = host.error; return false }
         selectedPage = id
         if (id === "assistant") assistantManager.prepareRuntime()
-        if (fromNavigation && id === "notes" && host.page) host.page.showLibrary()
-        if (fromNavigation && id === "calendar" && host.page) host.page.forceActiveFocus()
         pageRevision++
         return true
+    }
+    function finishNavigation(host) {
+        const id = host.descriptor.id
+        if (navigationTarget !== id || selectedPage !== id || !host.page) return
+        navigationTarget = ""
+        if (id === "assistant") assistantManager.prepareRuntime()
+        if (id === "notes") host.page.showLibrary()
+        if (id === "calendar") host.page.forceActiveFocus()
     }
     function setAddonEnabled(id, enabled) {
         if (ownerLocked(id)) return qsTr("Finish the current update before changing this add-on.")
@@ -765,7 +784,8 @@ Window {
     Component { id: addonHostFactory; AddonHost {
         anchors.fill: parent
         anchors.bottomMargin: workspaceStatus.visible ? workspaceStatus.height + 32 : 0
-        onPageCreated: window.pageRevision++
+        id: addonHost
+        onPageCreated: { window.pageRevision++; window.finishNavigation(addonHost) }
     } }
     Component {
         id: addonContextFactory
@@ -1047,7 +1067,7 @@ Window {
         Column {
             anchors.fill: parent; spacing: 12
             Label { id: assistantErrorHeading; text: qsTr("Assistant error"); color: window.selectedTextColour; font.pixelSize: 20 }
-            ScrollView {
+            PilonScrollView {
                 width: parent.width; height: parent.height - assistantErrorHeading.height - parent.spacing; clip: true
                 PilonTextArea {
                     id: assistantErrorText
@@ -1069,7 +1089,7 @@ Window {
         background: Rectangle { color: window.selectedMainColour; border.color: window.selectedMutedTextColour; radius: 8 }
         ColumnLayout {
             anchors.fill: parent; spacing: 12
-            ScrollView {
+            PilonScrollView {
                 Layout.fillWidth: true; Layout.fillHeight: true; Layout.minimumHeight: 0
                 contentWidth: availableWidth; clip: true
                 Column {
@@ -1243,18 +1263,16 @@ Window {
             window.showAddonSettings()
         }
         onSectionActivated: id => {
-            if (visible) window.showAddonSettings()
+            if (visible) Qt.callLater(() => {
+                if (settingsMenu.visible && settingsMenu.currentId === id) window.showAddonSettings(true)
+            })
         }
         categories: [
             {id: "application", title: qsTr("Application"), group: qsTr("General"), objectName: "applicationTab"},
             {id: "appearance", title: qsTr("Appearance"), group: qsTr("General"), objectName: "appearanceTab"},
             {id: "keybindings", title: qsTr("Keyboard shortcuts"), group: qsTr("General"), objectName: "keybindingsTab"},
             {id: "addons", title: qsTr("Add-ons"), group: qsTr("General"), objectName: "addonsTab"}
-        ].concat(addonRegistry.addons.filter(addon => addon.enabled && !addon.error).reduce((sections, addon) => sections.concat(addon.settings.map(section => ({
-            id: "addon:" + addon.id + ":" + section.id, title: section.name, group: addon.name,
-            selectorTitle: addon.name === section.name ? section.name : addon.name + ": " + section.name,
-            objectName: addon.id + "-" + section.id + "Tab", addonId: addon.id, sectionId: section.id
-        }))), []))
+        ].concat(window.addonSettingsCategories(addonRegistry.addons))
         navigationFooterComponent: Component {
             PilonHoldButton {
                 objectName: "resetPilon"
@@ -1319,10 +1337,10 @@ Window {
                 anchors.fill: parent
                 visible: settingsMenu.currentId === "application"
                 contentWidth: width
-                contentHeight: applicationContents.height + 32
+                contentHeight: applicationContents.implicitHeight
                 clip: true
                 boundsBehavior: Flickable.StopAtBounds
-                ScrollBar.vertical: ScrollBar { }
+                ScrollBar.vertical: PilonScrollBar { }
 
                 Column {
                     id: applicationContents
@@ -1435,139 +1453,26 @@ Window {
                         }
                     }
                 }
-                FileAppearanceSection {
-                    objectName: "fileAppearanceTypeSection"
-                    width: parent.width
-                    visible: window.addonEnabled("files")
-                    appearanceModel: sharedFiles.appearance
-                    ownerWindow: settingsMenu
-                    paths: false
-                }
-                FileAppearanceSection {
-                    objectName: "fileAppearancePathSection"
-                    width: parent.width
-                    visible: window.addonEnabled("files")
-                    appearanceModel: sharedFiles.appearance
-                    ownerWindow: settingsMenu
-                    paths: true
-                }
                 PilonSectionHeader { objectName: "applicationColoursSection"; width: parent.width; text: qsTr("Colours") }
-                Item {
-                    id: colourModeGroup
-
+                Column {
                     width: parent.width
-                    height: colourModeLabel.implicitHeight + 8 + colourMode.height
-
+                    spacing: 8
                     Label {
-                        id: colourModeLabel
-
-                        anchors.left: parent.left
-                        anchors.right: parent.right
-                        anchors.top: parent.top
+                        width: parent.width
                         text: qsTr("Colour mode")
-                        color: window.selectedTextColour
+                        color: settingsMenu.palette.windowText
                         wrapMode: Text.Wrap
                     }
-
                     PilonComboBox {
                         id: colourMode
-                            objectName: "colourMode"
-
-                        anchors.left: parent.left
-                        anchors.right: parent.right
-                        anchors.top: colourModeLabel.bottom
-                        anchors.topMargin: 8
-                        height: Math.max(40, implicitHeight)
+                        objectName: "colourMode"
+                        width: parent.width
                         model: [qsTr("System"), qsTr("Custom")]
                         currentIndex: persistentSettings.colourModeIndex
-                            Accessible.name: qsTr("Colour mode")
-                        leftPadding: 12
-                        rightPadding: 42
+                        Accessible.name: qsTr("Colour mode")
                         onActivated: {
                             persistentSettings.colourModeIndex = currentIndex
                             window.applySelectedColours()
-                        }
-
-                        contentItem: Label {
-                            text: colourMode.displayText
-                            color: window.selectedTextColour
-                            verticalAlignment: Text.AlignVCenter
-                            elide: Text.ElideRight
-                        }
-
-                        delegate: ItemDelegate {
-                            id: colourModeOption
-
-                            required property int index
-                            required property var modelData
-
-                            width: ListView.view.width
-                            height: 40
-                            text: modelData
-                            highlighted: colourMode.highlightedIndex === index
-
-                            contentItem: Label {
-                                text: colourModeOption.text
-                                color: colourModeOption.highlighted
-                                       ? window.selectedAccentTextColour
-                                       : window.selectedTextColour
-                                verticalAlignment: Text.AlignVCenter
-                            }
-
-                            background: Rectangle {
-                                radius: 8
-                                color: colourModeOption.highlighted
-                                       ? window.withOpacity(window.selectedAccentColour, 0.72)
-                                       : colourModeOption.hovered
-                                         ? window.withOpacity(window.selectedTextColour, 0.12)
-                                         : "transparent"
-                            }
-                        }
-
-                        indicator: Item {
-                            x: colourMode.width - width
-                            width: 40
-                            height: colourMode.height
-
-                            ControlsImpl.ColorImage {
-                                anchors.centerIn: parent
-                                width: 18
-                                height: 18
-                                source: "icons/chevron-right.svg"
-                                rotation: 90
-                                color: window.selectedTextColour
-                            }
-                        }
-
-                        background: Rectangle {
-                            radius: 8
-                            color: window.selectedSecondaryColour
-                            border.color: colourMode.activeFocus
-                                          ? window.selectedAccentColour
-                                          : window.withOpacity(window.selectedTextColour, 0.2)
-                        }
-
-                        popup: Popup {
-                            popupType: Popup.Item
-                            margins: 8
-                            y: colourMode.height + 4
-                            width: colourMode.width
-                            padding: 6
-                            height: contentItem.implicitHeight + topPadding + bottomPadding
-
-                            contentItem: ListView {
-                                clip: true
-                                implicitHeight: contentHeight
-                                model: colourMode.delegateModel
-                                currentIndex: colourMode.highlightedIndex
-                                highlightMoveDuration: 0
-                            }
-
-                            background: Rectangle {
-                                radius: 10
-                                color: window.withOpacity(window.selectedSecondaryColour, 0.98)
-                                border.color: window.withOpacity(window.selectedTextColour, 0.2)
-                            }
                         }
                     }
                 }
@@ -1631,6 +1536,22 @@ Window {
                             warningColourDialog.open()
                         }
                     }
+                }
+                FileAppearanceSection {
+                    objectName: "fileAppearanceTypeSection"
+                    width: parent.width
+                    visible: window.addonEnabled("files")
+                    appearanceModel: sharedFiles.appearance
+                    ownerWindow: settingsMenu
+                    paths: false
+                }
+                FileAppearanceSection {
+                    objectName: "fileAppearancePathSection"
+                    width: parent.width
+                    visible: window.addonEnabled("files")
+                    appearanceModel: sharedFiles.appearance
+                    ownerWindow: settingsMenu
+                    paths: true
                 }
             }
         }
@@ -1850,7 +1771,7 @@ Window {
             contentHeight: sshConnectionContents.height
             clip: true
             boundsBehavior: Flickable.StopAtBounds
-            ScrollBar.vertical: ScrollBar { }
+            ScrollBar.vertical: PilonScrollBar { }
             ColumnLayout {
                 id: sshConnectionContents
                 width: sshConnectionScroll.width
@@ -1883,7 +1804,7 @@ Window {
                     color: window.selectedTextColour
                     wrapMode: Text.Wrap
                 }
-                ScrollView {
+                PilonScrollView {
                     id: sshDetailsScroll
                     objectName: "sshConnectionDetailsScroll"
                     visible: sshLoginNotification.details.length > 0

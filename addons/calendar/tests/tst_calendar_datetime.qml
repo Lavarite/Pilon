@@ -159,6 +159,22 @@ TestCase {
         compare(Qt.formatDate(chosen.signalArguments[0][0], "yyyy-MM-dd"), "2026-10-29")
         compare(chosen.signalArguments[0][1], displayedTime)
     }
+    function test_arrowNavigationKeepsTheSelectedDayVisibleInAShortMenu() {
+        owner.width = 440; owner.height = 320; owner.uiScale = 1.4
+        picker.show(new Date(2026, 9, 4, 12), "09:00")
+        tryCompare(picker, "opened", true)
+        owner.requestActivate(); tryCompare(owner, "active", true)
+        verify(waitForRendering(picker.contentItem))
+        tryVerify(() => owner.activeFocusItem?.date?.getDate() === 4)
+        const view = findChild(picker.contentItem, "calendarDateTimeScroll").contentItem
+        for (const expectedDay of [11, 18, 25]) {
+            keyClick(Qt.Key_Down)
+            tryVerify(() => owner.activeFocusItem?.date?.getDate() === expectedDay)
+            const day = owner.activeFocusItem
+            tryVerify(() => day.mapToItem(view, 0, 0).y >= 0
+                      && day.mapToItem(view, 0, day.height).y <= view.height + 1)
+        }
+    }
     function test_cancelDiscardsDateAndTimeBeforeReopening() {
         owner.width = 480; owner.height = 800; owner.uiScale = 1.4
         picker.show(new Date(2026, 9, 29, 12), "09:00")

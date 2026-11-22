@@ -1,5 +1,6 @@
 pragma ComponentBehavior: Bound
 import QtQuick
+import QtQuick.Controls
 
 Item {
     id: host
@@ -28,11 +29,21 @@ Item {
         if (!descriptor.runtime || !descriptor.runtime.toString()) return true
         return !!runtimeLoader.item || load(runtimeLoader, descriptor.runtime, context)
     }
-    function ensurePage() {
-        if (!enabled || !ensureRuntime()) return false
-        return !!pageLoader.item || load(pageLoader, descriptor.page, context)
+    function ensurePage(background = false) {
+        if (!enabled || !ensureRuntime() || !descriptor.page || !descriptor.page.toString()) return false
+        if (pageLoader.item) return true
+        if (!background && pageLoader.status === Loader.Loading) pageLoader.source = ""
+        pageLoader.asynchronous = background
+        if (pageLoader.status !== Loader.Loading) {
+            entryError = ""
+            pageLoader.setSource(descriptor.page, {addon: context})
+        }
+        return pageLoader.status === Loader.Ready || (background && pageLoader.status === Loader.Loading)
     }
-    function openSettings(section, parentItem) {
+    function loadSelectedPage() {
+        if (selected && enabled && !preparing) ensurePage(true)
+    }
+    function openSettings(section, parentItem, background = false) {
         if (!settingsEnabled || preparing || !parentItem || !(descriptor.settings || []).length) return false
         const id = section || descriptor.settings[0].id
         if (!descriptor.settings.some(item => item.id === id)) return false
@@ -46,6 +57,7 @@ Item {
             settingsContent = content
         }
         if (!settingsContent) return false
+        settingsContent.background = background
         settingsContent.currentId = id
         settingsContent.loadSection()
         return true
@@ -71,14 +83,20 @@ Item {
         settingsContent.destroy()
         settingsContent = null
     }
-    onSelectedChanged: if (selected && enabled) ensurePage()
-    onPreparingChanged: if (!preparing && enabled) {
-        if (descriptor.startOnEnable) ensureRuntime()
-        if (selected) ensurePage()
+    onSelectedChanged: {
+        if (selected) Qt.callLater(loadSelectedPage)
+        else if (pageLoader.status === Loader.Loading) pageLoader.source = ""
+    }
+    onPreparingChanged: {
+        if (preparing && pageLoader.status === Loader.Loading) pageLoader.source = ""
+        if (!preparing && enabled) {
+            if (descriptor.startOnEnable) ensureRuntime()
+            if (selected) Qt.callLater(loadSelectedPage)
+        }
     }
     Component.onCompleted: {
         if (enabled && descriptor.startOnEnable) ensureRuntime()
-        if (selected && enabled) ensurePage()
+        if (selected && enabled) Qt.callLater(loadSelectedPage)
     }
     visible: selected && enabled
     Loader {
@@ -90,8 +108,15 @@ Item {
         enabled: !host.preparing
         anchors.fill: parent
         anchors.margins: host.descriptor.builtin ? 0 : 16
+        visible: status === Loader.Ready
         onLoaded: host.pageCreated()
         onStatusChanged: if (status === Loader.Error) host.entryError = qsTr("Unable to load %1. Check the add-on package.").arg(host.descriptor.name)
+    }
+    BusyIndicator {
+        anchors.centerIn: parent
+        visible: host.visible && !host.page && !host.error
+        running: visible
+        Accessible.name: qsTr("Loading %1").arg(host.descriptor.name)
     }
     Loader {
         id: pageIntegrations

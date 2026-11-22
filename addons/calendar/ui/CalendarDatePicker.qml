@@ -11,6 +11,8 @@ Basic.Popup {
     property date selectedDate: new Date()
     property int firstDay: 1
     property bool choosingMonth: false
+    property bool datesCreated: false
+    onAboutToShow: datesCreated = true
     property bool includeTime: false
     property string selectedTime: "09:00"
     readonly property var ownerWindow: parent ? parent.Window.window : null
@@ -40,12 +42,12 @@ Basic.Popup {
         const first = dateAt(year.value, month.currentIndex, 1)
         return dateAt(year.value, month.currentIndex, 1 - (((first.getDay() + 6) % 7 - (firstDay - 1) + 7) % 7))
     }
-    function focusSelectedDate() {
+    function focusSelectedDate(reason) {
         for (let i = 0; i < dayButtons.count; ++i) {
             const button = dayButtons.itemAt(i)
             if (button.date.getFullYear() === selectedDate.getFullYear()
                     && button.date.getMonth() === selectedDate.getMonth() && button.date.getDate() === selectedDate.getDate()) {
-                button.forceActiveFocus(Qt.PopupFocusReason)
+                button.forceActiveFocus(reason)
                 return
             }
         }
@@ -54,7 +56,7 @@ Basic.Popup {
         const next = dateAt(date.getFullYear(), date.getMonth(), date.getDate() + days)
         if (next.getFullYear() < 1 || next.getFullYear() > 9999) return
         selectedDate = next; year.value = next.getFullYear(); month.currentIndex = next.getMonth()
-        Qt.callLater(focusSelectedDate)
+        Qt.callLater(focusSelectedDate, Qt.TabFocusReason)
     }
     function positionWithinWindow() {
         if (!parent || !ownerWindow) return
@@ -65,7 +67,7 @@ Basic.Popup {
         y = Math.max((8 - origin.y) / sy, Math.min(parent.height + 4, (ownerWindow.height - 8 - origin.y) / sy - height))
     }
     onOpened: Qt.callLater(() => {
-        positionWithinWindow(); focusSelectedDate()
+        positionWithinWindow(); focusSelectedDate(Qt.PopupFocusReason)
         if (includeTime) timeFields.centerSelection()
     })
     onWidthChanged: if (opened) Qt.callLater(positionWithinWindow)
@@ -85,7 +87,7 @@ Basic.Popup {
     contentItem: ColumnLayout {
         id: pickerFields
         spacing: 12
-        ScrollView {
+        PilonScrollView {
             id: pickerScroll
             objectName: "calendarDateTimeScroll"
             Layout.fillWidth: true; Layout.fillHeight: true; Layout.minimumHeight: 0
@@ -150,7 +152,7 @@ Basic.Popup {
                     GridLayout {
                         columns: 7; Layout.fillWidth: true; columnSpacing: 4; rowSpacing: 4
                         Repeater {
-                            model: 7
+                            model: picker.datesCreated ? 7 : 0
                             Label {
                                 required property int index
                                 Layout.fillWidth: true; Layout.minimumWidth: 0
@@ -161,7 +163,7 @@ Basic.Popup {
                         }
                         Repeater {
                             id: dayButtons
-                            model: 42
+                            model: picker.datesCreated ? 42 : 0
                             delegate: CalendarButton {
                                 required property int index
                                 objectName: "calendarDate-" + index

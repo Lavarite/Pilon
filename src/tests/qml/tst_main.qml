@@ -302,7 +302,8 @@ TestCase {
         verify(settings.visible)
         if (settings.currentSection.addonId) {
             const content=appWindow.addonHosts[settings.currentSection.addonId].settingsContent
-            verify(content && content.visible && content.entry,"The add-on section loads inside main Settings")
+            verify(content && content.visible, "Settings shows the selected section immediately")
+            tryVerify(() => !!content.entry, 5000, "The add-on section finishes loading inside Settings")
             compare(content.Window.window,settings)
         }
         return settings
@@ -431,8 +432,8 @@ TestCase {
                 const selected = navigationControl()
                 compare(selected.Window.window,appWindow)
                 if (entry[1]) {
+                    tryVerify(() => !!findControl(appWindow, entry[1])?.visible, 5000, entry[1] + " finished loading")
                     const page = findControl(appWindow, entry[1])
-                    verify(page.visible)
                     verify(page.width > 0 && page.height > 0)
                 }
             }
@@ -632,7 +633,8 @@ TestCase {
         }
     }
     function test_settingsScrollingDoesNotConsumeTheNextSelection_data() {
-        return [{tag:"wheel",touch:false,fontSize:16},{tag:"touch",touch:true,fontSize:16},
+        return [{tag:"wheel",touch:false,fontSize:16},{tag:"wheel_before_frame",touch:false,fontSize:16},
+            {tag:"touch",touch:true,fontSize:16},
                 {tag:"large_font",touch:false,fontSize:28}]
     }
     function test_settingsScrollingDoesNotConsumeTheNextSelection(data) {
@@ -665,7 +667,11 @@ TestCase {
                     wait(20)
                 }
                 touch.release(0,flick,x,flick.height*.3).commit()
-            } else mouseWheel(navigation,100,navigation.height/2,0,-120)
+            } else {
+                mouseWheel(navigation,100,navigation.height/2,0,-120)
+                if (data.tag !== "wheel_before_frame")
+                    tryVerify(() => flick.contentY > 0, 1000, "The native wheel animation has advanced")
+            }
             const choice=visibleChoice()
             verify(choice)
             const expected="section-"+choice.objectName.slice("scrollSection-".length)
@@ -675,7 +681,8 @@ TestCase {
                 touch.press(0,choice).commit(); touch.release(0,choice).commit()
             } else mouseClick(choice,choice.width/2,choice.height/2,Qt.LeftButton,Qt.NoModifier,0)
             compare(settings.currentId,expected,"The first selection after scrolling must activate")
-            verify(flick.contentY>0,"Wheel and touch input actually scroll the sidebar")
+            if (data.tag !== "wheel_before_frame")
+                verify(flick.contentY>0,"Wheel and touch input actually scroll the sidebar")
             renderWindow(settings)
             settings.focusCategory(categories.length-1)
             const last=findControl(settings,categories[categories.length-1].objectName)
@@ -990,6 +997,18 @@ TestCase {
             verify(tabletInput.setDirectoryWritable(notes.storageDirectory,true));verify(notes.save())
         }
     }
+    function test_navigationShowsDestinationWhileColdPageLoads() {
+        const host = appWindow.addonHosts.calendar
+        compare(host.page, null)
+        verify(appWindow.selectPage("calendar", true))
+        compare(appWindow.selectedPage, "calendar")
+        verify(host.visible)
+        verify(!appWindow.addonHosts.files.visible)
+        compare(host.page, null, "The navigation handler returns before it builds the calendar")
+        tryVerify(() => host.page !== null)
+        tryVerify(() => host.page.activeFocus)
+        verify(!findChild(host.page, "calendarSharesDialog"), "Sharing windows are created on demand")
+    }
     function test_programmaticNotesSelectionPreservesEditor() {
         verify(appWindow.selectPage("notes"))
         const page = findControl(appWindow, "notesPane")
@@ -1236,6 +1255,9 @@ TestCase {
         verify(!settings.categories.some(section => section.addonId === "devices"))
         verify(appWindow.setAddonEnabled("devices",true) === true)
         verify(appWindow.openSettings("devices")); renderWindow(settings)
+        const index=settings.categories.findIndex(section => section.addonId === "devices")
+        compare(settings.categories[index].group,"SSH")
+        compare(settings.categories[index-1].addonId,"ssh")
         verify(findControl(settings,"devicesConnectionSection")); verify(!findControl(settings,"sshAddDevice"))
         settings.width=600; renderWindow(settings)
         const heading=findControl(settings,"settingsSectionHeading")
@@ -1247,6 +1269,7 @@ TestCase {
         waitForWorkspaceIdle()
         tabletInput.configureWindow(appWindow, 1024, 700)
         verify(appWindow.setAddonEnabled("ssh", true) === true)
+        verify(appWindow.setAddonEnabled("devices", true) === true)
         verify(appWindow.selectPage("files"))
         tryVerify(() => !!appWindow.filesPane)
         const pane = appWindow.filesPane
@@ -1260,8 +1283,13 @@ TestCase {
 
         let result = null
         Promise.resolve(appWindow.setAddonEnabled("ssh", false)).then(value => result = value)
+        const confirmation = findControl(appWindow, "disableDependentsConfirmation")
+        tryCompare(confirmation, "opened", true)
+        compare(findControl(confirmation.contentItem, "dependentAddonNames").text, "Tailscale")
+        findControl(confirmation.contentItem, "confirmDisableDependents").clicked()
         tryVerify(() => result !== null)
         compare(result, true)
+        verify(!appWindow.addonRegistryObject.isEnabled("devices"))
         tryCompare(heading, "visible", false)
         tryCompare(findControl(appWindow, "fileSearchDevicesButton"), "visible", false)
         compare(files.remoteEnabled, false)
@@ -1308,6 +1336,9 @@ TestCase {
         const frost=findControl(settings,"glassFrostiness")
         const reset=findControl(settings,"resetGlassFrostiness")
         verify(frost && frost.visible)
+        const colours = findControl(settings, "applicationColoursSection")
+        verify(frost.mapToItem(colours, 0, frost.height).y <= 0)
+        verify(colours.mapToItem(fileTypes, 0, colours.height).y <= 0)
         compare(frost.from,0); compare(frost.to,100); compare(frost.stepSize,1)
         const original=appWindow.glassFrostiness
         try {
