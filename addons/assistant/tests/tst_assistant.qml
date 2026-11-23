@@ -143,9 +143,14 @@ TestCase {
             id: host
             property real uiScale: 1
             property int typeSize: 14
+            property color chatBackground: "#221e1a"
+            property color chatPanel: "#221e1a"
+            property color chatText: "#d0c0b0"
+            property color chatMuted: "#968879"
+            property color chatAccent: "#f4b371"
             property alias assistantPage: nativePage
             visible: false
-            color: "#221e1a"
+            color: chatBackground
             Overlay.overlay.scale: uiScale
             Overlay.overlay.transformOrigin: Item.TopLeft
             Overlay.overlay.width: width / uiScale
@@ -158,8 +163,9 @@ TestCase {
                     id: nativePage
                     anchors.fill: parent; anchors.margins: 16
                     assistant: backend; fileWorkspace: mockFileWorkspace
-                    secondaryColour: "#221e1a"; textColour: "#d0c0b0"; mutedTextColour: "#968879"
-                    accentColour: "#f4b371"; accentTextColour: "#20180f"
+                    mainColour: host.chatBackground; secondaryColour: host.chatPanel
+                    textColour: host.chatText; mutedTextColour: host.chatMuted
+                    accentColour: host.chatAccent; accentTextColour: "#20180f"
                     warningColour: "#d69874"; warningTextColour: "#20180f"
                 }
             }
@@ -243,6 +249,55 @@ TestCase {
         compare(findChild(page, "assistantApprovalMode").text, "YOLO")
         verify(findChild(page, "assistantComposerStatus").text.indexOf("Automatic") === -1)
         verify(findChild(page, "assistantEmptyState") === null)
+    }
+    function test_messageSurfacesRemainReadable_data() {
+        return [
+            {tag:"dark", background:"#2c2c30", panel:"#222224", foreground:"#eeeeee", muted:"#99999d", accent:"#457db4"},
+            {tag:"light", background:"#eeece5", panel:"#f9f8f2", foreground:"#2f3032", muted:"#66666a", accent:"#6098cd"},
+            {tag:"dim-custom", background:"#564958", panel:"#4a3e4c", foreground:"#6a5d6b", muted:"#605763", accent:"#574c68"}
+        ]
+    }
+    function contrast(first, second) {
+        function luma(colour) {
+            function linear(channel) { return channel <= .04045 ? channel / 12.92 : Math.pow((channel + .055) / 1.055, 2.4) }
+            return .2126 * linear(colour.r) + .7152 * linear(colour.g) + .0722 * linear(colour.b)
+        }
+        const a = luma(first), b = luma(second)
+        return (Math.max(a, b) + .05) / (Math.min(a, b) + .05)
+    }
+    function test_messageSurfacesRemainReadable(data) {
+        backend.messages = [{role:"user", text:"Can you summarise the changes?"},
+                            {role:"assistant", text:"The **navigation** now keeps your active tab in view."}]
+        const host = createTemporaryObject(nativeChatComponent, test, {
+            width:360, height:720, chatBackground:data.background, chatPanel:data.panel,
+            chatText:data.foreground, chatMuted:data.muted, chatAccent:data.accent
+        })
+        verify(host)
+        page.visible = false
+        try {
+            host.show()
+            const subject = host.assistantPage
+            for (const role of ["user", "assistant"]) {
+                const bubbleName = "chatBubble_" + role
+                tryVerify(() => !!findChild(subject, bubbleName))
+                const bubble = findChild(subject, bubbleName)
+                const text = findChild(bubble, "messageText_" + role)
+                verify(contrast(text.color, bubble.color) >= 4.5, role + " message contrast")
+                verify(contrast(text.selectedTextColor, text.selectionColor) >= 4.5, role + " selection contrast")
+                if (role === "user") {
+                    const label = findChild(bubble, "chatRole_user")
+                    verify(label && contrast(label.color, bubble.color) >= 4.5, "Author label contrast")
+                }
+                compare(bubble.color.a, 1)
+                verify(contrast(bubble.color, host.color) >= 1.25, role + " fill separates from the window")
+                verify(bubble.border.width > 0 && contrast(bubble.border.color, host.color) >= 1.75,
+                    role + " border separates from the window")
+            }
+            verify(waitForRendering(host.contentItem))
+        } finally {
+            host.close()
+            page.visible = true
+        }
     }
     function test_chatTimestampDensityAndFullDescription() {
         const today=new Date(); today.setHours(10,15,0,0)
