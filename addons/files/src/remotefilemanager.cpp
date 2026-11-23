@@ -1619,8 +1619,9 @@ QVariantMap previewFile(const QString &path, const QString &root, const std::sha
         result["previewKind"] = "document"; result["previewPages"] = pages;
     } else if (mime.startsWith("text/") || QFileInfo(path).suffix().compare("txt", Qt::CaseInsensitive) == 0 || QFileInfo(path).suffix().compare("csv", Qt::CaseInsensitive) == 0) {
         QFile file(path); if (!file.open(QIODevice::ReadOnly)) return failure(file.errorString());
+        const auto data = file.read(1024 * 1024);
         result["previewKind"] = "text";
-        result["previewText"] = QString::fromUtf8(file.read(1024 * 1024)) + (file.atEnd() ? QString{} : QObject::tr("\n[Preview truncated. Open externally to read the full file.]"));
+        result["previewText"] = QString::fromUtf8(data) + (file.atEnd() ? QString{} : QObject::tr("\n[Preview truncated. Open externally to read the full file.]"));
     } else if (NoteImport::supportsFile(path)) {
         const auto converted = NoteImport::pdf(path, root, NoteImport::officeExecutable(), cancel);
         if (converted.contains("error")) { result["previewKind"] = "external"; result["previewText"] = converted.value("error"); }

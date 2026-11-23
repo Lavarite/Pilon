@@ -546,6 +546,29 @@ private slots:
         }
     }
 
+    void textPreviewMarksOnlyTruncatedData()
+    {
+        constexpr auto limit = 1024 * 1024;
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        RemoteFileManager manager;
+        for (const auto size : {0, 20, limit, limit + 1}) {
+            const auto path = directory.filePath(QString::number(size) + ".txt");
+            const QByteArray text(size, 'x');
+            QVERIFY(writeVersion(path, text, 10000));
+            manager.viewFile(localEndpoint(path), "");
+            QTRY_VERIFY_WITH_TIMEOUT(!manager.busy(), 5000);
+            QCOMPARE(manager.previewKind(), QString("text"));
+            const auto preview = manager.previewText();
+            if (size <= limit)
+                QCOMPARE(preview, QString::fromUtf8(text));
+            else {
+                QCOMPARE(preview.left(limit), QString::fromUtf8(text.first(limit)));
+                QVERIFY(preview.sliced(limit).contains("Preview truncated"));
+            }
+        }
+    }
+
     void initTestCase()
     {
         QStandardPaths::setTestModeEnabled(true);
