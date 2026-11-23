@@ -724,6 +724,7 @@ if(PILON_BUILD_TESTS)
     endif()
     qt_add_executable(pilon_calendar_ui_tests ../addons/calendar/tests/harness/calendar_ui_main.cpp
         app/keybindings.cpp app/keybindings.h ${PILON_SCROLL_PRESS_SOURCES})
+    target_include_directories(pilon_calendar_ui_tests PRIVATE ui/controls)
     target_link_libraries(pilon_calendar_ui_tests PRIVATE pilon_calendar Qt6::QuickTest Qt6::Quick Qt6::Widgets)
     # Exercise native dialog sizing with the same QML compilation as the app.
     qt_add_qml_module(pilon_calendar_ui_tests
