@@ -326,7 +326,8 @@ bool PiconfDocument::validPath(const QString &path) {
 
 bool PiconfDocument::Data::resolve(const QString &scopeId, QString &error) {
     auto &scope = scopes[scopeId];
-    const auto &main = scopes.constFind(MainPath).value();
+    const auto mainIt = scopes.constFind(MainPath);
+    const auto &main = mainIt.value();
     QSet<Key> visiting;
 
     std::function<bool(const Key &, QVariant &, qsizetype &)> resolveKey;
@@ -424,7 +425,8 @@ bool PiconfDocument::Data::resolve(const QString &scopeId, QString &error) {
             size = main.weights.value(key);
             return true;
         }
-        const auto &entry = scope.entries.constFind(key).value();
+        const auto entryIt = scope.entries.constFind(key);
+        const auto &entry = entryIt.value();
         if (visiting.contains(key) || visiting.size() >= 64) {
             error =
                 where(entry.file, entry.line, "Cyclic or overly nested variable reference: " + keyText(key));
@@ -467,7 +469,8 @@ bool PiconfDocument::Data::resolve(const QString &scopeId, QString &error) {
 bool PiconfDocument::Data::build(const Reader &read, QString &error) {
     if (!collect(MainPath, scopes[MainPath], read, 0, error) || !resolve(MainPath, error))
         return false;
-    const auto &host = scopes.constFind(MainPath).value();
+    const auto hostIt = scopes.constFind(MainPath);
+    const auto &host = hostIt.value();
     const QVariant addons = host.tree.value("addons");
     if (addons.isValid() && addons.typeId() != QMetaType::QVariantMap) {
         error = where(MainPath, 1, "Expected add-on declarations.");
@@ -487,7 +490,8 @@ bool PiconfDocument::Data::build(const Reader &read, QString &error) {
             error = where(MainPath, 1, "Missing add-on configuration declaration.");
             return false;
         }
-        const auto &entry = host.entries.constFind(ancestor).value();
+        const auto entryIt = host.entries.constFind(ancestor);
+        const auto &entry = entryIt.value();
         QVariant raw = entry.value;
         for (auto i = ancestor.size(); i < key.size(); ++i)
             raw = raw.toMap().value(key[i]);
@@ -725,7 +729,8 @@ bool PiconfDocument::apply(const QList<Edit> &edits, const Files &newFiles, QStr
                 error = where(edit.path, 1, "Invalid configuration key.");
                 return false;
             }
-        const auto &scope = m_data->scopes.constFind(edit.path).value();
+        const auto scopeIt = m_data->scopes.constFind(edit.path);
+        const auto &scope = scopeIt.value();
         Key key = edit.keys;
         // A map written as an inline JSON object owns its member assignments as well.
         while (!key.isEmpty() && !scope.entries.contains(key))
