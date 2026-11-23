@@ -183,7 +183,7 @@ Control {
     }
     Component.onCompleted: { syncChats(); syncMessages() }
     onVisibleChanged: if (conversation) { if (visible) syncMessages(); else conversation.rememberPosition(true) }
-    Component.onDestruction: if (conversation) conversation.rememberPosition()
+    Component.onDestruction: if (conversation) conversation.rememberPosition(true)
     onCurrentChatWorkingChanged: conversation.scheduleTail()
     Connections {
         target: page.assistant
@@ -420,10 +420,12 @@ Control {
                 padding: 4
                 height: Math.min(280, contentItem.implicitHeight + 8, maximumContentHeight)
                 contentItem: ListView {
+                    id: models
                     implicitHeight: contentHeight
                     model: choice.popup.visible ? choice.delegateModel : null
                     currentIndex: choice.highlightedIndex
                     clip: true
+                    PilonScrollMotion { view: models }
                     ScrollBar.vertical: PilonScrollBar {}
                 }
                 background: Rectangle {
@@ -527,11 +529,13 @@ Control {
         }
         Timer { id: searchTimer; interval: 150; onTriggered: page.chatSearch = chatSearchInput.text }
         ListView {
+            id: sidebarChats
             objectName: "chatSidebar"
             anchors.top: chatActions.bottom; anchors.bottom: parent.bottom
             anchors.left: parent.left; anchors.right: parent.right; anchors.margins: 12
             clip: true; spacing: 8
             model: chatSummaries
+            PilonScrollMotion { view: sidebarChats }
             delegate: ActionButton {
                 id: chatEntry
                 required property string chatId
@@ -891,11 +895,12 @@ Control {
             clip: true
             spacing: 12
             model: chatMessages
+            PilonScrollMotion { view: conversation }
             property bool followTail: true
             property bool restoringPosition: false
             property int restoreRevision: 0
             function rememberPosition(force) {
-                if (restoringPosition || (!page.visible && !force) || height <= 0 || !page.assistant
+                if (restoringPosition || ((moving || !page.visible) && !force) || height <= 0 || !page.assistant
                     || !page.Window.window || !page.Window.window.visible
                     || page.displayedChatId !== page.assistant.currentChatId
                     || page.assistant.readingPosition === undefined) return
@@ -929,10 +934,10 @@ Control {
                     })
                 })
             }
-            onContentYChanged: rememberPosition()
-            onFollowTailChanged: rememberPosition()
+            onContentYChanged: if (!moving) Qt.callLater(rememberPosition)
+            onFollowTailChanged: if (!moving) Qt.callLater(rememberPosition)
             function settleTail() {
-                if (!page.visible || !followTail) return
+                if (!page.visible || !followTail || moving) return
                 forceLayout()
                 positionViewAtEnd()
                 // Positioning instantiates the last virtual delegate. Its
@@ -940,7 +945,7 @@ Control {
                 Qt.callLater(finishTail)
             }
             function finishTail() {
-                if (!page.visible || !followTail) return
+                if (!page.visible || !followTail || moving) return
                 forceLayout()
                 positionViewAtEnd()
             }
@@ -948,7 +953,7 @@ Control {
                 if (page.visible && followTail) Qt.callLater(settleTail)
             }
             onMovementStarted: followTail = false
-            onMovementEnded: { followTail = atYEnd; rememberPosition() }
+            onMovementEnded: { followTail = atYEnd; Qt.callLater(rememberPosition) }
             // contentHeight is estimated from virtual delegates. Scrolling on
             // every estimate change feeds layout back into scrolling forever.
             onHeightChanged: scheduleTail()
