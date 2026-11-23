@@ -1099,6 +1099,7 @@ void AddonRegistry::refresh() {
         }
         auto row = readPackage(path, builtin, expectedId, hash, true, m_stateDirectory + "/cache");
         row["packagePath"] = path;
+        row["sha256"] = QString::fromLatin1(hash.toHex());
         row["builtin"] = builtinIds.contains(row.value("id").toString());
         row["defaultEnabled"] = m_seeded.contains(row.value("id").toString()) && row.value("id") != "git" &&
                                 row.value("id") != "devices";
@@ -1181,6 +1182,21 @@ void AddonRegistry::refresh() {
     emit changed();
 }
 bool AddonRegistry::install(const QUrl &url) {
+    return installPackage(url, {}, {}, {});
+}
+bool AddonRegistry::installConfigured(const QUrl &url, const QString &id, const QString &version,
+                                      const QString &sha256) {
+    if (!addonId(id) || (!sha256.isEmpty() && !matches(sha256, "\\A[0-9a-fA-F]{64}\\z")))
+        return fail(issue("The configured package ID or SHA-256 pin is invalid."));
+    if (find(id)) return fail(issue("This add-on is already installed."));
+    return installPackage(url, id, version, sha256);
+}
+bool AddonRegistry::installConfiguredBuiltin(const QString &id, const QString &version, const QString &sha256) {
+    if (!builtinIds.contains(id)) return fail(issue("This package is not a shipped Pilon add-on."));
+    return installConfigured(QUrl::fromLocalFile(QDir(m_builtins).filePath(id + ".piext")), id, version, sha256);
+}
+bool AddonRegistry::installPackage(const QUrl &url, const QString &expected, const QString &pinnedVersion,
+                                   const QString &sha256) {
     if (!url.isLocalFile())
         return fail(issue("Choose a local .piext package."));
     QFile source(url.toLocalFile());
@@ -1201,10 +1217,17 @@ bool AddonRegistry::install(const QUrl &url) {
     if (!stage.flush())
         return fail(issue("Cannot save the staged package."));
     stage.close();
-    const auto row = readPackage(stage.fileName(), false, {}, fileHash(stage.fileName()), false);
+    const auto hash = fileHash(stage.fileName());
+    if (!sha256.isEmpty() && hash.toHex() != sha256.toLower().toLatin1())
+        return fail(issue("The package does not match its configured SHA-256 digest."));
+    const auto row = readPackage(stage.fileName(), false, {}, hash, false);
     if (!row.value("error").toString().isEmpty())
         return fail(row.value("error").toString());
     const auto id = row.value("id").toString();
+    if (!expected.isEmpty() && expected != id)
+        return fail(issue("The chosen package has a different add-on ID."));
+    if (!pinnedVersion.isEmpty() && row.value("version").toString() != pinnedVersion)
+        return fail(issue("The package does not match its configured version."));
     const auto destination = QDir(m_installed).absoluteFilePath(id + ".piext");
     for (const auto &existing : m_rows)
         if (existing.value("id") == id && existing.value("error").toString().isEmpty()) {
@@ -1218,6 +1241,27 @@ bool AddonRegistry::install(const QUrl &url) {
     if (QFileInfo(destination).isSymLink() ||
         (QFileInfo::exists(destination) && !QFileInfo(destination).isFile()))
         return fail(issue("The package destination is not a regular file."));
+    if (!expected.isEmpty()) {
+        if (QFileInfo::exists(destination))
+            return fail(issue("The package appeared while it was being restored. Refresh the add-on list."));
+        // Publishing a missing package must not activate a stale enabled flag. The caller enables
+        // it through the normal dependency checks after the verified installation succeeds.
+        PilonSettings settings;
+        const QString key = enabledKey(id);
+        const QVariant previous = settings.value(key);
+        settings.setValue(key, false);
+        settings.sync();
+        if (settings.status() != QSettings::NoError)
+            return fail(issue("Cannot save the activation state for this package."));
+        if (!QFile::rename(stage.fileName(), destination)) {
+            if (previous.isValid()) settings.setValue(key, previous);
+            else settings.remove(key);
+            settings.sync();
+            return fail(issue("Cannot publish this package into the add-on folder."));
+        }
+        refresh();
+        return true;
+    }
     QFile staged(stage.fileName());
     QSaveFile output(destination);
     if (!staged.open(QIODevice::ReadOnly) || !output.open(QIODevice::WriteOnly))

@@ -1,5 +1,6 @@
 #include "addonregistry.h"
 #include <QCoreApplication>
+#include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
 #include <QJsonArray>
@@ -81,6 +82,44 @@ class AddonTests : public QObject {
         QSettings().clear();
         QSettings().setValue("app/setupVersion", 1);
         QSettings().sync();
+    }
+    void configuredRestoreVerifiesIdentityVersionAndDigestBeforeInstallation() {
+        QTemporaryDir root;
+        const QString id = "org.example.counter";
+        const auto source = root.filePath("source/counter.piext");
+        package(source, manifest(id));
+        QFile packageFile(source);
+        QVERIFY(packageFile.open(QIODevice::ReadOnly));
+        const auto digest = QString::fromLatin1(QCryptographicHash::hash(packageFile.readAll(), QCryptographicHash::Sha256).toHex());
+        const auto url = QUrl::fromLocalFile(source);
+        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data"), false);
+        QVERIFY(!registry.installConfigured(url, "org.example.other", "", ""));
+        QVERIFY(!registry.installConfigured(url, id, "1.2.3", digest));
+        QVERIFY(!registry.installConfigured(url, id, "", QString(64, '0')));
+        QVERIFY(registry.addons().isEmpty());
+        QVERIFY(!registry.downloadConfigured(QUrl("http://example.invalid/release.piext"), id, "", ""));
+        QVERIFY(!registry.downloadConfigured(QUrl("https://example.invalid/repository"), id, "", ""));
+        QSettings().setValue("addons/enabled/" + id, true);
+        QSettings().sync();
+        QVERIFY(registry.installConfigured(url, id, "1.0.0", digest.toUpper()));
+        QCOMPARE(row(registry, id).value("sha256").toString(), digest);
+        QVERIFY(!registry.isEnabled(id));
+        QVERIFY(!registry.installConfigured(url, id, "1.0.0", digest));
+        QVERIFY(registry.setEnabled(id, true));
+        QVERIFY(registry.isEnabled(id));
+    }
+    void restoreRemovedBuiltinUsesPackagedCopyWithoutNetwork() {
+        QTemporaryDir root;
+        package(root.filePath("builtins/files.piext"), manifest("files"));
+        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data"), false);
+        const auto digest = row(registry, "files")["sha256"].toString();
+        QVERIFY(!digest.isEmpty());
+        QVERIFY(registry.setEnabled("files", false));
+        QVERIFY2(registry.finalizeRemoval("files", true), qPrintable(registry.error()));
+        QVERIFY(row(registry, "files").isEmpty());
+        QVERIFY2(registry.installConfiguredBuiltin("files", "1.0.0", digest), qPrintable(registry.error()));
+        QCOMPARE(row(registry,"files").value("sha256").toString(),digest);
+        QVERIFY(!registry.isEnabled("files"));
     }
     void packagesAreDiscoveredWithoutQmlExecutionAndChoicesPersist() {
         QTemporaryDir root;

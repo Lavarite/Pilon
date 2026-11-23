@@ -2,11 +2,14 @@
 #include <QFileSystemWatcher>
 #include <QHash>
 #include <QObject>
+#include <QPointer>
 #include <QStringList>
 #include <QTimer>
 #include <QUrl>
 #include <QVariantList>
 #include <QtQml/qqmlregistration.h>
+
+class QNetworkReply;
 
 class AddonRegistry : public QObject {
     Q_OBJECT
@@ -14,6 +17,7 @@ class AddonRegistry : public QObject {
     Q_PROPERTY(QVariantList addons READ addons NOTIFY changed)
     Q_PROPERTY(QVariantList sidebarAddons READ sidebarAddons NOTIFY changed)
     Q_PROPERTY(QString error READ error NOTIFY changed)
+    Q_PROPERTY(QString restoringAddon READ restoringAddon NOTIFY restoreChanged)
     Q_PROPERTY(bool recovery READ recovery CONSTANT)
   public:
     explicit AddonRegistry(QObject *parent = nullptr);
@@ -40,6 +44,11 @@ class AddonRegistry : public QObject {
     Q_INVOKABLE bool finalizeRemoval(const QString &id, bool cleanupSucceeded = false,
                                      const QVariantMap &ownedPaths = {});
     Q_INVOKABLE bool install(const QUrl &package);
+    Q_INVOKABLE bool installConfigured(const QUrl &package, const QString &id, const QString &version, const QString &sha256);
+    Q_INVOKABLE bool installConfiguredBuiltin(const QString &id, const QString &version, const QString &sha256);
+    Q_INVOKABLE bool downloadConfigured(const QUrl &source, const QString &id, const QString &version, const QString &sha256);
+    Q_INVOKABLE void cancelConfiguredDownload();
+    QString restoringAddon() const { return m_restoring; }
     Q_INVOKABLE void refresh();
     Q_INVOKABLE QString dataDirectory(const QString &id);
     Q_INVOKABLE bool settingsWritable(const QString &id);
@@ -47,6 +56,8 @@ class AddonRegistry : public QObject {
     Q_INVOKABLE bool setSetting(const QString &id, const QString &key, const QVariant &value);
   signals:
     void changed();
+    void restoreChanged();
+    void configuredDownloadFinished(const QString &id, bool installed, const QString &error);
 
   private:
     AddonRegistry(const QString &builtins, const QString &installed, const QString &data,
@@ -62,6 +73,9 @@ class AddonRegistry : public QObject {
     bool loadState();
     bool saveState();
     bool seedPackages();
+    bool installPackage(const QUrl &package, const QString &id, const QString &version, const QString &sha256);
+    QString m_restoring;
+    QPointer<QNetworkReply> m_download;
     void rearmWatches();
     bool fail(const QString &message);
     QString m_builtins, m_installed, m_data, m_error;

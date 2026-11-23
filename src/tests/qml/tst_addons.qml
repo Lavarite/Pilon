@@ -84,6 +84,61 @@ TestCase {
         const host=control.Window.window
         host.update(); verify(waitForRendering(host.contentItem))
     }
+    Component {
+        id: restoreFixture
+        App.ConfiguredAddonRestore {
+            id: restore
+            width: 320
+            declarations: ({"org.example.clock": {source: "https://example.test/clock.piext", enabled: true,
+                version: "1.0.1", sha256: "e".repeat(64)}})
+            property var enabledIds: []
+            changeEnabled: (id, enabled) => { enabledIds = enabled ? [id] : []; return true }
+            fileWorkspace: null
+            registry: QtObject {
+                property var addons: []
+                property string restoringAddon: ""
+                property string error: ""
+                property var requests: []
+                signal configuredDownloadFinished(string id, bool installed, string error)
+                function downloadConfigured(url, id, version, digest) {
+                    requests = [url, id, version, digest]
+                    restoringAddon = id
+                    return true
+                }
+                function cancelConfiguredDownload() {
+                    const id = restoringAddon
+                    restoringAddon = ""
+                    configuredDownloadFinished(id, false, "")
+                }
+            }
+        }
+    }
+    function test_configuredRestoreNeedsConsentAndEnablesAfterVerifiedInstallation() {
+        const page = createTemporaryObject(restoreFixture, app.contentItem)
+        verify(page)
+        const id = "org.example.clock", action = findControl(page, "restoreConfigured-" + id)
+        const consent = findControl(page, "configuredPackageConsent")
+        verify(action && consent)
+        compare(page.registry.requests.length, 0)
+        action.clicked()
+        tryCompare(consent, "opened", true)
+        consent.reject()
+        compare(page.registry.requests.length, 0)
+        action.clicked()
+        tryCompare(consent, "opened", true)
+        consent.accept()
+        compare(page.registry.requests.join("|"), ["https://example.test/clock.piext", id, "1.0.1", "e".repeat(64)].join("|"))
+        compare(page.enabledIds.length, 0)
+        action.clicked()
+        compare(page.registry.restoringAddon, "")
+        compare(page.enabledIds.length, 0)
+        action.clicked()
+        tryCompare(consent, "opened", true)
+        consent.accept()
+        page.registry.restoringAddon = ""
+        page.registry.configuredDownloadFinished(id, true, "")
+        compare(page.enabledIds.join(","), id)
+    }
     function test_activationAndImportMessagesFollowTheWindowForeground() {
         verify(app.openSettings("addons"))
         const settings = findChild(app, "settingsMenu")
