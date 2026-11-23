@@ -1,5 +1,6 @@
 #include "../../src/calendarmanager.h"
 #include "../../../../src/app/keybindings.h"
+#include "../../../../src/ui/controls/scrollpresshandler.h"
 #include <QApplication>
 #include <QImage>
 #include <QPointingDevice>
@@ -43,6 +44,7 @@ class CalendarUiSetup : public QObject {
 int main(int argc, char **argv) {
     QApplication app(argc, argv);
     qmlRegisterSingletonType<KeyBindings>("Pilon", 1, 0, "KeyBindings", &KeyBindings::create);
+    qmlRegisterTypesAndRevisions<ScrollPressHandler>("Pilon", 1);
     CalendarUiSetup setup;
     return quick_test_main_with_setup(argc, argv, "calendar_ui", nullptr, &setup);
 }

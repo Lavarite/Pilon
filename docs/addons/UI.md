@@ -22,7 +22,7 @@ Use `import Pilon` and shared components from [src/ui](../../src/ui):
 | Labeled settings field | `PilonFormRow` |
 | Meaningful settings group | `PilonSectionHeader` |
 | Scrollable form/list | `PilonScrollView` |
-| Scrollbar on a custom list, grid or document view | `PilonScrollBar` |
+| Native list, grid or document scrolling | `PilonScrollMotion` on the viewport and `PilonScrollBar` for overflow |
 | Context/action menu | `PilonMenu`, `PilonMenuItem` |
 | Short confirmation | `PilonConfirmation` with a message and a specific action |
 | Operation failure | `PilonErrorPopup` owned by the initiating page or form |
@@ -76,9 +76,10 @@ section changes and include hidden loaded forms in preparation. Use the shared
 label/rule header for distinct tasks, without headings around a single control.
 Respect owner pauses and edit guards; recovery must stay reachable. Background
 entries follow [the quiescence acknowledgement contract](API.md#preparation-and-cleanup).
-Settings and forms use the native wheel and touch momentum in `PilonScrollView`.
-Pressing a control during a scroll stops the movement and activates the control
-on the same click or tap. Scrollbars appear when the content overflows.
+Forms use `PilonScrollView`. Native lists and grids keep their own viewport and
+use `PilonScrollMotion { view: viewport }` for the same wheel, touch and edge
+behavior. A fresh press stops momentum and reaches the control on the same click
+or tap. Scrollbars appear when content overflows.
 
 Keep everyday actions visible and put secondary actions in the existing menus
 or a focused task form. Icon-only actions need a tooltip and accessible name.
