@@ -272,6 +272,43 @@ TestCase {
         }
         verify(tabletInput.saveWindow(page, "/tmp/pilon-file-grid-spacing.png"))
     }
+    function test_workingAreaFrame_data() {
+        return [{tag: "desktop", width: 1000, zoom: 0},
+                {tag: "narrow-list", width: 360, zoom: 0},
+                {tag: "narrow-grid", width: 360, zoom: 2}]
+    }
+    function test_workingAreaFrame(data) {
+        test.width = data.width
+        page.fileZoomLevel = data.zoom
+        const view = findChild(page, "fileEntriesView")
+        const pane = view.parent
+        tryVerify(() => pane.width > 0 && pane.height > 50)
+        const y = Math.round(pane.height / 2)
+        verify(tabletInput.pixelAt(pane, 0, y).r > tabletInput.pixelAt(pane, 4, y).r + .05,
+            "The work area has a visible frame along its left edge")
+        const x = Math.round(pane.width / 2)
+        verify(tabletInput.pixelAt(pane, x, 0).r > tabletInput.pixelAt(pane, x, 4).r + .05,
+            "The frame continues along the top edge")
+    }
+    function test_listSelectionJoinsConsecutiveRows_data() {
+        return [{tag: "desktop", width: 1000}, {tag: "narrow", width: 360}]
+    }
+    function test_listSelectionJoinsConsecutiveRows(data) {
+        test.width = data.width
+        const view = findChild(page, "fileEntriesView")
+        tryCompare(view, "count", files.entries.length)
+        clickEntry(1)
+        clickEntry(3, Qt.ShiftModifier)
+        compare(page.selectedEntries.length, 3)
+        const row = view.cellHeight
+        function pixel(y) { return tabletInput.pixelAt(view, 2, y) }
+        const fill = pixel(row * 2 + 14)
+        compare(pixel(row * 2 - 1), fill, "No gap before the second selected row")
+        compare(pixel(row * 2 + 1), fill, "No gap after the join")
+        compare(pixel(row * 3 - 1), fill, "The fill continues into the third row")
+        verify(pixel(row + 1).r < fill.r, "The start of the selection retains its outer corner")
+        verify(pixel(row * 4 - 1).r < fill.r, "The end of the selection retains its outer corner")
+    }
     function test_loadingKeepsFileChromeAndCachedRowsInPlace() {
         const loading = findChild(page, "fileLocationLoadingIndicator")
         const view = findChild(page, "fileEntriesView")

@@ -1010,6 +1010,7 @@ Item {
         anchors.bottom: parent.bottom
         radius: 14
         color: filesPage.withOpacity(filesPage.secondaryColour, 0.42)
+        border.color: filesPage.withOpacity(filesPage.textColour, 0.18)
 
         Label {
             id: savedListingStatus
@@ -1165,9 +1166,19 @@ Item {
                 z: 1
 
                 Rectangle {
+                    readonly property bool joinAbove: !filesPage.largeIconView && fileEntryDelegate.selected
+                        && fileEntryDelegate.index > 0
+                        && filesPage.isEntrySelected(filesPage.displayedEntries[fileEntryDelegate.index - 1])
+                    readonly property bool joinBelow: !filesPage.largeIconView && fileEntryDelegate.selected
+                        && fileEntryDelegate.index + 1 < filesPage.displayedEntries.length
+                        && filesPage.isEntrySelected(filesPage.displayedEntries[fileEntryDelegate.index + 1])
                     anchors.fill: parent
                     anchors.margins: filesPage.largeIconView ? 4 : 0
                     radius: filesPage.largeIconView ? 10 : 8
+                    topLeftRadius: joinAbove ? 0 : radius
+                    topRightRadius: topLeftRadius
+                    bottomLeftRadius: joinBelow ? 0 : radius
+                    bottomRightRadius: bottomLeftRadius
                     color: fileEntryDelegate.dropTarget || fileEntryDelegate.selected ? filesPage.accentColour : filesPage.textColour
                     opacity: fileEntryDelegate.dropTarget ? .46 : fileEntryDelegate.selected ? .3 : fileEntryDelegate.hovered ? .1 : 0
                 }
