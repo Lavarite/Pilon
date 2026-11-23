@@ -254,6 +254,66 @@ TestCase {
         tryCompare(bar, "visible", false)
         compare(form.ScrollBar.horizontal.visible, false)
     }
+    Component {
+        id: scrollListProbe
+        ListView {
+            id: list
+            width: 180; height: 120
+            clip: true
+            model: 150
+            UI.PilonScrollMotion { view: list }
+            delegate: UI.PilonButton {
+                width: ListView.view.width
+                height: 40
+                text: "Open"
+                onClicked: ++test.actionCount
+            }
+        }
+    }
+    function test_firstPressAfterListScrollActivates_data() {
+        return [{tag: "mouse", touch: false}, {tag: "touch", touch: true}]
+    }
+    function test_firstPressAfterListScrollActivates(data) {
+        owner.show()
+        scroll.visible = false
+        const list = createTemporaryObject(scrollListProbe, surface)
+        verify(list)
+        list.flick(0, -1200)
+        tryVerify(() => list.contentY > 20)
+        verify(list.moving)
+        const x = list.width / 2, y = list.height / 2
+        if (data.touch)
+            touchEvent(list).press(0, list, x, y).commit().release(0, list, x, y).commit()
+        else
+            mouseClick(list, x, y)
+        compare(actionCount, 1)
+        compare(list.moving, false)
+    }
+    function test_wheelDistanceIndependentOfContentLength() {
+        owner.show()
+        scroll.visible = false
+        const form = createTemporaryObject(scrollRangeProbe, surface)
+        const list = createTemporaryObject(scrollListProbe, surface)
+        verify(form && list)
+        form.contentHeight = 600
+        function wheelStep(view) {
+            view.contentY = 0
+            mouseWheel(view, 90, 60, 0, -120)
+            tryVerify(() => view.contentY > 0)
+            tryCompare(view, "moving", false)
+            return view.contentY
+        }
+        list.visible = false
+        const formDistance = wheelStep(form.contentItem)
+        form.visible = false
+        list.visible = true
+        list.model = 15
+        const shortDistance = wheelStep(list)
+        list.model = 150
+        const longDistance = wheelStep(list)
+        fuzzyCompare(formDistance, shortDistance, 2)
+        fuzzyCompare(shortDistance, longDistance, 2)
+    }
     function test_expandedNavigationWrapsLabelsWithIcons() {
         owner.width = 420; owner.height = 480; owner.uiScale = 1; owner.typeSize = 28; owner.lightTheme = false
         scroll.visible = false

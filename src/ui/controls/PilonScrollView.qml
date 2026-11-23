@@ -20,21 +20,8 @@ Basic.ScrollView {
         active: control.Basic.ScrollBar.vertical.active
         policy: Basic.ScrollBar.AlwaysOff
     }
-    Binding {
-        target: control.contentItem
-        property: "boundsBehavior"
-        value: Flickable.StopAtBounds
-        when: control.contentItem instanceof Flickable
-    }
-    Item {
-        parent: control
-        anchors.fill: parent
-        z: 1
-        // A press stops momentum before the Flickable takes that press from its controls.
-        PointHandler {
-            onActiveChanged: if (active && control.contentItem instanceof Flickable
-                                 && control.contentItem.moving) control.contentItem.cancelFlick()
-        }
+    PilonScrollMotion {
+        view: control.contentItem as Flickable
     }
     function revealFocus() {
         const view = contentItem, owner = control.Window.window

@@ -216,6 +216,7 @@ set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/ui/controls/PilonErrorP
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/ui/controls/PilonLoadingLayout.qml" PROPERTIES QT_RESOURCE_ALIAS "ui/PilonLoadingLayout.qml")
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/ui/controls/PilonPopup.qml" PROPERTIES QT_RESOURCE_ALIAS "ui/PilonPopup.qml")
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/ui/controls/PilonScrollBar.qml" PROPERTIES QT_RESOURCE_ALIAS "ui/PilonScrollBar.qml")
+set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/ui/controls/PilonScrollMotion.qml" PROPERTIES QT_RESOURCE_ALIAS "ui/PilonScrollMotion.qml")
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/ui/controls/PilonScrollView.qml" PROPERTIES QT_RESOURCE_ALIAS "ui/PilonScrollView.qml")
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/ui/controls/PilonSectionHeader.qml" PROPERTIES QT_RESOURCE_ALIAS "ui/PilonSectionHeader.qml")
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/ui/controls/PilonSlider.qml" PROPERTIES QT_RESOURCE_ALIAS "ui/PilonSlider.qml")

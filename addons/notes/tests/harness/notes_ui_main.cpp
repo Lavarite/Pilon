@@ -1,4 +1,5 @@
 #include "../../../../src/app/keybindings.h"
+#include "../../../../src/ui/controls/scrollpresshandler.h"
 #include "../../../../src/core/addons/addonregistry.h"
 #include "../../../../src/core/widgets/widgetstore.h"
 #include "../../../../src/core/workspace/pilonworkspace.h"
@@ -550,6 +551,7 @@ public slots:
         qputenv("PILON_MODELS_DIR", m_assets.filePath("models").toUtf8());
         if (!qEnvironmentVariableIsSet("PILON_TEST_NO_TOUCH")) QTest::createTouchDevice();
         qmlRegisterTypesAndRevisions<KeyBindings>("Pilon", 1);
+        qmlRegisterTypesAndRevisions<ScrollPressHandler>("Pilon", 1);
         qmlRegisterType<AddonRegistry>("Pilon", 1, 0, "AddonRegistry");
         qmlRegisterType<WidgetStore>("Pilon", 1, 0, "WidgetStore");
         for (const auto &folder : {QString(PILON_QML_SOURCE_DIR), QString(PILON_QML_SOURCE_DIR) + "/ui"}) {

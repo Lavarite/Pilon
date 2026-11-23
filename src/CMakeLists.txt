@@ -227,6 +227,7 @@ set(PILON_UI_FILES
     ui/controls/PilonLoadingLayout.qml
     ui/controls/PilonPopup.qml
     ui/controls/PilonScrollBar.qml
+    ui/controls/PilonScrollMotion.qml
     ui/controls/PilonScrollView.qml
     ui/controls/PilonSlider.qml
     ui/controls/PilonSpinBox.qml
@@ -243,12 +244,15 @@ set(PILON_UI_FILES
     ui/controls/PilonFormRow.qml
 )
 
+set(PILON_SCROLL_PRESS_SOURCES ui/controls/scrollpresshandler.cpp ui/controls/scrollpresshandler.h)
+
 qt_add_qml_module(pilon
     URI Pilon
     VERSION 1.0
     SOURCES
         app/keybindings.cpp
         app/keybindings.h
+        ${PILON_SCROLL_PRESS_SOURCES}
         ../addons/ssh/src/terminalitem.cpp
         ../addons/ssh/src/terminalitem.h
     QML_FILES
@@ -550,7 +554,7 @@ if(ANDROID)
     add_dependencies(pilon pilon_android_runtimes)
 endif()
 # Foreign-type wrappers are generated here and included by qmltyperegistrar.
-target_include_directories(pilon PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+target_include_directories(pilon PRIVATE ${CMAKE_CURRENT_BINARY_DIR} ui/controls)
 foreach(feature IN LISTS PILON_FEATURE_TARGETS)
     qt_generate_foreign_qml_types(${feature} pilon)
 endforeach()
@@ -718,7 +722,8 @@ if(PILON_BUILD_TESTS)
         add_test(NAME calendar_background_notifications COMMAND ${PILON_DBUS_RUN_SESSION} -- $<TARGET_FILE:pilon_calendar_tests> remindersWithoutWindow)
         set_tests_properties(calendar_background_notifications PROPERTIES ENVIRONMENT "PILON_TEST_PRIVATE_BUS=1")
     endif()
-    qt_add_executable(pilon_calendar_ui_tests ../addons/calendar/tests/harness/calendar_ui_main.cpp app/keybindings.cpp app/keybindings.h)
+    qt_add_executable(pilon_calendar_ui_tests ../addons/calendar/tests/harness/calendar_ui_main.cpp
+        app/keybindings.cpp app/keybindings.h ${PILON_SCROLL_PRESS_SOURCES})
     target_link_libraries(pilon_calendar_ui_tests PRIVATE pilon_calendar Qt6::QuickTest Qt6::Quick Qt6::Widgets)
     # Exercise native dialog sizing with the same QML compilation as the app.
     qt_add_qml_module(pilon_calendar_ui_tests
@@ -767,7 +772,8 @@ if(PILON_BUILD_TESTS)
     qt_add_resources(pilon_notes_tests notes_ocr_test PREFIX "/qt/qml/Pilon" FILES ../addons/notes/workers/handwriting_worker.py)
     add_test(NAME notes COMMAND pilon_notes_tests -platform offscreen)
     qt_add_executable(pilon_notes_ui_tests ../addons/notes/tests/harness/notes_ui_main.cpp
-        app/tabletinputguard.cpp app/tabletinputguard.h app/keybindings.cpp app/keybindings.h ../addons/ssh/src/terminalitem.cpp ../addons/ssh/src/terminalitem.h)
+        app/tabletinputguard.cpp app/tabletinputguard.h app/keybindings.cpp app/keybindings.h ${PILON_SCROLL_PRESS_SOURCES}
+        ../addons/ssh/src/terminalitem.cpp ../addons/ssh/src/terminalitem.h)
     target_link_libraries(pilon_notes_ui_tests PRIVATE ${PILON_FEATURE_TARGETS} pilon_vterm
         Qt6::QuickTest Qt6::GuiPrivate Qt6::Quick Qt6::Widgets)
     add_dependencies(pilon_notes_ui_tests pilon_addon_packages)
