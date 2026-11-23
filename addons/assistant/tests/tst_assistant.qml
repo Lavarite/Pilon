@@ -124,6 +124,7 @@ TestCase {
     }
     SignalSpy { id: proposalRequested; target: page; signalName: "calendarProposalRequested" }
     SignalSpy { id: conversationMovement; signalName: "movementStarted" }
+    SignalSpy { id: readingUpdates; target: backend; signalName: "readingPositionChanged" }
     Rectangle { anchors.fill: parent; color: "#221e1a" }
     App.AssistantPage {
         id: page
@@ -1198,6 +1199,33 @@ TestCase {
         backend.busy = false
         backend.workingChatId = ""
         verify(!findChild(page, "chatWorking_fixture").running)
+    }
+
+    function test_savesReadingPositionAfterScrollingStops() {
+        const messages = []
+        for (let i = 0; i < 90; ++i)
+            messages.push({role: i % 2 ? "user" : "assistant", messageId: "scroll-" + i,
+                text: ("Message " + i + "\n\n").repeat(2 + i % 5)})
+        backend.messages = messages
+        const view = findChild(page, "assistantConversation")
+        tryCompare(view, "atYEnd", true)
+        view.followTail = false
+        view.positionViewAtIndex(65, ListView.Beginning)
+        tryVerify(() => backend.readingPosition.messageId === "scroll-65")
+        readingUpdates.clear()
+
+        view.flick(0, -1300)
+        tryCompare(view, "moving", true)
+        const start = view.contentY
+        tryVerify(() => view.contentY > start + 80)
+        verify(view.moving)
+        compare(readingUpdates.count, 0, "Scrolling should not save every frame")
+        tryCompare(view, "moving", false)
+        tryVerify(() => readingUpdates.count > 0)
+        compare(readingUpdates.count, 1)
+        const index = view.indexAt(1, view.contentY + 1) >= 0
+            ? view.indexAt(1, view.contentY + 1) : view.indexAt(1, view.contentY + view.spacing + 1)
+        compare(backend.readingPosition.messageId, "scroll-" + index)
     }
 
     function test_scrollWhileStreaming() {
