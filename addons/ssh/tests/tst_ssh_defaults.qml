@@ -413,7 +413,8 @@ TestCase {
     }
     function test_settingsUserAtHostRows_data() {
         return [{tag:"desktop",width:1024,height:768,scale:1,font:16},
-            {tag:"narrow",width:320,height:640,scale:1,font:16},
+            {tag:"320",width:320,height:640,scale:1,font:16},
+            {tag:"360",width:360,height:640,scale:1,font:16},
             {tag:"scaled",width:480,height:640,scale:1.4,font:28}]
     }
     function test_settingsUserAtHostRows(data) {
@@ -423,17 +424,26 @@ TestCase {
             test.width=data.width;test.height=data.height;contentScale=data.scale
             tabletInput.configureWindow(test.Window.window,data.width,data.height)
             page.visible=false
+            const longName="A long saved device name that needs to stay on a single line"
+            tailscale.devices=[Object.assign({},tailscale.devices[0],{name:longName}),tailscale.devices[1]]
             const settings=createTemporaryObject(settingsFactory,host)
             verify(settings)
             const username=findChild(settings,"sshDeviceUsername-google")
             const device=findChild(settings,"sshDeviceHost-google")
             const at=findChild(settings,"sshDeviceAt-google")
             const included=findChild(settings,"sshDeviceIncluded-google")
-            verify(username && device && at && included,"Each override includes a checkbox, username and address")
-            compare(at.text,"@");compare(device.text,"test-server 192.0.2.1")
-            const checkboxEnd=included.mapToItem(host,included.width,0)
-            const fieldStart=username.mapToItem(host,0,0)
-            verify(checkboxEnd.x <= fieldStart.x && checkboxEnd.y >= fieldStart.y - 5)
+            verify(username && device && at && included,"Each override includes a checkbox, username and device")
+            compare(at.text,"@");compare(device.text,longName)
+            const controls=[included,username,at,device]
+            const centre=username.mapToItem(host,0,username.height/2).y
+            for (let i=0;i<controls.length;++i) {
+                const control=controls[i]
+                const left=control.mapToItem(host,0,control.height/2)
+                fuzzyCompare(left.y,centre,1)
+                if (i>0) verify(left.x>=controls[i-1].mapToItem(host,controls[i-1].width,0).x)
+            }
+            verify(username.width<=110)
+            compare(device.elide,Text.ElideRight)
             verify(device.readOnly===undefined,"The host is a label, not an editable field")
             username.forceActiveFocus();username.text="tester";keyClick(Qt.Key_Tab)
             compare(workspace.deviceUsernames.google,"tester")
@@ -456,8 +466,8 @@ TestCase {
                     const start=control.mapToItem(host,0,0),end=control.mapToItem(host,control.width,control.height)
                     verify(start.x>=0 && end.x<=host.width+1,"The complete connection row fits its form")
                 }
-                verify(label.height>=label.contentHeight)
-                verify(!label.truncated, "The device name and address remain readable")
+                compare(label.lineCount,1)
+                if (data.width < 500 && id === "google") verify(label.truncated,"The name is elided")
             }
             verify(tabletInput.saveWindow(test.Window.window.contentItem,"/tmp/pilon-ssh-user-host-"+data.tag+".png"))
         } finally { tabletInput.setApplicationFont(originalFont) }
@@ -501,12 +511,13 @@ TestCase {
         compare(combo.currentIndex,0)
         compare(combo.editText,tailscale.devices[0].name)
     }
-    function test_longTypedFieldsFitOrReflow_data() {
+    function test_longTypedFieldsStayOnOneLine_data() {
         return [{tag:"wide",width:1400,height:800,scale:1,font:16},
-            {tag:"narrow",width:320,height:640,scale:1,font:16},
+            {tag:"320",width:320,height:640,scale:1,font:16},
+            {tag:"360",width:360,height:640,scale:1,font:16},
             {tag:"scaled",width:640,height:640,scale:1.4,font:28}]
     }
-    function test_longTypedFieldsFitOrReflow(data) {
+    function test_longTypedFieldsStayOnOneLine(data) {
         test.width=data.width;test.height=data.height;contentScale=data.scale
         tabletInput.configureWindow(test.Window.window,data.width,data.height)
         tryCompare(test.Window.window.contentItem,"width",data.width)
@@ -517,18 +528,28 @@ TestCase {
         waitForPolish(page)
         test.Window.window.update();verify(waitForRendering(test.Window.window.contentItem))
         const bar=findChild(page,"sshConnectionBar")
+        const at=findChild(page,"sshConnectionAt")
+        verify(at && at.visible)
+        compare(at.text,"@")
         verify(bar.width<=page.width-32+1)
+        verify(bar.width<=420)
+        verify(user.width<=104)
         verify(user.contentHeight<=user.height-user.topPadding-user.bottomPadding+1,"Username text height fits")
         verify(input.contentHeight<=input.height-input.topPadding-input.bottomPadding+1,"Host text height fits")
-        for (const control of [user,combo,findChild(page,"sshConnectButton")]) {
+        const controls=[user,at,combo,findChild(page,"sshConnectButton")]
+        for (const control of controls) {
             const point=control.mapToItem(page,0,0)
             verify(point.x>=15 && point.x+control.width<=page.width-15)
             verify(point.y>=0 && point.y+control.height<=page.height)
+            fuzzyCompare(point.y+control.height/2,user.mapToItem(page,0,user.height/2).y,1)
         }
-        if (!bar.compact) {
-            verify(user.contentWidth<=user.width-user.leftPadding-user.rightPadding+1)
-            verify(input.contentWidth<=input.width+1)
-        } else verify(combo.y>=user.y+user.height+8)
+        if(data.width===320) {
+            for(const field of [user,input]) {
+                const summary=findChild(field,"elidedFieldText")
+                verify(summary && summary.visible && summary.truncated)
+                compare(summary.text, field.text)
+            }
+        }
         for (const field of [user,input]) {
             field.forceActiveFocus();field.cursorPosition=field.text.length
             waitForPolish(field)

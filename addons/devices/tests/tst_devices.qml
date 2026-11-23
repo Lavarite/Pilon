@@ -183,6 +183,15 @@ TestCase {
         compare(manager.devices.length, 1); compare(page.prepareDisable(), true)
         capture(page,"saved-host")
         const included = control("sshDeviceIncluded-external:fixture")
+        owner.width = 320
+        tryCompare(page, "width", 320)
+        const host = control("sshDeviceHost-external:fixture")
+        const actions = control("sshDeviceActions-external:fixture")
+        compare(host.text, "Workstation")
+        compare(host.lineCount, 1)
+        fuzzyCompare(host.mapToItem(page, 0, host.height / 2).y,
+            actions.mapToItem(page, 0, actions.height / 2).y, 1)
+        verify(actions.mapToItem(page, actions.width, 0).x <= page.width + 1)
         verify(included.checked); mouseClick(included); verify(!manager.devices[0].included)
         page.removeSavedDevice("external:fixture", 0)
         compare(manager.devices.length, 0)
@@ -310,7 +319,7 @@ TestCase {
         manager.devices=[{id:"api:fixture",name:"Peer <b>literal</b>",ip:"100.64.0.2",included:false,saved:false,onlineKnown:false}]
         showSshSettings()
         const peer=control("sshDeviceHost-api:fixture")
-        compare(peer.text, "Peer <b>literal</b> 100.64.0.2")
+        compare(peer.text, "Peer <b>literal</b>")
         compare(peer.textFormat, Text.PlainText)
         verify(!control("sshDeviceActions-api:fixture").visible)
         click("sshDeviceIncluded-api:fixture")

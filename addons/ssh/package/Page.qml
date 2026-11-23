@@ -106,42 +106,38 @@ Item {
         property color mutedForegroundColour: addon.selectedMutedTextColour
         property color warningColour: addon.selectedWarningColour
 
-        Text { id: usernameMeasure; visible: false; text: sshUsername.text || sshUsername.placeholderText; font: sshUsername.font }
-        Text { id: deviceMeasure; visible: false; text: sshDevice.editText || sshDevice.currentText || sshDeviceInput.placeholderText; font: sshDeviceInput.font }
-        readonly property real usernameWidth: Math.max(96, Math.ceil(usernameMeasure.implicitWidth) + 28)
-        readonly property real requestedWidth: Math.max(520, usernameWidth + 28 + Math.ceil(deviceMeasure.implicitWidth) + 58 + 48 + 12 + 8)
-        width: Math.min(requestedWidth, sshPage.width - 32)
-        readonly property bool compact: width < requestedWidth
-        readonly property real rowHeight: Math.max(44, sshUsername.implicitHeight,
-            sshDeviceInput.contentHeight + sshDevice.topPadding + sshDevice.bottomPadding)
-        height: rowHeight * (compact ? 2 : 1) + (compact ? 8 : 0) + 12
-        x: Math.max(16, (sshPage.width - 0 - width) / 2)
+        width: Math.min(420, Math.max(0, sshPage.width - 32))
+        height: Math.max(44, sshUsername.implicitHeight, sshDevice.implicitHeight) + 12
+        anchors.horizontalCenter: parent.horizontalCenter
         y: sshPage.consoleVisible ? 16 : Math.round((parent.height - height) / 2)
         radius: 16
         color: addon.withOpacity(baseColour, 0.68)
         border.color: addon.withOpacity(foregroundColour, 0.22)
 
-        Item {
+        RowLayout {
             anchors.fill: parent
             anchors.margins: 6
+            spacing: 0
 
             PilonTextField {
                 id: sshUsername
                 objectName: "sshUsernameInput"
                 property bool userEdited: false
 
-                width: sshConnectionBar.compact ? parent.width : sshConnectionBar.usernameWidth
-                height: sshConnectionBar.rowHeight
-                leftPadding: 14
-                rightPadding: 14
+                Layout.preferredWidth: Math.min(104, Math.round(sshConnectionBar.width * .28))
+                Layout.fillHeight: true
+                leftPadding: 8
+                rightPadding: 8
                 placeholderText: qsTr("Username")
+                Accessible.name: qsTr("SSH username")
                 text: addon.fileWorkspace.username
                 onTextEdited: userEdited = true
-                placeholderTextColor: sshConnectionBar.mutedForegroundColour
-                color: sshConnectionBar.foregroundColour
+                palette.placeholderText: sshConnectionBar.mutedForegroundColour
+                palette.text: sshConnectionBar.foregroundColour
                 selectionColor: addon.selectedAccentColour
                 selectedTextColor: addon.selectedAccentTextColour
                 selectByMouse: true
+                elideWhenUnfocused: true
 
                 background: Rectangle {
                     radius: 10
@@ -153,23 +149,23 @@ Item {
 
             Label {
                 id: sshAt
-                visible: !sshConnectionBar.compact
-                x: sshUsername.width
+                objectName: "sshConnectionAt"
 
-                width: 28
-                height: sshConnectionBar.rowHeight
+                Layout.preferredWidth: Math.max(20, implicitWidth + 6)
+                Layout.fillHeight: true
                 font: sshUsername.font
                 text: "@"
                 horizontalAlignment: Text.AlignHCenter
                 verticalAlignment: Text.AlignVCenter
-                color: sshConnectionBar.mutedForegroundColour
+                color: sshConnectionBar.foregroundColour
             }
 
             PilonComboBox {
                 id: sshDevice
                 objectName: "sshDeviceSelector"
-                x: sshConnectionBar.compact ? 0 : sshUsername.width + sshAt.width
-                y: sshConnectionBar.compact ? sshConnectionBar.rowHeight + 8 : 0
+                Layout.fillWidth: true
+                Layout.minimumWidth: 0
+                Layout.fillHeight: true
 
                 property bool userEditedHost: false
                 property string customHost: ""
@@ -214,10 +210,8 @@ Item {
                     sshPage.applyUsernameDefault(false)
                 }
 
-                width: Math.max(0, parent.width - x - connectButton.width)
-                height: sshConnectionBar.rowHeight
-                leftPadding: 8
-                rightPadding: 50
+                leftPadding: 4
+                rightPadding: 34
                 ToolTip.visible: hovered
                 ToolTip.text: editText || currentText
                 model: addon.discoveredDevices
@@ -255,13 +249,15 @@ Item {
                     rightPadding: 0
                     topPadding: 0
                     bottomPadding: 0
-                    placeholderText: qsTr("Device or IP address")
-                    placeholderTextColor: sshConnectionBar.mutedForegroundColour
+                    placeholderText: qsTr("Device or host")
+                    Accessible.name: qsTr("SSH host")
+                    palette.placeholderText: sshConnectionBar.mutedForegroundColour
                     selectByMouse: true
-                    color: sshConnectionBar.foregroundColour
+                    palette.text: sshConnectionBar.foregroundColour
                     selectionColor: addon.selectedAccentColour
                     selectedTextColor: addon.selectedAccentTextColour
                     verticalAlignment: Text.AlignVCenter
+                    elideWhenUnfocused: true
                     onTextEdited: {
                         sshDevice.customHost = text
                         sshDevice.currentIndex = -1
@@ -284,9 +280,8 @@ Item {
                     width: ListView.view.width
                     implicitHeight: Math.max(42, implicitContentHeight + topPadding + bottomPadding)
                     height: implicitHeight
-                    text: modelData.ip.length > 0
-                          ? modelData.name + ": " + modelData.ip
-                          : modelData.name
+                    text: modelData.name || modelData.ip
+                    Accessible.name: text
                     highlighted: sshDevice.highlightedIndex === index
                     enabled: sshPage.canConnectToDevice(modelData)
                     leftPadding: 12
@@ -306,7 +301,8 @@ Item {
                                ? sshConnectionBar.foregroundColour
                                : sshConnectionBar.mutedForegroundColour
                         verticalAlignment: Text.AlignVCenter
-                        wrapMode: Text.Wrap
+                        textFormat: Text.PlainText
+                        elide: Text.ElideRight
                     }
 
                     background: Rectangle {
@@ -321,7 +317,7 @@ Item {
 
                 indicator: Item {
                     x: sshDevice.width - width
-                    width: 46
+                    width: 34
                     height: sshDevice.height
 
                     ControlsImpl.ColorImage {
@@ -410,13 +406,11 @@ Item {
             PilonPanelButton {
                 id: connectButton
                 objectName: "sshConnectButton"
-                x: parent.width - width
-                y: sshConnectionBar.compact ? sshConnectionBar.rowHeight + 8 : 0
+                Layout.preferredWidth: 48
+                Layout.fillHeight: true
 
                 fillColour: addon.sshManager.running ? addon.selectedWarningColour : addon.selectedAccentColour
                 foregroundColour: addon.contrastingText(fillColour, 0.96)
-                width: 48
-                height: sshConnectionBar.rowHeight
                 text: addon.sshManager.running ? qsTr("Log out") : qsTr("Connect")
                 display: AbstractButton.IconOnly
                 icon.source: addon.sshManager.running
