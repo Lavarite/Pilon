@@ -1615,7 +1615,8 @@ TestCase {
             verify(tile.width >= 280)
             verify(tile.height >= 150)
             compare(tile.bookmarksOnRight, i % 2 === 1)
-            compare(places.x, i % 2 === 1 ? tile.width - places.width : 0)
+            compare(places.visible, !tile.compactPlaces)
+            compare(places.x, !tile.compactPlaces && i % 2 === 1 ? tile.width - places.width : 0)
         }
         const columns = findWorkspaceChild("fileTileColumns")
         const left = findWorkspaceChild("fileLeftColumn")
