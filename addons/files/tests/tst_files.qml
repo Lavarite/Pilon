@@ -255,6 +255,9 @@ TestCase {
         appearance.reload()
         compare(appearance.iconForEntry(remote), "icons/command-line.svg")
     }
+    function test_pilonConfigurationUsesAGear() {
+        compare(page.iconForFile("theme.piconf", false), "icons/cog-6-tooth.svg")
+    }
     function test_fileAppearanceContextAndIconSearch() {
         const entry = {name: "Fixture", path: "/tmp/Fixture", deviceId: "local", directory: true}
         page.selectedEntries = [entry]

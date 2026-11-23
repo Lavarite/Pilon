@@ -58,16 +58,22 @@ class DesktopInstallerTests(unittest.TestCase):
         ns = {"mime": "http://www.freedesktop.org/standards/shared-mime-info"}
         entries = definitions.findall("mime:mime-type", ns)
         self.assertEqual({item.attrib["type"] for item in entries}, {
-            "application/x-pilon-note", "application/x-pilon-calendar", "application/x-pilon-extension"})
-        self.assertEqual({glob.attrib["pattern"] for item in entries for glob in item.findall("mime:glob", ns)}, {"*.pin", "*.pical", "*.piext"})
+            "application/x-pilon-note", "application/x-pilon-calendar", "application/x-pilon-extension", "application/x-pilon-config"})
+        self.assertEqual({glob.attrib["pattern"] for item in entries for glob in item.findall("mime:glob", ns)}, {"*.pin", "*.pical", "*.piext", "*.piconf"})
         icons = []
         for entry in entries:
-            self.assertIn(entry.attrib["type"] + ";", text)
+            if entry.attrib["type"] == "application/x-pilon-config":
+                self.assertNotIn(entry.attrib["type"] + ";", text)
+                self.assertEqual(entry.find("mime:sub-class-of", ns).attrib["type"], "text/plain")
+            else:
+                self.assertIn(entry.attrib["type"] + ";", text)
             name = entry.find("mime:icon", ns).attrib["name"]
             icon = self.data / "icons/hicolor/scalable/mimetypes" / (name + ".svg")
             self.assertEqual(ET.parse(icon).getroot().attrib["viewBox"], "0 0 256 256")
             icons.append(icon.read_bytes())
-        self.assertEqual(len(set(icons)), 3)
+        self.assertEqual(len(set(icons)), 4)
+        config_icon = self.data / "icons/hicolor/scalable/mimetypes/application-x-pilon-config.svg"
+        self.assertEqual(config_icon.read_bytes(), (ROOT / "src/assets/icons/cog-6-tooth.svg").read_bytes())
 
     def test_runs_available_validators_and_database_updates(self):
         with mock.patch.object(installer.shutil, "which", side_effect=lambda name: "/mock/" + name), mock.patch.object(installer.subprocess, "run") as run:
