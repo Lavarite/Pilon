@@ -226,19 +226,23 @@ TestCase {
         }
         appWindow = null
     }
-    function findControl(root, name) {
-        const owned = findChild(root, name)
-        if (owned) return owned
-        // Repeater delegates can have a visual parent outside their QObject owner.
-        function visualChild(item) {
-            if (item.objectName === name) return item
-            for (const child of item.children || []) {
-                const result = visualChild(child)
-                if (result) return result
-            }
-            return null
+    function findVisualControl(item, name) {
+        if (item.objectName === name) return item
+        for (const child of item.children || []) {
+            const result = findVisualControl(child, name)
+            if (result) return result
         }
-        return visualChild(root.contentItem || root)
+        return null
+    }
+    function findControl(root, name) {
+        // Repeater delegates can have a visual parent outside their QObject owner.
+        return findChild(root, name) || findVisualControl(root.contentItem || root, name)
+    }
+    function settingsCloseButton(settings) {
+        // Confirmation windows own their own close buttons under Settings.
+        const button = findVisualControl(settings.contentItem, "windowCloseButton")
+        verify(button && button.Window.window === settings, "The Close button belongs to the Settings window")
+        return button
     }
     function revealControl(control) {
         verify(control!==null)
@@ -554,7 +558,7 @@ TestCase {
             verify(navigation.visible)
             fuzzyCompare(navigation.width, settings.availableWidth, 1)
             verify(!settings.pageArea.visible)
-            const first = findControl(settings, "applicationTab"), close = findControl(settings, "windowCloseButton")
+            const first = findControl(settings, "applicationTab"), close = settingsCloseButton(settings)
             verify(first.mapToGlobal(0, 0).y >= close.mapToGlobal(0, close.height).y,
                    "The first section row clears the close button")
             verify(tabletInput.saveWindow(settings.contentItem, "/tmp/pilon-settings-nov9-" + data.tag + "-sections.png"))
@@ -713,7 +717,7 @@ TestCase {
             settings.open(); settings.width = data.width; settings.height = data.height
             wait(100)
             chooseSettingsCategory("appearanceTab", "appearance")
-            const back = findControl(settings, "settingsBackButton"), close = findControl(settings, "windowCloseButton")
+            const back = findControl(settings, "settingsBackButton"), close = settingsCloseButton(settings)
             const heading = findControl(settings, "settingsSectionHeading")
             verify(back.visible && heading.visible)
             const first = back.mapToGlobal(0, 0), end = heading.mapToGlobal(heading.width, 0), cross = close.mapToGlobal(0, 0)
@@ -810,7 +814,7 @@ TestCase {
             verify(findControl(appWindow,"noteTranscriptionModel") === null)
             verify(findControl(appWindow,"noteRecordingTool") === null)
             verify(tabletInput.saveWindow(settings.contentItem,"/tmp/pilon-settings-refreshed-"+data.tag+".png"))
-            const close = findControl(settings,"windowCloseButton")
+            const close = settingsCloseButton(settings)
             const point = close.mapToItem(settings.contentItem,close.width,0)
             verify(Math.abs(settings.width-point.x-16*settings.uiScale)<=1)
             verify(Math.abs(point.y-16*settings.uiScale)<=1)
@@ -889,7 +893,7 @@ TestCase {
     function test_settingsCloseDoesNotHideMainWindow() {
         const settings = findControl(appWindow, "settingsMenu")
         settings.open(); tryCompare(settings, "visible", true)
-        tap(findControl(settings, "windowCloseButton"))
+        tap(settingsCloseButton(settings))
         tryCompare(settings, "visible", false)
         verify(appWindow.visible)
     }
