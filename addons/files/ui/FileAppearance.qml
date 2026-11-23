@@ -183,6 +183,7 @@ Item {
         id: editor
         objectName: "fileAppearanceEditor"
         contentHasCloseButton: true
+        usePopupSurface: true
         property var owner: null
         property bool onlyPath: false
         property int mode: 0
