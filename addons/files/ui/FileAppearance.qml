@@ -370,7 +370,7 @@ Item {
                                 color: editor.palette.windowText
                                 text: editor.importSource.toString() ? editor.importSource.toString().split("/").pop()
                                      : editor.choice.startsWith("custom-") ? qsTr("Custom icon") : editor.choice.startsWith("phosphor/")
-                                        ? qsTr("%1 (%2)").arg(editor.choice.split("/")[2]).arg(editor.choice.split("/")[1]) : editor.choice || qsTr("Default icon")
+                                        ? qsTr("%1 (%2)").arg(editor.choice.split("/")[2]).arg(editor.choice.split("/")[1]) : editor.choice === "pilon" ? qsTr("Pilon") : editor.choice || qsTr("Default icon")
                             }
                         }
                         Flow {

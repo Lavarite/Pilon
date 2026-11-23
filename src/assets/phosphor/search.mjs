@@ -3,11 +3,12 @@ import Fuse from "./fuse.mjs"
 
 // Match the ranking and query syntax of phosphoricons.com.
 let index
-const names = icons.map(icon => icon.name)
+const catalogue = [...icons, {name: "pilon", tags: ["application", "logo"], categories: ["brands"]}]
+const names = catalogue.map(icon => icon.name)
 WorkerScript.onMessage = function(query) {
     let results = names
     if (query) {
-        if (!index) index = new Fuse(icons, {
+        if (!index) index = new Fuse(catalogue, {
             keys: [{name: "name", weight: 4}, "tags", "categories", "codepoint"],
             threshold: 0.2,
             useExtendedSearch: true
