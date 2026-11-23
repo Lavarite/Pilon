@@ -228,6 +228,9 @@ Control {
         if (changed && g.edge) selectedDate = g.targetDate
         if (!changed && calendar.error) { operationIssue.message = calendar.error }
     }
+    function pastTapThreshold(from, to) {
+        return Math.hypot(to.x - from.x, to.y - from.y) >= Qt.styleHints.startDragDistance
+    }
     Keys.onEscapePressed: gesture = null
     Keys.onLeftPressed: event => handlePeriodArrow(event, -1)
     Keys.onRightPressed: event => handlePeriodArrow(event, 1)
@@ -609,24 +612,32 @@ Control {
                                             anchors.fill: parent
                                             property bool touchInput: true
                                             property bool held: false
+                                            property bool moved: false
                                             property point pressPoint
+                                            property point touchStart
                                             preventStealing: !touchInput || held
                                             cursorShape: block.modelData.writable ? Qt.OpenHandCursor : Qt.ArrowCursor
                                             onPressed: mouse => {
-                                                touchInput = mouse.source !== Qt.MouseEventNotSynthesized; held = false
+                                                touchInput = mouse.source !== Qt.MouseEventNotSynthesized; held = false; moved = false
+                                                touchStart = mapToItem(page, mouse.x, mouse.y)
                                                 pressPoint = mapToItem(timeGrid, mouse.x, mouse.y)
                                                 if (!touchInput) page.beginGesture(block.modelData, dayColumn.date, dayColumn.index, pressPoint, false, block.x, block.width)
                                             }
                                             onPressAndHold: {
-                                                if (touchInput && block.modelData.writable) {
+                                                if (touchInput && !moved && block.modelData.writable) {
                                                     held = true
                                                     page.beginGesture(block.modelData, dayColumn.date, dayColumn.index, pressPoint, false, block.x, block.width)
                                                 }
                                             }
-                                            onPositionChanged: mouse => { if (pressed && (!touchInput || held)) page.updateGesture(mapToItem(timeGrid, mouse.x, mouse.y)) }
+                                            onPositionChanged: mouse => {
+                                                if (!pressed) return
+                                                if (touchInput && !held) moved = moved || page.pastTapThreshold(touchStart, mapToItem(page, mouse.x, mouse.y))
+                                                else page.updateGesture(mapToItem(timeGrid, mouse.x, mouse.y))
+                                            }
                                             onReleased: mouse => {
-                                                if (touchInput && !held) page.edit(block.modelData)
-                                                else { page.updateGesture(mapToItem(timeGrid, mouse.x, mouse.y)); page.finishGesture() }
+                                                if (touchInput && !held) {
+                                                    if (!moved && !page.pastTapThreshold(touchStart, mapToItem(page, mouse.x, mouse.y))) page.edit(block.modelData)
+                                                } else { page.updateGesture(mapToItem(timeGrid, mouse.x, mouse.y)); page.finishGesture() }
                                                 held = false; touchInput = true
                                             }
                                             onCanceled: { held = false; touchInput = true; page.gesture = null }
@@ -637,26 +648,34 @@ Control {
                                             height: page.touchMode ? Math.min(24, block.height / 2) : 10; cursorShape: Qt.SizeVerCursor
                                             property bool touchInput: true
                                             property bool held: false
+                                            property bool moved: false
                                             property point pressPoint
+                                            property point touchStart
                                             preventStealing: !touchInput || held
                                             enabled: block.modelData.writable && !block.modelData.allDay
                                                 && (block.modelData.displayEndDate === page.iso(dayColumn.date)
                                                     || (block.modelData.endMinute === 0 && block.modelData.displayEndDate === page.iso(page.addDays(dayColumn.date, 1))))
                                             onPressed: mouse => {
-                                                touchInput = mouse.source !== Qt.MouseEventNotSynthesized; held = false
+                                                touchInput = mouse.source !== Qt.MouseEventNotSynthesized; held = false; moved = false
+                                                touchStart = mapToItem(page, mouse.x, mouse.y)
                                                 pressPoint = mapToItem(timeGrid, mouse.x, mouse.y)
                                                 if (!touchInput) page.beginGesture(block.modelData, dayColumn.date, dayColumn.index, pressPoint, true, block.x, block.width)
                                             }
                                             onPressAndHold: {
-                                                if (touchInput) {
+                                                if (touchInput && !moved) {
                                                     held = true
                                                     page.beginGesture(block.modelData, dayColumn.date, dayColumn.index, pressPoint, true, block.x, block.width)
                                                 }
                                             }
-                                            onPositionChanged: mouse => { if (pressed && (!touchInput || held)) page.updateGesture(mapToItem(timeGrid, mouse.x, mouse.y)) }
+                                            onPositionChanged: mouse => {
+                                                if (!pressed) return
+                                                if (touchInput && !held) moved = moved || page.pastTapThreshold(touchStart, mapToItem(page, mouse.x, mouse.y))
+                                                else page.updateGesture(mapToItem(timeGrid, mouse.x, mouse.y))
+                                            }
                                             onReleased: mouse => {
-                                                if (touchInput && !held) page.edit(block.modelData)
-                                                else { page.updateGesture(mapToItem(timeGrid, mouse.x, mouse.y)); page.finishGesture() }
+                                                if (touchInput && !held) {
+                                                    if (!moved && !page.pastTapThreshold(touchStart, mapToItem(page, mouse.x, mouse.y))) page.edit(block.modelData)
+                                                } else { page.updateGesture(mapToItem(timeGrid, mouse.x, mouse.y)); page.finishGesture() }
                                                 held = false; touchInput = true
                                             }
                                             onCanceled: { held = false; touchInput = true; page.gesture = null }
