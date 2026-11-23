@@ -297,6 +297,9 @@ TestCase {
         } finally {
             host.close()
             page.visible = true
+            const owner = test.Window.window
+            owner.requestActivate()
+            tryCompare(owner, "active", true)
         }
     }
     function test_chatTimestampDensityAndFullDescription() {
@@ -783,6 +786,7 @@ TestCase {
         const background=Qt.color(data.background)
         subject.secondaryColour=Qt.rgba(background.r,background.g,background.b,.3)
         host.color=Qt.rgba(background.r,background.g,background.b,data.opacity)
+        subject.mainColour=host.color
         page.visible=false
         backend.messages=[{role:"assistant",text:"## Reading text\n\nA paragraph uses the same readable type as the interface.\n\n* First item with **emphasis**\n* Second item with `inline code`\n\n[Documentation](https://example.com)\n\n```cpp\nint count = 42;\n```"}]
         try {
@@ -793,12 +797,12 @@ TestCase {
             compare(body.font.pixelSize,data.size,"Chat prose follows the chosen interface text size")
             const surface=findChild(subject,"chatBubble_assistant")
             fuzzyCompare(surface.color.a,1,.001,"The reading surface stays opaque at every frostiness setting")
-            fuzzyCompare(surface.color.r,background.r,.001);fuzzyCompare(surface.color.g,background.g,.001);fuzzyCompare(surface.color.b,background.b,.001)
+            verify(contrast(surface.color, background) >= 1.25, "The reading surface is distinct from the window")
             verify(body.mapToItem(surface,0,0).x>=12 && body.mapToItem(surface,0,0).y>=12,"The reading surface includes text padding")
             verify(body.mapToItem(surface,0,body.height).y<=surface.height-12+1)
             fuzzyCompare(host.color.a,data.opacity,.001,"Chat backing does not increase window frostiness")
             fuzzyCompare(body.color.a,1,.001,"Message glyphs stay opaque on glass")
-            fuzzyCompare(body.color.r,foreground.r,.001);fuzzyCompare(body.color.g,foreground.g,.001);fuzzyCompare(body.color.b,foreground.b,.001)
+            verify(contrast(body.color, surface.color) >= 4.5, "Message glyphs are legible against the reading surface")
             verify(body.getText(0,body.length).indexOf("**")<0)
             verify(body.getText(0,body.length).indexOf("int count = 42;")>=0)
             host.update();verify(waitForRendering(host.contentItem))
