@@ -8,18 +8,20 @@ import "ui"
 PilonDialog {
     id: dialog
     objectName: "sidebarTabOrder"
-    title: qsTr("Sidebar tab order")
+    title: qsTr("Tab order")
+    contentSizedWindow: true
     required property var registry
     property var sidebarNavigation: null
+    readonly property bool horizontal: sidebarNavigation?.horizontal === true
     readonly property var tabs: registry.sidebarAddons.filter(entry => entry.enabled)
     // An unchanged registry refresh must leave the preview delegates and their drag intact.
     readonly property string previewPagesJson: JSON.stringify(tabs.map(entry => ({
         id: entry.id, title: entry.name, icon: String(entry.icon), sidebarVisible: entry.sidebarVisible
     })))
     property string error: ""
-    width: 190 + padding * 2
+    width: horizontal ? Math.min(maximumContentWidth, (sidebarNavigation?.parent.width || 240) + padding * 2) : 190 + padding * 2
     height: Math.min(600, topPadding + bottomPadding + preview.implicitHeight
-        + 12 + settingsButton.height + 10)
+        + (horizontal ? 16 : 12 + settingsButton.height + 10))
     topPadding: 16 + 42 + 8
     rightPadding: padding
     modal: true
@@ -40,8 +42,8 @@ PilonDialog {
     contentItem: ColumnLayout {
         spacing: 12
         Item {
-            Layout.preferredWidth: 190
-            Layout.maximumWidth: 190
+            Layout.preferredWidth: dialog.horizontal ? dialog.width - dialog.leftPadding - dialog.rightPadding : 190
+            Layout.maximumWidth: Layout.preferredWidth
             Layout.fillWidth: true
             Layout.fillHeight: true
             Layout.alignment: Qt.AlignHCenter
@@ -54,12 +56,14 @@ PilonDialog {
             AppNavigation {
                 id: preview
                 objectName: "sidebarOrderPreview"
-                anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
-                anchors.bottom: settingsButton.top
-                anchors.bottomMargin: 12
+                x: dialog.horizontal ? 8 : 0
+                y: dialog.horizontal ? 8 : 0
+                width: dialog.horizontal ? Math.max(0, parent.width - 68) : parent.width
+                height: dialog.horizontal ? Math.max(0, parent.height - 16) : Math.max(0, settingsButton.y - 12)
                 pages: JSON.parse(dialog.previewPagesJson)
                 currentId: dialog.sidebarNavigation ? dialog.sidebarNavigation.currentId : ""
-                expanded: true
+                horizontal: dialog.horizontal
+                expanded: dialog.sidebarNavigation?.expanded ?? true
                 reorderEnabled: true
                 visibilityControls: true
                 onReorderRequested: (from, to) => dialog.move(from, to)
@@ -68,12 +72,12 @@ PilonDialog {
             PilonToolButton {
                 id: settingsButton
                 objectName: "sidebarPreviewSettings"
-                anchors.left: parent.left; anchors.leftMargin: preview.pageInset
-                anchors.bottom: parent.bottom; anchors.bottomMargin: 10
-                width: preview.width - preview.pageInset * 2 - 40
+                x: dialog.horizontal ? parent.width - width - 8 : preview.pageInset
+                y: dialog.horizontal ? 8 : parent.height - height - 10
+                width: dialog.horizontal || !preview.expanded ? 44 : preview.width - preview.pageInset * 2 - 40
                 height: Math.max(44, implicitContentHeight + topPadding + bottomPadding)
                 text: qsTr("Settings")
-                display: AbstractButton.TextBesideIcon
+                display: !dialog.horizontal && preview.expanded ? AbstractButton.TextBesideIcon : AbstractButton.IconOnly
                 icon.source: "icons/cog-6-tooth.svg"
                 icon.width: 24; icon.height: 24
                 leftPadding: 10; rightPadding: 10
@@ -86,6 +90,7 @@ PilonDialog {
                     }
                     Label {
                         objectName: "sidebarPreviewSettingsLabel"
+                        visible: settingsButton.display === AbstractButton.TextBesideIcon
                         Layout.fillWidth: true; Layout.minimumWidth: 0
                         text: settingsButton.text; font: settingsButton.font
                         color: dialog.palette.windowText; wrapMode: Text.Wrap

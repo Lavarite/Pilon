@@ -593,6 +593,10 @@ Control {
             radius: 14
             color: page.withOpacity(page.secondaryColour, .42)
             border.color: page.withOpacity(page.textColour, .18)
+            LocalComponents.PilonLoadingLayout {
+                anchors.fill: parent
+                visible: page.notes.loading && noteList.count === 0
+            }
             DropArea {
                 anchors.fill: noteList
                 keys: ["pilon-note"]
@@ -1317,7 +1321,7 @@ Control {
             id: status
             anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
             visible: text.length > 0
-            text: page.notes.loading ? qsTr("Loading notes…") : page.notes.importing ? qsTr("Importing…") : page.notice
+            text: page.notice
             color: page.mutedTextColour
             wrapMode: Text.Wrap
         }

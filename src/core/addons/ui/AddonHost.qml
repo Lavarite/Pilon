@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
+import "ui"
 
 Item {
     id: host
@@ -112,11 +113,11 @@ Item {
         onLoaded: host.pageCreated()
         onStatusChanged: if (status === Loader.Error) host.entryError = qsTr("Unable to load %1. Check the add-on package.").arg(host.descriptor.name)
     }
-    BusyIndicator {
-        anchors.centerIn: parent
+    PilonLoadingLayout {
+        anchors.fill: parent
         visible: host.visible && !host.page && !host.error
-        running: visible
-        Accessible.name: qsTr("Loading %1").arg(host.descriptor.name)
+        layout: host.descriptor.id === "calendar" ? "calendar"
+            : host.descriptor.id === "notes" || host.descriptor.id === "ssh" ? "document" : "list"
     }
     Loader {
         id: pageIntegrations

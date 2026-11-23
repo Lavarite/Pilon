@@ -264,7 +264,10 @@ TestCase {
         owner.usableGeometry = Qt.rect(20, 390, 320, 260)
         tryVerify(() => host.height <= Math.ceil(260 - 2 * 16 * data.scale))
         tryVerify(() => dialog.contentItem.contentHeight > dialog.contentItem.availableHeight)
+        const actionY = dialog.confirmButton.mapToGlobal(0, dialog.confirmButton.height).y
+        verify(actionY <= host.y + host.height + 1)
         dialog.contentItem.contentItem.contentY = dialog.contentItem.contentHeight - dialog.contentItem.availableHeight
+        compare(dialog.confirmButton.mapToGlobal(0, dialog.confirmButton.height).y, actionY)
         tryVerify(() => dialog.confirmButton.mapToGlobal(0, dialog.confirmButton.height).y <= host.y + host.height + 1)
         mouseClick(dialog.confirmButton); tryCompare(dialog, "opened", false)
         compare(dialogAccepted.count, 1)

@@ -12,7 +12,7 @@ Basic.Dialog {
         contentHasCloseButton ? 0 : 16 + 42 + 16)
     popupType: Basic.Popup.Item
     dim: false
-    property bool contentSizedWindow: false
+    property bool contentSizedWindow: Qt.platform.os === "android"
     property bool contentHasCloseButton: false
     closePolicy: Basic.Popup.CloseOnEscape
     readonly property var dialogWindow: windowFrame.window

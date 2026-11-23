@@ -304,7 +304,17 @@ Window {
             addonHosts[id].settingsEnabled = false
         }
         runtimesReady = true
-        // Change handlers can run before the pages binding refreshes.
+        updateVisiblePages()
+        const current = addonHosts[selectedPage]
+        if (current && workspaceActive && selectedPage !== navigationTarget) current.ensurePage()
+        pageRevision++
+        updateWorkspaceLocks()
+        syncingAddons = false
+        syncWidgetRuntimes()
+        Qt.callLater(requestWidgetPublications)
+    }
+    function updateVisiblePages() {
+        if (!addonsReady) return
         const visibleEntries = addonRegistry.sidebarAddons.filter(entry => entry.enabled && entry.sidebarVisible)
         const visibleIds = visibleEntries.map(entry => entry.id)
         const selectedHost = addonHosts[selectedPage]
@@ -314,13 +324,6 @@ Window {
             && (lastVisiblePageIds === null || lastVisiblePageIds.indexOf(selectedPage) >= 0)
         if (!selectedAvailable || justHidden) selectedPage = visibleEntries.length ? visibleEntries[0].id : ""
         lastVisiblePageIds = visibleIds
-        const current = addonHosts[selectedPage]
-        if (current && workspaceActive && selectedPage !== navigationTarget) current.ensurePage()
-        pageRevision++
-        updateWorkspaceLocks()
-        syncingAddons = false
-        syncWidgetRuntimes()
-        Qt.callLater(requestWidgetPublications)
     }
     function selectPage(id, fromNavigation) {
         if (!workspaceActive) return false
@@ -741,7 +744,11 @@ Window {
         scale: window.uiScale
         transformOrigin: Item.TopLeft
 
-    Backend.AddonRegistry { id: addonRegistry; onChanged: window.syncAddonHosts() }
+    Backend.AddonRegistry {
+        id: addonRegistry
+        onChanged: window.syncAddonHosts()
+        onSidebarChanged: window.updateVisiblePages()
+    }
     Item {
         id: addonArea
         objectName: "addonArea"
@@ -1115,7 +1122,17 @@ Window {
         y: window.bottomNavigation ? parent.height - height : 0
         width: window.bottomNavigation ? parent.width : navigation.expanded ? 150 : 64
         height: window.bottomNavigation ? Math.max(44, navigation.implicitHeight) + 16 : parent.height
-        color: window.withOpacity(window.selectedSecondaryColour, 0.48)
+        color: window.bottomNavigation && window.mobilePlatform ? window.selectedSecondaryColour
+            : window.withOpacity(window.selectedSecondaryColour, 0.48)
+
+        Rectangle {
+            objectName: "navigationInset"
+            anchors.top: parent.bottom
+            width: parent.width
+            height: window.bottomNavigation && !window.appService.foldOccluding
+                ? window.SafeArea.margins.bottom / window.uiScale : 0
+            color: sidebar.color
+        }
 
         AppNavigation {
             id: navigation
@@ -1264,23 +1281,19 @@ Window {
         FileDialog {
             id: configurationPicker
             objectName: "configurationPicker"
-            property bool exporting: false
             parentWindow: settingsMenu
-            title: exporting ? qsTr("Export configuration") : qsTr("Import configuration")
-            fileMode: exporting ? FileDialog.SaveFile : FileDialog.OpenFile
-            defaultSuffix: exporting ? "piconfpack" : ""
+            title: qsTr("Export configuration")
+            fileMode: FileDialog.SaveFile
+            defaultSuffix: "piconfpack"
             nameFilters: [qsTr("Pilon configuration bundles (*.piconfpack)")]
-            function choose(forExport) {
-                exporting = forExport
+            function choose() {
                 if (window.mobilePlatform) open()
-                else useSelection(window.appService.chooseConfigurationBundle(settingsMenu, exporting, title, nameFilters[0]))
+                else useSelection(window.appService.chooseConfigurationBundle(settingsMenu, true, title, nameFilters[0]))
             }
             function useSelection(file) {
-                if (!file.toString()) return
-                if (exporting) {
-                    persistentSettings.sync()
-                    window.appService.exportConfiguration(file)
-                } else configurationReview.inspect(file)
+                if (!file || !file.toString()) return
+                persistentSettings.sync()
+                window.appService.exportConfiguration(file)
             }
             onAccepted: useSelection(selectedFile)
         }
@@ -1387,13 +1400,15 @@ Window {
                         PilonWrapButton {
                             objectName: "exportConfiguration"
                             text: qsTr("Export configuration…")
-                            onClicked: configurationPicker.choose(true)
+                            onClicked: configurationPicker.choose()
                         }
                         PilonWrapButton {
                             objectName: "importConfiguration"
                             text: qsTr("Import configuration…")
                             enabled: !window.preparingWorkspace && !addonCleanup.busy && !addonRegistry.restoringAddon && !window.resetBlocked
-                            onClicked: configurationPicker.choose(false)
+                            onClicked: sharedFiles.selectFiles(qsTr("Import configuration"), files => {
+                                if (files.length === 1) configurationReview.inspect(files[0])
+                            }, window.appService.workspaceRoot, ".piconfpack", settingsMenu)
                         }
                     }
                     ConfiguredAddonRestore {

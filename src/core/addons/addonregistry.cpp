@@ -492,6 +492,7 @@ AddonRegistry::AddonRegistry(const QString &builtins, const QString &installed, 
                              const QString &state, bool recovery, QObject *parent)
     : QObject(parent), m_builtins(builtins), m_installed(installed), m_data(data), m_recovery(recovery),
       m_stateDirectory(QDir::cleanPath(state)) {
+    connect(this, &AddonRegistry::changed, this, &AddonRegistry::sidebarChanged);
     m_refreshTimer.setSingleShot(true);
     m_refreshTimer.setInterval(150);
     connect(&m_refreshTimer, &QTimer::timeout, this, &AddonRegistry::refresh);
@@ -831,8 +832,8 @@ bool AddonRegistry::setSidebarOrder(const QStringList &ids) {
         settings.sync();
         return fail(issue("Cannot save the sidebar tab order. Check your settings folder permissions."));
     }
-    m_error.clear();
-    emit changed();
+    if (m_error.isEmpty()) emit sidebarChanged();
+    else { m_error.clear(); emit changed(); }
     return true;
 }
 bool AddonRegistry::setPageVisible(const QString &id, bool visible) {
@@ -855,8 +856,8 @@ bool AddonRegistry::setPageVisible(const QString &id, bool visible) {
         settings.sync();
         return fail(issue("Cannot save the page visibility. Check your settings folder permissions."));
     }
-    m_error.clear();
-    emit changed();
+    if (m_error.isEmpty()) emit sidebarChanged();
+    else { m_error.clear(); emit changed(); }
     return true;
 }
 bool AddonRegistry::isEnabled(const QString &id) const {

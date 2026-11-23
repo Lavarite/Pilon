@@ -46,11 +46,10 @@ Item {
             ? qsTr("Unable to load these settings. Check the add-on package.")
             : content.currentLoader ? content.currentLoader.integrationError : ""
     }
-    BusyIndicator {
-        anchors.centerIn: parent
+    PilonLoadingLayout {
+        anchors.fill: parent
+        padding: 0
         visible: content.visible && !!content.currentLoader && content.currentLoader.status === Loader.Loading
-        running: visible
-        Accessible.name: qsTr("Loading settings")
     }
     Component {
         id: sectionFactory
