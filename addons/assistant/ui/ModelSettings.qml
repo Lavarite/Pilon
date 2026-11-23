@@ -625,25 +625,11 @@ PilonScrollView {
         PilonSectionHeader { width: parent.width; visible: (settings.catalog.supportModels || []).length > 0; text: qsTr("Supporting models") }
         Repeater {
             model: settings.catalog.supportModels || []
-            delegate: GridLayout {
+            delegate: PilonModelDownloadRow {
                 required property var modelData
-                width: parent.width; columnSpacing: 12; rowSpacing: 8
-                columns: width < supportLabel.implicitWidth + supportDownload.implicitWidth + columnSpacing ? 1 : 2
-                Label {
-                    id: supportLabel
-                    objectName: "supportModelName_" + parent.modelData.id
-                    Layout.fillWidth: true; Layout.minimumWidth: 0
-                    verticalAlignment: Text.AlignVCenter
-                    text: modelData.name + ", " + (modelData.bytes / 1073741824).toFixed(2) + " GiB"
-                    color: settings.textColour; wrapMode: Text.Wrap
-                }
-                Action {
-                    id: supportDownload
-                    objectName: "downloadSupport_" + parent.modelData.id
-                    text: parent.modelData.installed ? qsTr("Downloaded") : qsTr("Download")
-                    enabled: !parent.modelData.installed && !settings.catalog.downloading && !settings.catalog.inspecting
-                    onClicked: settings.catalog.downloadSupport(parent.modelData.id)
-                }
+                width: settings.availableWidth
+                model: modelData
+                catalog: settings.catalog
             }
         }
         Column {

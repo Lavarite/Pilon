@@ -2,6 +2,7 @@
 
 #include <QObject>
 #include "notehandwriting.h"
+#include "assistantmodels.h"
 #include <QMap>
 #include <QCache>
 #include <QTimer>
@@ -59,10 +60,12 @@ class NotesManager : public QObject {
     Q_PROPERTY(QVariantList pens READ pens WRITE setPens NOTIFY settingsChanged)
     Q_PROPERTY(bool dirty READ dirty NOTIFY dirtyChanged)
     Q_PROPERTY(QString errorMessage READ errorMessage NOTIFY errorChanged)
+    Q_PROPERTY(AssistantModels *handwritingModels READ handwritingModels CONSTANT)
 public:
     explicit NotesManager(QObject *parent = nullptr);
     explicit NotesManager(const QString &directory, QObject *parent = nullptr, bool asynchronous = false);
     ~NotesManager() override;
+    AssistantModels *handwritingModels();
     bool active() const { return m_active; }
     void setActive(bool active);
     bool gitUpdating() const { return m_gitUpdating; }
@@ -235,6 +238,7 @@ private:
     QTemporaryDir m_exportDirectory;
     NoteElements m_elementsModel{this};
     NoteHandwriting m_handwriting{this};
+    AssistantModels *m_handwritingModels = nullptr;
     QFutureWatcher<QVariantMap> m_importWatcher;
     bool m_importing = false;
     std::shared_ptr<std::atomic_bool> m_importCancel;

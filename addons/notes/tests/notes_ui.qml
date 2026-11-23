@@ -3,6 +3,7 @@ import QtQuick.Controls
 import QtTest
 import Pilon
 import ".." as App
+import "../addons/notes" as NotesAddon
 
 TestCase {
     id: test
@@ -31,6 +32,38 @@ TestCase {
         function exportNote(note) { exportedNote = note }
     }
     NotesManager { id: notes }
+    Component {
+        id: handwritingSettings
+        NotesAddon.Settings {
+            addon: QtObject {
+                readonly property color selectedMutedTextColour: "#aaaaaa"
+                readonly property color selectedTextColour: "#eeeeee"
+                readonly property color selectedAccentColour: "#aabbcc"
+                readonly property var notesManager: QtObject {
+                    readonly property string storageDirectory: "/fixture/notes"
+                    property bool loading: false
+                    property bool importing: false
+                    property bool pressureSensitive: true
+                    property bool recognizeShapes: false
+                    property bool drawWithFinger: false
+                    property bool showPageOutlines: true
+                    property var defaultPaper: ({})
+                    property string errorMessage: ""
+                    readonly property var handwritingModels: QtObject {
+                        property var supportModels: [{id:"ppocrv5", name:"Handwriting recognition", bytes:1024, installed:false}]
+                        property bool downloading: false
+                        property bool inspecting: false
+                        property real progress: 0.4
+                        property string error: ""
+                        property string request: ""
+                        function downloadSupport(id) { request = id; downloading = true }
+                        function cancelDownload() { downloading = false }
+                        function dismissError() { error = "" }
+                    }
+                }
+            }
+        }
+    }
     Component {
         id: recreatedNotePage
         App.NotesPage {
@@ -78,6 +111,32 @@ TestCase {
         page.drawingTool = "pen"
         mousePress(canvas(), 60, y); mouseMove(canvas(), 140, y + 1); mouseRelease(canvas(), 240, y)
         compare(notes.strokes.length, 1)
+    }
+    function test_handwritingDownloadStartsAndCancelsInNotesSettings_data() {
+        return [{tag: "compact", width: 320, height: 400}, {tag: "desktop", width: 1000, height: 760}]
+    }
+    function test_handwritingDownloadStartsAndCancelsInNotesSettings(data) {
+        const container = createTemporaryQmlObject("import QtQuick; Item { z: 10 }", test)
+        container.width = data.width
+        container.height = data.height
+        const form = createTemporaryObject(handwritingSettings, container)
+        verify(form !== null)
+        waitForRendering(form)
+        const catalog = form.addon.notesManager.handwritingModels
+        const download = findChild(form, "downloadSupport_ppocrv5")
+        verify(download && download.enabled)
+        form.contentItem.contentY = Math.max(0, form.contentHeight - form.height)
+        tryVerify(() => download.mapToItem(form, 0, 0).y + download.height <= form.height)
+        mouseClick(download)
+        compare(catalog.request, "ppocrv5")
+        tryCompare(download, "enabled", false)
+        const cancel = findChild(form, "cancelHandwritingDownload")
+        tryCompare(cancel, "visible", true)
+        waitForRendering(form)
+        form.contentItem.contentY = Math.max(0, form.contentHeight - form.height)
+        mouseClick(cancel)
+        tryCompare(cancel, "visible", false)
+        tryCompare(download, "enabled", true)
     }
     function test_viewportResizeFinishesAcceptedInkAndConsumesTheOldContact_data() {
         return [{tag:"stylus",source:"stylus"},{tag:"finger",source:"finger"},{tag:"mouse",source:"mouse"}]

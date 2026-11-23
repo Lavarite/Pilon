@@ -535,7 +535,7 @@ TestCase {
         test.width = data.width
         assistant.connections = connectionFixture
         connectionFixture.servers = [{id: "server", name: "Example server", remoteModel: "model", vision: true, audio: true, video: true}]
-        catalog.supportModels = [{id: "ppocrv5", name: "Handwriting recognition", bytes: 1024, installed: false}]
+        catalog.supportModels = [{id: "whisper-large-v3-turbo", name: "Speech recognition", bytes: 1024, installed: false}]
         wait(40)
         const context = findChild(settings, "modelContextSize_0")
         const card = findChild(settings, "installedModelCard_0")
@@ -543,7 +543,7 @@ TestCase {
         verify(contextEnd.x <= card.width - 11, "Context input stays inside card")
         const video = findChild(card, "modality_film")
         verify(video.mapToItem(card, video.width, video.height).x <= card.width - 11, "Modalities wrap inside card")
-        const support = findChild(settings, "supportModelName_ppocrv5")
+        const support = findChild(settings, "supportModelName_whisper-large-v3-turbo")
         verify(support.height >= support.implicitHeight - 1, "Support model label has room for wrapped text")
         const actions = findChild(settings, "apiServerActions_server")
         for (const item of actions.children) {
@@ -556,18 +556,18 @@ TestCase {
         connectionFixture.servers = []; catalog.supportModels = []
     }
     function test_support_model_downloads() {
-        catalog.supportModels = [{id: "ppocrv5", name: "Handwriting recognition", bytes: 1024, installed: false}]
+        catalog.supportModels = [{id: "whisper-large-v3-turbo", name: "Speech recognition", bytes: 1024, installed: false}]
         wait(20)
-        const download = findChild(settings, "downloadSupport_ppocrv5")
+        const download = findChild(settings, "downloadSupport_whisper-large-v3-turbo")
         verify(download !== null)
         verify(download.enabled)
         download.clicked()
-        compare(catalog.supportDownload, "ppocrv5")
+        compare(catalog.supportDownload, "whisper-large-v3-turbo")
         verify(catalog.downloading)
         catalog.downloading = false
-        catalog.supportModels = [{id: "ppocrv5", name: "Handwriting recognition", bytes: 1024, installed: true}]
+        catalog.supportModels = [{id: "whisper-large-v3-turbo", name: "Speech recognition", bytes: 1024, installed: true}]
         wait(20)
-        verify(!findChild(settings, "downloadSupport_ppocrv5").enabled)
+        verify(!findChild(settings, "downloadSupport_whisper-large-v3-turbo").enabled)
         catalog.supportModels = []
     }
 

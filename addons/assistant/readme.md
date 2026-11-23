@@ -15,7 +15,7 @@ The [Codex app-server](https://developers.openai.com/codex/app-server/) owns
 threads and tool continuations over private JSON-RPC stdio. A token-protected
 loopback adapter connects it to the local llama.cpp or LiteRT-LM worker. The
 GGUF and Whisper helpers use `runtime/bin/`, LiteRT-LM uses `runtime/litert/`,
-and downloaded weights use `models/`.
+and downloaded weights use `addon-data/assistant/models/` inside the Pilon folder.
 
 For GGUF models, `PILON_LLM_BACKEND=auto` detects GPUs on each machine. It prefers an installed
 CUDA worker on NVIDIA; otherwise it uses the bundled Vulkan worker. Explicit
@@ -62,8 +62,8 @@ choices. Modalities appear as accessible icons with tooltips. Select one GGUF
 variant and, for multimodal input, its matching projector.
 Split weights download together. Downloads pin the repository commit, stream to disk,
 and verify file sizes and SHA-256 hashes when the repository provides them. Only fully
-downloaded models enter `models/installed.json`. Cancellation discards the active
-partial file; earlier completed files remain in `models/hf/`. Private or gated repositories
+downloaded models enter `addon-data/assistant/models/installed.json`. Cancellation discards the active
+partial file. Earlier completed files remain in the same directory under `hf/`. Private or gated repositories
 require access on Hugging Face and `HF_TOKEN` in Pilon's environment. GGUF architecture
 support depends on the installed llama.cpp runtime. Repositories without a chat template
 are shown with unknown capabilities and conservative text-only defaults.
@@ -527,7 +527,7 @@ Follow [Build from source](../../docs/CONTRIBUTING.md#build-from-source). Run fo
 checks with `ctest --test-dir build --output-on-failure -R '^(assistant|assistant_ui|models_ui)$'`.
 
 The build script prepares runtimes without downloading model weights. Settings →
-Models offers handwriting, speech recognition, and speech output downloads alongside
+Models offers speech recognition and speech output downloads alongside
 user-added assistant models. Existing legacy Gemma/Qwen folders are not automatically registered. Runtime
 builds and support model downloads are pinned and checksum-verified. Runtime source
 builds happen outside the repository. Qt Multimedia, FFmpeg (`ffmpeg`, `ffprobe`),
@@ -632,7 +632,7 @@ with no public listener or hosted API. Microphone input and TTS stay on this com
 Install the pinned runtime with `bash addons/assistant/scripts/setup_breeze.sh`, then download Speech
 output in Settings → Models. CPU installations omit CUDA packages. Python dependencies are
 isolated in `runtime/breeze`, upstream code is in `addons/assistant/vendor/breeze`, and the model is
-in `models/breeze-tts-2`. CUDA devices use Breeze's streaming runtime; machines
+in `addon-data/assistant/models/breeze-tts-2`. CUDA devices use Breeze's streaming runtime; machines
 without CUDA use standard generation on the CPU, which is slower. The model's **weights
 and self-hosted outputs are research/non-commercial only**, despite its inference code
 being Apache-2.0: [Breeze model card and license](https://huggingface.co/BreezeBlue/Breeze-TTS-2).

@@ -1,4 +1,5 @@
 #include "notehandwriting.h"
+#include "assistantmodels.h"
 #include "notedocument.h"
 #include "../../../src/core/workspace/pilonworkspace.h"
 #include <QCoreApplication>
@@ -116,12 +117,13 @@ NoteHandwriting::NoteHandwriting(QObject *parent) : QObject(parent) {
         m_request = QJsonDocument::fromVariant(QVariantMap{{"lines", pending}}).toJson(QJsonDocument::Compact) + '\n';
         if (m_process.state() == QProcess::Running) send();
         else {
+            const auto models = AssistantModels::handwritingRoot() + "/ppocrv5";
 #ifdef Q_OS_ANDROID
             m_process.setProgram(PilonWorkspace::packagedExecutable("ocr"));
-            m_process.setArguments({PilonWorkspace::modelsDirectory() + "/ppocrv5"});
+            m_process.setArguments({models});
 #else
             m_process.setProgram(m_root + "/runtime/handwriting/bin/python");
-            m_process.setArguments({"-u", m_directory.filePath("handwriting_worker.py"), m_root + "/models/ppocrv5"});
+            m_process.setArguments({"-u", m_directory.filePath("handwriting_worker.py"), models});
 #endif
             auto env = QProcessEnvironment::systemEnvironment(); env.insert("HF_HUB_OFFLINE", "1"); env.insert("TOKENIZERS_PARALLELISM", "false");
 #ifdef Q_OS_ANDROID
@@ -184,18 +186,20 @@ void NoteHandwriting::enqueue(const QString &id, const QVariantList &strokes, qi
 }
 void NoteHandwriting::next() {
     if (!m_active || m_writing || !m_id.isEmpty() || m_pending.isEmpty()) return;
+    const auto models = AssistantModels::handwritingRoot() + "/ppocrv5/";
 #ifdef Q_OS_ANDROID
     if (PilonWorkspace::packagedExecutable("ocr").isEmpty()) {
         m_pending.clear(); emit failed(tr("Handwriting recognition is missing from this installation.")); return;
     }
-    const auto models = PilonWorkspace::modelsDirectory() + "/ppocrv5/";
-    if (!QFile::exists(models + "en_PP-OCRv5_rec_mobile.onnx") || !QFile::exists(models + "ch_PP-OCRv5_det_server.onnx")) {
-        m_pending.clear(); emit failed(tr("Download Handwriting recognition in Settings → Models.")); return;
-    }
 #else
-    if (!QFile::exists(m_root + "/runtime/handwriting/bin/python") || !QFile::exists(m_root + "/models/ppocrv5/en_PP-OCRv5_rec_mobile.onnx")) {
-        m_pending.clear(); emit failed(tr("Handwriting search needs its runtime and models. Run ./src/scripts/build.sh for the runtime, then download Handwriting recognition in Settings → Models.")); return;
+    if (!QFile::exists(m_root + "/runtime/handwriting/bin/python")) {
+        m_pending.clear(); emit failed(tr("Handwriting recognition is missing from this installation. Run ./src/scripts/build.sh to install its runtime.")); return;
     }
+#endif
+    if (!QFile::exists(models + "en_PP-OCRv5_rec_mobile.onnx") || !QFile::exists(models + "ch_PP-OCRv5_det_server.onnx")) {
+        m_pending.clear(); emit failed(tr("Download Handwriting recognition in Settings → Notes.")); return;
+    }
+#ifndef Q_OS_ANDROID
     if (!QFile::exists(m_directory.filePath("handwriting_worker.py")) && !QFile::copy(":/qt/qml/Pilon/handwriting_worker.py", m_directory.filePath("handwriting_worker.py"))) {
         m_pending.clear(); emit failed(tr("Unable to prepare handwriting search.")); return;
     }

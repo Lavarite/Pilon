@@ -81,6 +81,7 @@
   "ui/PilonScrollBar.qml": "src/ui/controls/PilonScrollBar.qml",
   "ui/PilonScrollView.qml": "src/ui/controls/PilonScrollView.qml",
   "ui/PilonWrapButton.qml": "src/ui/controls/PilonWrapButton.qml",
+  "ui/PilonModelDownloadRow.qml": "src/ui/controls/PilonModelDownloadRow.qml",
   "ui/PilonHoldButton.qml": "src/ui/controls/PilonHoldButton.qml",
   "ui/RoundedCheckBox.qml": "src/ui/controls/RoundedCheckBox.qml",
   "icons/archive-box.svg": "src/assets/icons/archive-box.svg",
