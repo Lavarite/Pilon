@@ -9,6 +9,7 @@ import QtCore
 import QtMultimedia
 import "ChatText.js" as ChatText
 import "ui"
+import "ui/PilonStyle.js" as PilonStyle
 
 Control {
     id: page
@@ -21,6 +22,7 @@ Control {
     signal calendarProposalRequested(string proposalId, int index)
     property bool showHiddenFiles: true
     required property var assistant
+    property color mainColour: secondaryColour
     required property color secondaryColour
     required property color textColour
     required property color mutedTextColour
@@ -28,6 +30,13 @@ Control {
     required property color accentTextColour
     required property color warningColour
     required property color warningTextColour
+    readonly property color conversationBackdrop: alpha(mainColour, 1)
+    readonly property color conversationInk: PilonStyle.contrastingText(conversationBackdrop)
+    readonly property color replySurface: Qt.tint(conversationBackdrop, alpha(conversationInk, .14))
+    readonly property color promptSurface: {
+        const tinted = Qt.tint(replySurface, alpha(accentColour, .18))
+        return PilonStyle.contrastRatio(tinted, conversationBackdrop) >= 1.25 ? tinted : replySurface
+    }
     property var expandedTools: ({})
     property var activityEntries: ({})
     property string displayedChatId: ""
@@ -195,6 +204,14 @@ Control {
     function alpha(colour, opacity) {
         return Qt.rgba(colour.r, colour.g, colour.b, opacity)
     }
+    function readableText(colour, surface) {
+        const preferred = alpha(colour, 1)
+        if (PilonStyle.contrastRatio(preferred, surface) >= 4.5) return preferred
+        const alternative = PilonStyle.contrastingText(surface)
+        if (PilonStyle.contrastRatio(alternative, surface) >= 4.5) return alternative
+        const white = Qt.rgba(1, 1, 1, 1)
+        return PilonStyle.contrastRatio(white, surface) >= 4.5 ? white : Qt.rgba(0, 0, 0, 1)
+    }
     readonly property var attachmentWarnings: {
         const model = assistant.modelIndex
         const models = assistant.availableModels
@@ -248,11 +265,14 @@ Control {
     component ActivityRow: Column {
         id: activity
         required property var entry
+        required property color foreground
+        required property color mutedColour
         readonly property bool thinking: entry.role === "thinking"
         readonly property bool expanded: page.expandedTools[entry.id] === true
         spacing: 8
         ActionButton {
             id: activityToggle
+            textColour: activity.foreground
             objectName: (activity.thinking ? "thinkingToggle_" : "toolToggle_") + activity.entry.id
             width: parent.width
             text: activity.thinking
@@ -265,7 +285,7 @@ Control {
                 ControlsImpl.ColorImage {
                     width: 24; height: 24
                     source: "icons/chevron-right.svg"
-                    color: page.textColour
+                    color: activity.foreground
                     rotation: activity.expanded ? 90 : 0
                     sourceSize: Qt.size(40, 40)
                 }
@@ -273,7 +293,7 @@ Control {
                     width: parent.width - 28
                     text: activityToggle.text
                     textFormat: Text.PlainText
-                    color: page.textColour
+                    color: activity.foreground
                     elide: Text.ElideRight
                 }
             }
@@ -294,13 +314,13 @@ Control {
             readOnly: true
             selectByMouse: true
             wrapMode: TextEdit.Wrap
-            color: page.textColour
+            color: activity.foreground
             font.pixelSize: 13
         }
         Label {
             visible: !activity.thinking && activity.expanded
             text: qsTr("Input")
-            color: page.mutedTextColour
+            color: activity.mutedColour
         }
         TextEdit {
             objectName: "toolInput_" + activity.entry.id
@@ -311,14 +331,14 @@ Control {
             readOnly: true
             selectByMouse: true
             wrapMode: TextEdit.Wrap
-            color: page.textColour
+            color: activity.foreground
             font.family: "monospace"
             font.pixelSize: 13
         }
         Label {
             visible: !activity.thinking && activity.expanded
             text: qsTr("Output")
-            color: page.mutedTextColour
+            color: activity.mutedColour
         }
         TextEdit {
             objectName: "toolOutput_" + activity.entry.id
@@ -329,7 +349,7 @@ Control {
             readOnly: true
             selectByMouse: true
             wrapMode: TextEdit.Wrap
-            color: page.textColour
+            color: activity.foreground
             font.family: "monospace"
             font.pixelSize: 13
         }
@@ -955,9 +975,10 @@ Control {
                     width: Math.min(850, message.width * (message.user ? .84 : 1))
                     height: messageContent.implicitHeight + 24
                     radius: 12
-                    color: message.user
-                        ? Qt.tint(page.alpha(page.secondaryColour, 1), page.alpha(page.accentColour, .14))
-                        : page.alpha(page.secondaryColour, 1)
+                    color: message.user ? page.promptSurface : page.replySurface
+                    border.color: Qt.tint(color, page.alpha(page.conversationInk, .23))
+                    readonly property color foreground: page.readableText(page.textColour, color)
+                    readonly property color mutedColour: page.readableText(page.mutedTextColour, color)
                     Column {
                         id: messageContent
                         anchors.left: parent.left
@@ -966,9 +987,10 @@ Control {
                         anchors.margins: 12
                         spacing: 8
                         Label {
+                            objectName: "chatRole_" + message.modelData.role
                             visible: message.user
                             text: message.user ? qsTr("You") : qsTr("Assistant")
-                            color: page.mutedTextColour
+                            color: bubble.mutedColour
                             font.pixelSize: 12
                         }
                         ActionButton {
@@ -976,13 +998,14 @@ Control {
                             visible: message.activity
                             width: parent.width
                             text: page.activitySummary(message.entries)
+                            textColour: bubble.foreground
                             contentItem: Row {
                                 spacing: 8
                                 ControlsImpl.ColorImage {
-                                    width: 24; height: 24; source: "icons/chevron-right.svg"; color: page.textColour
+                                    width: 24; height: 24; source: "icons/chevron-right.svg"; color: bubble.foreground
                                     rotation: page.expandedTools["group:" + message.modelData.id] ? 90 : 0
                                 }
-                                Label { text: page.activitySummary(message.entries); color: page.textColour }
+                                Label { text: page.activitySummary(message.entries); color: bubble.foreground }
                             }
                             onPressed: conversation.followTail = false
                             onClicked: {
@@ -1001,6 +1024,8 @@ Control {
                                 required property string encoded
                                 width: messageContent.width
                                 entry: page.activityEntries[JSON.parse(encoded).id] || JSON.parse(encoded)
+                                foreground: bubble.foreground
+                                mutedColour: bubble.mutedColour
                                 visible: page.expandedTools["group:" + message.modelData.id] === true
                             }
                         }
@@ -1011,6 +1036,7 @@ Control {
                             width: parent.width
                             visible: message.modelData.role === "artifact"
                             text: artifact.name || ""
+                            textColour: bubble.foreground
                             icon.source: "icons/document.svg"
                             onClicked: page.assistant.openArtifact(artifact.id)
                             ToolTip.visible: hovered
@@ -1040,9 +1066,10 @@ Control {
                                 acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
                                 acceptedButtons: Qt.LeftButton
                             }
-                            color: page.alpha(page.textColour, 1)
-                            selectionColor: page.accentColour
-                            selectedTextColor: page.accentTextColour
+                            color: bubble.foreground
+                            selectionColor: PilonStyle.contrastRatio(page.accentColour, bubble.color) >= 2
+                                ? page.alpha(page.accentColour, 1) : bubble.foreground
+                            selectedTextColor: page.readableText(page.accentTextColour, selectionColor)
                             font: page.font
                             onLinkActivated: function(link) {
                                 if (/^https?:\/\//.test(link))
@@ -1058,6 +1085,8 @@ Control {
                                 delegate: AttachmentCard {
                                     required property var modelData
                                     attachment: modelData
+                                    textColour: bubble.foreground
+                                    mutedTextColour: bubble.mutedColour
                                 }
                             }
                         }

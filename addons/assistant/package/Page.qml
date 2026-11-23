@@ -23,6 +23,7 @@ AssistantPage {
     anchors.topMargin: 16
     anchors.bottomMargin: 16
     assistant: addon.assistantManager
+    mainColour: addon.selectedMainColour
     secondaryColour: addon.selectedSecondaryColour
     textColour: addon.selectedTextColour
     mutedTextColour: addon.selectedMutedTextColour
