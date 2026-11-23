@@ -20,6 +20,9 @@ Basic.Menu {
     width: Math.min(implicitWidth, maximumContentWidth)
     height: Math.min(implicitHeight, maximumContentHeight)
     padding: 4
+    property PilonScrollMotion scrollMotion: PilonScrollMotion {
+        view: control.contentItem as Flickable
+    }
     delegate: PilonMenuItem {}
     background: Rectangle {
         implicitWidth: 240
