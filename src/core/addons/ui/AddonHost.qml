@@ -114,10 +114,10 @@ Item {
         onStatusChanged: if (status === Loader.Error) host.entryError = qsTr("Unable to load %1. Check the add-on package.").arg(host.descriptor.name)
     }
     PilonLoadingLayout {
+        objectName: "addonPageLoading"
         anchors.fill: parent
         visible: host.visible && !host.page && !host.error
-        layout: host.descriptor.id === "calendar" ? "calendar"
-            : host.descriptor.id === "notes" || host.descriptor.id === "ssh" ? "document" : "list"
+        layout: host.descriptor.builtin ? host.descriptor.id : "list"
     }
     Loader {
         id: pageIntegrations

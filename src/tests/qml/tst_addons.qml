@@ -84,6 +84,35 @@ TestCase {
         const host=control.Window.window
         host.update(); verify(waitForRendering(host.contentItem))
     }
+    function test_firstFrameLoadingFollowsEachAddonLayout_data() {
+        return [
+            {tag:"files cover", id:"files", width:320, shape:"loadingFileRows"},
+            {tag:"files desktop", id:"files", width:1000, shape:"loadingFilePlaces"},
+            {tag:"notes inside", id:"notes", width:676, shape:"loadingNoteCards"},
+            {tag:"calendar cover", id:"calendar", width:320, shape:"loadingCalendarGrid"},
+            {tag:"assistant desktop", id:"assistant", width:900, shape:"loadingChatCompose"},
+            {tag:"ssh cover", id:"ssh", width:320, shape:"loadingSshConnect"},
+            {tag:"git cover", id:"git", width:320, shape:"loadingRepositories"}
+        ]
+    }
+    function test_firstFrameLoadingFollowsEachAddonLayout(data) {
+        const descriptor = {id:data.id, name:data.id, builtin:true, page:Qt.resolvedUrl("fixtures/AddonFixture.qml"),
+            settings:[], runtime:""}
+        const host = createTemporaryObject(hostFactory, test, {descriptor, enabled:true, selected:true, width:data.width})
+        const shell = findControl(host,"addonPageLoading")
+        verify(shell && shell.visible)
+        compare(host.page,null)
+        const shape = findControl(shell,data.shape)
+        verify(shape && shape.visible)
+        verify(shape.width > 0 && shape.x + shape.width <= shell.width)
+        tryVerify(() => !!host.page)
+        tryCompare(shell,"visible",false)
+        const instance = host.page
+        host.selected = false
+        host.selected = true
+        compare(host.page,instance)
+        verify(!shell.visible)
+    }
     Component {
         id: toggleFixture
         App.AddonsSettings {
