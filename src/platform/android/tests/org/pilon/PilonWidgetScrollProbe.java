@@ -303,6 +303,36 @@ public final class PilonWidgetScrollProbe extends Instrumentation {
         ListView list = activity.host.findViewById(R.id.widget_timeline_list);
         for (int count = 0; count < 50 && (list == null || list.getChildCount() == 0); ++count) { SystemClock.sleep(100); waitForIdleSync(); list = activity.host.findViewById(R.id.widget_timeline_list); }
         check(list != null && list.getAdapter() != null && list.getAdapter().getCount() == 1 && list.getChildCount() == 1, "one continuous timeline");
+        step = "launcher-reloads-default";
+        main(() -> {
+            activity.host.updateAppWidget(null);
+            check(title(activity.host, context.getString(R.string.pilon_widget_configure)) == null,
+                "launcher fallback never presents a configuration prompt for its existing widget");
+            View fallback = activity.host.findViewById(R.id.widget_root);
+            check(fallback != null && fallback.getBackground() == null, "the initial view has no opaque placeholder background");
+            new PilonWidgetProvider().onReceive(context, new Intent(Intent.ACTION_MY_PACKAGE_REPLACED));
+        });
+        SystemClock.sleep(700); waitForIdleSync();
+        check(cards(activity.host) == 3, "package reload republishes last saved events without launching Pilon");
+        step = "launcher-restores-id";
+        int previousId = activity.id + 100000;
+        var prefs = context.getSharedPreferences("pilon_widgets", Context.MODE_PRIVATE);
+        String previous = prefs.getString("widget." + activity.id, null);
+        check(previous != null && prefs.edit().remove("widget." + activity.id).putString("widget." + previousId, previous).commit(),
+            "simulate the launcher remapping the user's saved widget ID");
+        main(() -> new PilonWidgetProvider().onReceive(context, new Intent(AppWidgetManager.ACTION_APPWIDGET_RESTORED)
+            .putExtra(AppWidgetManager.EXTRA_APPWIDGET_OLD_IDS, new int[]{previousId})
+            .putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, new int[]{activity.id})));
+        SystemClock.sleep(700); waitForIdleSync();
+        PilonWidgets.Binding restored = PilonWidgets.binding(context, activity.id);
+        check(restored != null && restored.workspaceId.equals(WORKSPACE) && restored.addonId.equals("calendar")
+            && restored.widgetId.equals("agenda") && PilonWidgets.binding(context, previousId) == null,
+            "restored widget keeps its existing workspace and provider binding");
+        if (android.os.Build.VERSION.SDK_INT >= 30)
+            check(AppWidgetManager.getInstance(context).getAppWidgetOptions(activity.id)
+                .getBoolean(AppWidgetManager.OPTION_APPWIDGET_RESTORE_COMPLETED), "launcher knows the restored widget is ready");
+        check(cards(activity.host) == 3, "restored widget shows cached agenda without choosing again");
+        list = activity.host.findViewById(R.id.widget_timeline_list);
         check(activity.hasWindowFocus(), "host focus"); View first = card(title(list, "First")); check(first != null, "first event");
         int height = first.getHeight(), width = first.getWidth(), rowHeight = list.getChildAt(0).getHeight(), headerTop = activity.host.findViewById(R.id.widget_title).getTop();
         check(rowHeight >= px(activity, 890), "full anchored day remains tall"); save("scroll-before"); step = "real-swipe"; swipe(list);

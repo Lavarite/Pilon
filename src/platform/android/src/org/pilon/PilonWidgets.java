@@ -85,6 +85,34 @@ public final class PilonWidgets {
     static void deleted(Context context, int[] ids) {
         SharedPreferences.Editor editor = preferences(context).edit(); for (int id : ids) editor.remove("widget." + id); editor.commit(); PilonWidgetClock.reconcile(context);
     }
+    static void restoreBindings(Context context, int[] oldIds, int[] newIds) {
+        if (oldIds.length != newIds.length) return;
+        SharedPreferences prefs = preferences(context);
+        SharedPreferences.Editor editor = prefs.edit();
+        Set<Integer> transferred = new HashSet<>(), obsolete = new HashSet<>();
+        try {
+            for (int index = 0; index < newIds.length; ++index) {
+                int oldId = oldIds[index], newId = newIds[index];
+                if (!owns(context, newId)) continue;
+                Binding current = binding(context, newId);
+                Binding restored = current != null ? current : binding(context, oldId);
+                if (restored == null) continue;
+                editor.putString("widget." + newId, restored.json().toString());
+                transferred.add(newId);
+                if (oldId != newId && !owns(context, oldId)) obsolete.add(oldId);
+            }
+            obsolete.removeAll(transferred);
+            for (int oldId : obsolete) editor.remove("widget." + oldId);
+        } catch (Exception invalid) { return; }
+        if (!editor.commit() || Build.VERSION.SDK_INT < 30) return;
+        AppWidgetManager manager = context.getSystemService(AppWidgetManager.class);
+        Bundle completed = new Bundle();
+        completed.putBoolean(AppWidgetManager.OPTION_APPWIDGET_RESTORE_COMPLETED, true);
+        for (int id : transferred) {
+            try { manager.updateAppWidgetOptions(id, completed); }
+            catch (RuntimeException removed) { /* Widget was removed during restoration. */ }
+        }
+    }
     public static synchronized boolean requestAdd(Context context, String addonId, String widgetId) {
         if (!(context instanceof Activity) || ((Activity)context).isFinishing() || !canRequestAdd(context)) return false;
         String token = UUID.randomUUID().toString(), key = "pending." + token;
