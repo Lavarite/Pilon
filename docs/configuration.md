@@ -17,11 +17,16 @@ include = ["theme.piconf"]
 accent = "${vars.accent}"
 frostiness = 66
 
+[application]
+keyboardShortcutHints = false
+
 [addons."org.example.timer"]
 enabled = false
 source = "https://github.com/example/timer"
 config = "../addon-data/org.example.timer/config.piconf"
 ```
+
+Keyboard shortcut hints are shown when a hardware keyboard is available and the preference is enabled.
 
 In `config/theme.piconf`, define the shared colour.
 

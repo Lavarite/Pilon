@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls.Basic as Basic
 import QtQuick.Controls.impl as ControlsImpl
+import "PilonStyle.js" as PilonStyle
 
 Basic.MenuItem {
     id: control
@@ -35,7 +36,7 @@ Basic.MenuItem {
         Text {
             id: shortcutLabel
             objectName: "menuItemShortcut"
-            visible: control.shortcutText.length > 0
+            visible: control.shortcutText.length > 0 && PilonStyle.showShortcutHints(control.Window.window)
             x: control.mirrored ? row.arrowPadding : row.width - width - row.arrowPadding
             width: implicitWidth; height: row.height
             text: control.shortcutText; font: control.font; color: control.palette.placeholderText

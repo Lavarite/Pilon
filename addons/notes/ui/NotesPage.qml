@@ -8,9 +8,11 @@ import QtCore
 import Pilon
 import "ui" as LocalComponents
 import "ui"
+import "ui/PilonStyle.js" as PilonStyle
 
 Control {
     id: page
+    readonly property bool showShortcutHints: PilonStyle.showShortcutHints(page.Window.window)
     palette.window: mainColour; palette.base: secondaryColour; palette.button: secondaryColour
     palette.text: textColour; palette.windowText: textColour; palette.buttonText: textColour
     palette.placeholderText: mutedTextColour; palette.highlight: accentColour; palette.highlightedText: accentTextColour
@@ -1107,28 +1109,32 @@ Control {
                         visible: page.hasNote && page.selectedTextBox.length > 0
                         objectName: "noteBold"; text: "B"; font.bold: true; width: 34; focusPolicy: Qt.NoFocus
                         fillColour: page.formattingEditor && page.editorFont().bold ? page.withOpacity(page.accentColour, .3) : page.secondaryColour
-                        ToolTip.visible: hovered; ToolTip.text: qsTr("Bold (Ctrl+B)"); Accessible.name: ToolTip.text
+                        ToolTip.visible: hovered; ToolTip.text: page.showShortcutHints ? qsTr("Bold (Ctrl+B)") : Accessible.name
+                        Accessible.name: qsTr("Bold")
                         onClicked: page.formatText("bold")
                     }
                     StyledButton {
                         visible: page.hasNote && page.selectedTextBox.length > 0
                         objectName: "noteItalic"; text: "I"; font.italic: true; width: 34; focusPolicy: Qt.NoFocus
                         fillColour: page.formattingEditor && page.editorFont().italic ? page.withOpacity(page.accentColour, .3) : page.secondaryColour
-                        ToolTip.visible: hovered; ToolTip.text: qsTr("Italic (Ctrl+I)"); Accessible.name: ToolTip.text
+                        ToolTip.visible: hovered; ToolTip.text: page.showShortcutHints ? qsTr("Italic (Ctrl+I)") : Accessible.name
+                        Accessible.name: qsTr("Italic")
                         onClicked: page.formatText("italic")
                     }
                     StyledButton {
                         visible: page.hasNote && page.selectedTextBox.length > 0
                         objectName: "noteUnderline"; text: "U"; font.underline: true; width: 34; focusPolicy: Qt.NoFocus
                         fillColour: page.formattingEditor && page.editorFont().underline ? page.withOpacity(page.accentColour, .3) : page.secondaryColour
-                        ToolTip.visible: hovered; ToolTip.text: qsTr("Underline (Ctrl+U)"); Accessible.name: ToolTip.text
+                        ToolTip.visible: hovered; ToolTip.text: page.showShortcutHints ? qsTr("Underline (Ctrl+U)") : Accessible.name
+                        Accessible.name: qsTr("Underline")
                         onClicked: page.formatText("underline")
                     }
                     StyledButton {
                         visible: page.hasNote && page.selectedTextBox.length > 0
                         objectName: "noteStrike"; text: "S"; font.strikeout: true; width: 34; focusPolicy: Qt.NoFocus
                         fillColour: page.formattingEditor && page.editorFont().strikeout ? page.withOpacity(page.accentColour, .3) : page.secondaryColour
-                        ToolTip.visible: hovered; ToolTip.text: qsTr("Strikethrough (Ctrl+Shift+X)"); Accessible.name: ToolTip.text
+                        ToolTip.visible: hovered; ToolTip.text: page.showShortcutHints ? qsTr("Strikethrough (Ctrl+Shift+X)") : Accessible.name
+                        Accessible.name: qsTr("Strikethrough")
                         onClicked: page.formatText("strikeout")
                     }
                     StyledSpinBox {

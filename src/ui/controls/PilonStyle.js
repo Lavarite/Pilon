@@ -4,6 +4,13 @@ var controlGap = 8
 var panelGap = 12
 var pageMargin = 16
 
+function showShortcutHints(window) {
+    for (let owner = window; owner; owner = owner.transientParent) {
+        if (typeof owner.showShortcutHints === "boolean") return owner.showShortcutHints
+    }
+    return Qt.platform.os !== "android"
+}
+
 function luminance(colour) {
     function linear(channel) {
         return channel <= .04045 ? channel / 12.92 : Math.pow((channel + .055) / 1.055, 2.4)

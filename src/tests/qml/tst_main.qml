@@ -24,6 +24,7 @@ TestCase {
         property bool backgroundEnabled: false
         property bool trayEnabled: false
         property bool offline: false
+        property bool hardwareKeyboardAvailable: true
         property string error: ""
         property bool quitCancelled: false
         property var configurationActions: []
@@ -1484,6 +1485,30 @@ TestCase {
         verify(heading.visible); verify(heading.text.includes("Tailscale"))
         verify(appWindow.openSettings("application")); renderWindow(settings)
         compare(heading.text,"Application")
+    }
+    function test_keyboardShortcutHintsRespectInputPreferenceAndDevice() {
+        verify(appWindow.openSettings("application"))
+        const activeSettings = findControl(appWindow, "settingsMenu")
+        const option = findControl(activeSettings, "keyboardShortcutHintsSetting")
+        verify(option)
+        const wasChecked = option.checked
+        try {
+            for (const enabled of [true, false]) {
+                if (option.checked !== enabled) option.click()
+                compare(appWindow.showShortcutHints, enabled)
+                compare(activeSettings.showShortcutHints, enabled)
+            }
+            option.click()
+            service.hardwareKeyboardAvailable = false
+            compare(appWindow.showShortcutHints, false)
+            compare(activeSettings.showShortcutHints, false)
+            compare(option.checked, true)
+            service.hardwareKeyboardAvailable = true
+            compare(appWindow.showShortcutHints, true)
+        } finally {
+            service.hardwareKeyboardAvailable = true
+            if (option.checked !== wasChecked) option.click()
+        }
     }
     function test_disablingSshHidesDevicesAndPreservesTheLocalFolder() {
         waitForWorkspaceIdle()

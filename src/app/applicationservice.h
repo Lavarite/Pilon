@@ -20,6 +20,7 @@ class ApplicationService : public QObject {
     Q_PROPERTY(bool startHidden READ startHidden NOTIFY changed)
     Q_PROPERTY(QString error READ error NOTIFY changed)
     Q_PROPERTY(bool offline READ offline NOTIFY connectivityChanged)
+    Q_PROPERTY(bool hardwareKeyboardAvailable READ hardwareKeyboardAvailable NOTIFY hardwareKeyboardAvailabilityChanged)
     Q_PROPERTY(bool resetting READ resetting)
     Q_PROPERTY(QVariantMap pendingResetChoices READ pendingResetChoices)
     Q_PROPERTY(QVariantMap pendingResetOwnedPaths READ pendingResetOwnedPaths)
@@ -52,6 +53,7 @@ public:
     bool foldSeparating() const { return m_foldSeparating; }
     bool foldOccluding() const { return m_foldOccluding; }
     QString foldPosture() const;
+    bool hardwareKeyboardAvailable() const { return m_hardwareKeyboardAvailable; }
     QString workspaceRoot() const;
     QString settingsFile() const;
     QUrl settingsLocation() const;
@@ -98,6 +100,7 @@ public:
 signals:
     void changed();
     void connectivityChanged();
+    void hardwareKeyboardAvailabilityChanged();
     void syncRequested();
     void settingsRequested();
     void quitRequested();
@@ -113,6 +116,7 @@ private:
     static QIcon columnIcon(const QColor &colour);
     bool configureStartup(bool enabled);
     void updateTray();
+    void setHardwareKeyboardAvailable(bool available);
     void updateFoldState(const QRect &bounds, bool vertical, bool separating, bool occluding, int posture);
     bool receiveWidgetUrl(const QUrl &url);
 #ifdef Q_OS_ANDROID
@@ -121,6 +125,7 @@ private:
     bool m_enabled = false, m_trayEnabled = true, m_startHidden = false, m_showPending = false;
     bool m_quitCancelled = false, m_resetting = false;
     bool m_setupRequired = false;
+    bool m_hardwareKeyboardAvailable = false;
     QString m_error;
     QString m_workspaceDestination;
     struct PendingConfiguration {

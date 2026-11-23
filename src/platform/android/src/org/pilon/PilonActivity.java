@@ -6,8 +6,10 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Rect;
 import android.graphics.drawable.Icon;
+import android.hardware.input.InputManager;
 import android.os.Build;
 import android.os.Bundle;
+import android.view.InputDevice;
 import java.util.ArrayList;
 import androidx.core.util.Consumer;
 import androidx.window.java.layout.WindowInfoTrackerCallbackAdapter;
@@ -43,6 +45,29 @@ public class PilonActivity extends QtActivity {
     private static native void nativeFoldChanged(int left, int top, int width, int height,
         boolean vertical, boolean separating, boolean occluding, int posture);
     private static native void nativeWidgetRequested(String uri);
+    private static native void nativeKeyboardAvailabilityChanged(boolean available);
+
+    private final InputManager.InputDeviceListener keyboardListener = new InputManager.InputDeviceListener() {
+        @Override public void onInputDeviceAdded(int id) { updateKeyboardAvailability(); }
+        @Override public void onInputDeviceChanged(int id) { updateKeyboardAvailability(); }
+        @Override public void onInputDeviceRemoved(int id) { updateKeyboardAvailability(); }
+    };
+
+    private void updateKeyboardAvailability() {
+        if (!nativeReceiverReady || !observing) return;
+        InputManager input = getSystemService(InputManager.class);
+        if (input != null) {
+            for (int id : input.getInputDeviceIds()) {
+                InputDevice device = input.getInputDevice(id);
+                if (device != null && !device.isVirtual()
+                    && device.getKeyboardType() == InputDevice.KEYBOARD_TYPE_ALPHABETIC) {
+                    nativeKeyboardAvailabilityChanged(true);
+                    return;
+                }
+            }
+        }
+        nativeKeyboardAvailabilityChanged(false);
+    }
 
     private String widgetUri(Intent intent) {
         if (intent != null && PilonWidgets.COLLECTION_CLICK.equals(intent.getAction())) return PilonWidgets.collectionUri(this, intent);
@@ -77,17 +102,29 @@ public class PilonActivity extends QtActivity {
 
     public void attachNativeObserver() {
         nativeReceiverReady = true;
-        observing = true;
-        if (foldTracker == null)
-            foldTracker = new WindowInfoTrackerCallbackAdapter(WindowInfoTracker.getOrCreate(this));
-        foldTracker.addWindowLayoutInfoListener(this, getMainExecutor(), foldListener);
+        if (!observing) {
+            observing = true;
+            if (foldTracker == null)
+                foldTracker = new WindowInfoTrackerCallbackAdapter(WindowInfoTracker.getOrCreate(this));
+            foldTracker.addWindowLayoutInfoListener(this, getMainExecutor(), foldListener);
+            InputManager input = getSystemService(InputManager.class);
+            if (input != null) input.registerInputDeviceListener(keyboardListener, null);
+        }
+        updateKeyboardAvailability();
         drainWidgetUris();
     }
 
     public void detachNativeObserver() {
         nativeReceiverReady = false;
+        stopNativeObservation();
+    }
+
+    private void stopNativeObservation() {
+        if (!observing) return;
         observing = false;
         if (foldTracker != null) foldTracker.removeWindowLayoutInfoListener(foldListener);
+        InputManager input = getSystemService(InputManager.class);
+        if (input != null) input.unregisterInputDeviceListener(keyboardListener);
     }
 
     @SuppressWarnings("deprecation")
@@ -126,15 +163,13 @@ public class PilonActivity extends QtActivity {
 
     @Override
     public void onStop() {
-        observing = false;
-        if (foldTracker != null) foldTracker.removeWindowLayoutInfoListener(foldListener);
+        stopNativeObservation();
         super.onStop();
     }
 
     @Override
     public void onDestroy() {
-        observing = false;
-        if (foldTracker != null) foldTracker.removeWindowLayoutInfoListener(foldListener);
+        stopNativeObservation();
         if (!isChangingConfigurations()) nativeReceiverReady = false;
         super.onDestroy();
     }
