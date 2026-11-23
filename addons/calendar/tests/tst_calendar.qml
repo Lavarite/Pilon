@@ -2346,7 +2346,7 @@ TestCase {
         waitForRendering(page)
         const view = findChild(page, "calendarViewMode"), actions = findChild(page, "calendarActions")
         const middle = view.mapToItem(actions, 0, view.height / 2).y
-        for (const name of ["calendarNewEvent", "calendarSync", "calendarSettings", "calendarShare"]) {
+        for (const name of ["calendarNewEvent", "calendarSync", "calendarShare"]) {
             const button = findChild(page, name)
             compare(button.display, AbstractButton.IconOnly)
             verify(button.icon.source.toString().length > 0)
@@ -2359,7 +2359,7 @@ TestCase {
                 return position.x >= -.5 && position.x + button.width <= actions.width + .5
             }, 5000, name + " is revealed on focus")
         }
-        verify(findChild(page, "calendarSettings").icon.source.toString().endsWith("cog-6-tooth.svg"))
+        verify(findChild(page, "calendarSettings") === null)
         capture(page, "/tmp/pilon-calendar-icon-actions.png")
     }
     function test_recurringScopeResets() {

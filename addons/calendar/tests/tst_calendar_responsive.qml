@@ -9,7 +9,6 @@ TestCase {
     when: windowShown
     width: 1440; height: 900
     property var ids: []
-    SignalSpy { id: settingsRequested; signalName: "settingsRequested" }
     Component {
         id: ownerComponent
         ApplicationWindow {
@@ -42,7 +41,7 @@ TestCase {
     Component { id: standardButton; App.CalendarButton { text: qsTr("Today") } }
     function toolbarControls(page) {
         return ["calendarPrevious", "calendarToday", "calendarNext", "calendarPickDate", "calendarViewMode",
-                "calendarNewEvent", "calendarSync", "calendarSettings", "calendarShare"].map(name => findChild(page, name))
+                "calendarNewEvent", "calendarSync", "calendarShare"].map(name => findChild(page, name))
     }
     function toolbarCases() {
         const sizes = [{tag: "cover", width: 360, sidebarWidth: 64, scale: 1, textSize: 14},
@@ -89,7 +88,7 @@ TestCase {
         const date = findChild(page, "calendarPickDate"), position = date.mapToItem(page, 0, 0)
         verify(position.x + date.width <= page.width + .5, "The full date remains in the page")
         const viewport = findChild(page, "calendarActions")
-        for (const name of ["calendarShare", "calendarSettings", "calendarViewMode"]) {
+        for (const name of ["calendarShare", "calendarSync", "calendarViewMode"]) {
             const control = findChild(page, name)
             owner.requestActivate(); control.forceActiveFocus(); tryVerify(() => control.activeFocus)
             const bounds = control.mapToItem(viewport, 0, 0)
@@ -111,6 +110,33 @@ TestCase {
     }
     function cleanupTestCase() {
         for (const id of ids) testCalendar.deleteEvent(id, "series")
+    }
+    function test_dayFitsViewportWithConcurrentEvents_data() {
+        return [{tag: "cover", width: 320, scale: 1},
+                {tag: "cover-scaled", width: 360, scale: 1.4},
+                {tag: "unfolded", width: 752, scale: 1}]
+    }
+    function test_dayFitsViewportWithConcurrentEvents(data) {
+        const owner = createTemporaryObject(ownerComponent, test, {width: data.width, uiScale: data.scale})
+        verify(owner)
+        const page = owner.page; page.viewMode = 0
+        owner.update(); verify(waitForRendering(owner.contentItem))
+        const view = findChild(page, "calendarTimeline")
+        const header = findChild(page, "calendarDayHeader-0")
+        const first = findChild(page, "calendarBlock-" + ids[1] + "-2097-03-05")
+        const concurrent = findChild(page, "calendarBlock-" + ids[7] + "-2097-03-05")
+        verify(first && concurrent, "Both simultaneous events are present")
+        fuzzyCompare(view.contentWidth, view.width, .5, "The whole day is visible within one viewport")
+        fuzzyCompare(header.width, first.parent.width, .5, "The header spans the same column as the events")
+        for (const block of [first, concurrent]) {
+            const left = block.mapToItem(view, 0, 0).x
+            verify(left >= page.timeGutterWidth && left + block.width <= view.width + .5)
+        }
+        swipe(page, view, view.width * .75, -100)
+        tryVerify(() => page.iso(page.selectedDate) === "2097-03-06")
+        tryCompare(page, "periodOffset", 0)
+        fuzzyCompare(view.contentX, 0, .5)
+        fuzzyCompare(view.contentWidth, view.width, .5)
     }
     function test_readableDaysScrollInsteadOfCompress_data() {
         const sizes = [{tag: "320", width: 320, scale: 1},
@@ -417,10 +443,11 @@ TestCase {
         const page = owner.page; page.viewMode = 0
         owner.update(); verify(waitForRendering(owner.contentItem))
         const view = findChild(page, "calendarTimeline"), header = findChild(page, "calendarTimelineHeader")
-        verify(view.contentWidth > view.width)
-        view.contentX = view.contentWidth - view.width
+        fuzzyCompare(view.contentWidth, view.width, .5)
         const title = findChild(page, "calendarDayHeader-0"), bounds = title.mapToItem(page, 0, 0)
+        view.contentY = view.contentHeight - view.height
         compare(header.contentX, 0)
+        compare(title.mapToItem(page, 0, 0), bounds)
         verify(bounds.x >= 0 && bounds.x + title.width <= page.width + .5)
         const date = findChild(page, "calendarPickDate"), button = date.mapToItem(page, 0, 0)
         verify(button.x >= 0 && button.x + date.width <= page.width + .5)
@@ -445,26 +472,28 @@ TestCase {
         const owner = createTemporaryObject(ownerComponent, test, {width: 360, uiScale: 1.4})
         verify(owner !== null)
         const page = owner.page
-        settingsRequested.target = page; settingsRequested.clear()
         owner.update(); verify(waitForRendering(owner.contentItem))
         const view = findChild(page, "calendarActions")
         verify(view.contentWidth > view.width, "The action strip scrolls: content " + view.contentWidth + ", viewport " + view.width + ", page " + page.width)
-        for (const name of ["calendarShare", "calendarSettings", "calendarViewMode"]) {
+        for (const name of ["calendarShare", "calendarSync", "calendarViewMode"]) {
             const control = findChild(page, name)
             owner.requestActivate(); control.forceActiveFocus(); tryVerify(() => control.activeFocus)
             const position = control.mapToItem(view, 0, 0)
             verify(position.x >= -.5 && position.x + control.width <= view.width + .5, "Focused actions are revealed")
         }
-        const settings = findChild(page, "calendarSettings")
-        settings.forceActiveFocus(); keyClick(Qt.Key_Space); compare(settingsRequested.count, 1)
+        const share = findChild(page, "calendarShare")
+        share.forceActiveFocus(); keyClick(Qt.Key_Space)
+        tryVerify(() => !!findChild(page, "calendarSharesDialog"))
+        const shares = findChild(page, "calendarSharesDialog")
+        tryCompare(shares, "opened", true)
+        shares.close(); tryCompare(shares, "opened", false)
         view.contentX = 0
         const touch = touchEvent(view), y = view.height / 2
         touch.press(0, view, view.width * .9, y).commit()
         for (let i = 1; i <= 8; ++i) { touch.move(0, view, view.width * (.9 - .8 * i / 8), y).commit(); wait(20) }
         touch.release(0, view, view.width * .1, y).commit(); view.cancelFlick()
         verify(view.contentX > 0, "The actions can be scrolled by touch")
-        compare(settingsRequested.count, 1)
+        verify(!shares.opened)
         verify(!page.eventEditor.opened)
-        settingsRequested.target = null
     }
 }

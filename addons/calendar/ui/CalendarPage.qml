@@ -88,6 +88,7 @@ Control {
         const count = timelineDays
         if (!count) return []
         const available = Math.max(0, timeline.width - timeGutterWidth) / count
+        if (viewMode === 0) return [available]
         const widths = []
         for (let i = 0; i < count; ++i) {
             let lanes = 1
@@ -383,7 +384,6 @@ Control {
                     }
                     CalendarAction { id: newEventAction; text: qsTr("New event"); objectName: "calendarNewEvent"; icon.source: "icons/plus.svg"; onClicked: page.create(page.selectedDate,540) }
                     CalendarAction { objectName: "calendarSync"; text: qsTr("Refresh"); icon.source: "icons/refresh.svg"; enabled: !page.calendar.syncing; onClicked: page.calendar.sync() }
-                    CalendarAction { objectName: "calendarSettings"; text: qsTr("Calendars"); icon.source: "icons/cog-6-tooth.svg"; onClicked: page.settingsRequested() }
                     CalendarAction { objectName: "calendarShare"; text: qsTr("Share"); icon.source: "icons/share.svg"; onClicked: { sharesLoader.active = true; sharesLoader.item.open() } }
                 }
             }
@@ -492,12 +492,12 @@ Control {
                 Flickable {
                     objectName: "calendarTimelineHeader"
                     x: page.timeGutterWidth; width: parent.width - x; height: parent.height
-                    contentWidth: page.viewMode === 0 ? width : timeline.contentWidth - page.timeGutterWidth
-                    contentHeight: height; contentX: page.viewMode === 0 ? 0 : timeline.contentX
+                    contentWidth: timeline.contentWidth - page.timeGutterWidth
+                    contentHeight: height; contentX: timeline.contentX
                     clip: true; interactive: false
                     Row {
                         id: timelineHeaders
-                        Repeater { model: page.timelineDays; delegate: Label { required property int index; objectName: "calendarDayHeader-" + index; width: page.viewMode === 0 ? timeline.width - page.timeGutterWidth : page.timelineColumnWidths[index]; horizontalAlignment: Text.AlignHCenter; text: Qt.formatDate(page.addDays(page.rangeStart,index),"ddd d"); color: page.textColour } }
+                        Repeater { model: page.timelineDays; delegate: Label { required property int index; objectName: "calendarDayHeader-" + index; width: page.timelineColumnWidths[index]; horizontalAlignment: Text.AlignHCenter; text: Qt.formatDate(page.addDays(page.rangeStart,index),"ddd d"); color: page.textColour } }
                     }
                 }
             }
@@ -507,7 +507,7 @@ Control {
                 Layout.fillWidth: true; Layout.fillHeight: true; clip: true; contentHeight: 24*60
                 contentWidth: page.timelineColumnOffset(page.timelineColumnWidths.length)
                 bottomMargin: timelineHorizontal.visible ? timelineHorizontal.height : 0
-                flickableDirection: Flickable.HorizontalAndVerticalFlick
+                flickableDirection: page.viewMode === 0 ? Flickable.VerticalFlick : Flickable.HorizontalAndVerticalFlick
                 activeFocusOnTab: true
                 onContentWidthChanged: contentX = Math.min(contentX, Math.max(0, contentWidth - width))
                 Keys.onUpPressed: contentY = Math.max(0, contentY - 60)
@@ -593,7 +593,7 @@ Control {
                                                 width: parent.width
                                                 text: block.modelData.title + (block.modelData.pending ? qsTr(" (sync pending)") : "")
                                                 wrapMode: Text.Wrap
-                                                maximumLineCount: Math.max(1, Math.floor((block.height - 8 - (blockTime.visible ? blockTime.implicitHeight + 2 : 0)) / eventMetrics.height))
+                                                maximumLineCount: Math.max(1, Math.floor((block.height - 8 - (block.height >= 44 ? blockTime.implicitHeight + 2 : 0)) / eventMetrics.height))
                                                 color: page.textColour; elide: Text.ElideRight; font.pixelSize: 12
                                             }
                                             Label {
