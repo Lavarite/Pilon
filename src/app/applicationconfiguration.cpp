@@ -204,6 +204,12 @@ bool ApplicationService::reconcileConfiguredStartup(bool previous, QString &erro
 #else
     PilonSettings settings;
     const bool desired = settings.value("app/backgroundEnabled", false).toBool();
+    // Startup has already recovered any interrupted file transaction. Its persisted result
+    // determines which registration must survive an interruption before or after commit.
+    if (QFileInfo::exists(QDir(workspaceRoot()).filePath(PiconfTransaction::StartupPending))) {
+        if (!configureStartup(desired)) { error = m_error; return false; }
+        return PiconfTransaction::setStartupPending(workspaceRoot(), false, error);
+    }
     if (desired != previous && !configureStartup(desired)) {
         error = m_error;
         settings.setValue("app/backgroundEnabled", previous);
@@ -245,13 +251,23 @@ bool ApplicationService::finishConfigurationImport(QString &error)
 #ifndef Q_OS_ANDROID
     const bool startup = pending->incoming.values().value("application").toMap().value("backgroundEnabled", false).toBool();
     const bool changeStartup = startup != backgroundEnabled();
-    if (changeStartup && !configureStartup(startup)) { error = m_error; return false; }
+    if (changeStartup) {
+        if (!PiconfTransaction::setStartupPending(pending->root, true, error)) return false;
+        if (!configureStartup(startup)) { error = m_error; return false; }
+    }
 #endif
     if (!PiconfTransaction::commit(pending->root, expected, updated, error)) {
 #ifndef Q_OS_ANDROID
-        if (changeStartup && !configureStartup(backgroundEnabled())) error += '\n' + m_error;
+        if (changeStartup) {
+            QString recoveryError;
+            if (!configureStartup(backgroundEnabled())) error += '\n' + m_error;
+            else if (!PiconfTransaction::setStartupPending(pending->root, false, recoveryError)) error += '\n' + recoveryError;
+        }
 #endif
         return false;
     }
+#ifndef Q_OS_ANDROID
+    if (changeStartup) return PiconfTransaction::setStartupPending(pending->root, false, error);
+#endif
     return true;
 }
