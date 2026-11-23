@@ -1093,7 +1093,6 @@ Item {
 
                 required property int index
                 required property var modelData
-                readonly property Item dragPreviewIcon: filesPage.largeIconView ? gridIcon : rowIcon
                 property bool hovered: filePointerArea.containsMouse
                                        && filePointerArea.hoverIndex === index
                 property bool selected: filesPage.isEntrySelected(modelData)
@@ -1145,7 +1144,6 @@ Item {
                         height: parent.height
 
                         ControlsImpl.ColorImage {
-                            id: rowIcon
                             anchors.left: parent.left
                             anchors.verticalCenter: parent.verticalCenter
                             width: 18 + filesPage.fileZoomLevel * 2
@@ -1215,7 +1213,6 @@ Item {
                     spacing: 6
 
                     ControlsImpl.ColorImage {
-                        id: gridIcon
                         anchors.horizontalCenter: parent.horizontalCenter
                         width: 44 + (filesPage.fileZoomLevel - 2) * 8
                         height: width
@@ -1260,7 +1257,6 @@ Item {
             property var pressedEntry: null
             property real startX: 0
             property real startY: 0
-            property point pressedIconOffset
             property bool itemDragging: false
             property bool contextHeld: false
             property bool collapseOnRelease: false
@@ -1315,14 +1311,6 @@ Item {
                     return
                 }
                 const entry = pressedEntry
-                const icon = fileEntryList.itemAtIndex(pressedIndex)?.dragPreviewIcon
-                if (icon) {
-                    const origin = icon.mapToItem(null, 0, 0)
-                    const position = mapToItem(null, mouse.x, mouse.y)
-                    pressedIconOffset = Qt.point(position.x - origin.x, position.y - origin.y)
-                } else {
-                    pressedIconOffset = Qt.point(22, 22)
-                }
                 if (mouse.button === Qt.RightButton) {
                     if (!filesPage.isEntrySelected(entry))
                         filesPage.selectEntry(entry, pressedIndex, Qt.NoModifier)
@@ -1359,7 +1347,7 @@ Item {
                     filesPage.remoteFiles.startDrag(entries,
                         Qt.resolvedUrl(filesPage.iconForFile(entry.name, entry.directory, entry.path, entry.deviceId, filesPage.usernameForEntry(entry))),
                         filesPage.iconColourForEntry(entry), filesPage.textColour,
-                        pressedIconOffset)
+                        mapToItem(null, mouse.x, mouse.y))
                 } else {
                     rubberBandSelection.visible = true
                     updateRectangle(mouse.x, mouse.y)

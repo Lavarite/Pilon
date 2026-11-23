@@ -199,26 +199,35 @@ private slots:
         QCOMPARE(other.currentPath(), canonical + "-public");
     }
 
-    void paintedDragPreviewFollowsTheOriginalGrabPoint()
+    void dragPreviewStartsAtThePointerAndTracksRealMotion()
     {
         QQuickWindow window;
         window.resize(500, 500);
         QPixmap pixmap(224, 216);
         pixmap.setDevicePixelRatio(2);
         pixmap.fill(Qt::transparent);
-        FileDragPreview preview(&window, pixmap, QPointF(59, 27));
+        const QPointF iconCenter(56, 32);
+        FileDragPreview preview(&window, pixmap, iconCenter, QPointF(130, 108));
         QCOMPARE(preview.size(), QSizeF(112, 108));
         QMimeData data;
-        QDragEnterEvent enter(QPointF(139, 127), Qt::MoveAction, &data, Qt::LeftButton, {});
+        QVERIFY(preview.isVisible());
+        QCOMPARE(preview.position() + iconCenter, QPointF(130, 108));
+        QDragEnterEvent enter(QPointF(250, 250), Qt::MoveAction, &data, Qt::LeftButton, {});
         QCoreApplication::sendEvent(&window, &enter);
         QVERIFY(preview.isVisible());
-        QCOMPARE(preview.position(), QPointF(80, 100));
+        QDragMoveEvent enterMove(QPointF(250, 250), Qt::MoveAction, &data, Qt::LeftButton, {});
+        QCoreApplication::sendEvent(&window, &enterMove);
+        QCOMPARE(preview.position() + iconCenter, QPointF(130, 108));
         QDragMoveEvent move(QPointF(200.5, 161.5), Qt::MoveAction, &data, Qt::LeftButton, {});
         QCoreApplication::sendEvent(&window, &move);
-        QCOMPARE(preview.position(), QPointF(141.5, 134.5));
+        QCOMPARE(preview.position() + iconCenter, QPointF(200.5, 161.5));
         QDragLeaveEvent leave;
         QCoreApplication::sendEvent(&window, &leave);
         QVERIFY(!preview.isVisible());
+        QDragEnterEvent reenter(QPointF(420, 109), Qt::MoveAction, &data, Qt::LeftButton, {});
+        QCoreApplication::sendEvent(&window, &reenter);
+        QVERIFY(preview.isVisible());
+        QCOMPARE(preview.position() + iconCenter, QPointF(420, 109));
     }
 
     void disablingSshDiscardsAPendingRemoteBrowseAndRestoresTheLocalFolder()
@@ -953,7 +962,7 @@ private slots:
         manager.startDrag({entry}, icon, Qt::white, Qt::white, QPointF(53, 47));
         auto *drag = manager.findChild<QDrag *>();
         QVERIFY(drag);
-        QCOMPARE(drag->hotSpot(), QPoint(87, 57));
+        QCOMPARE(drag->hotSpot(), QPoint(56, 32));
         QCOMPARE(drag->mimeData()->urls(), QList<QUrl>{QUrl::fromLocalFile(path)});
         QVERIFY(drag->mimeData()->data("text/uri-list").contains("%23"));
         QCOMPARE(QJsonDocument::fromJson(drag->mimeData()->data("application/x-pilon-remote-entries")).toVariant().toList(),
