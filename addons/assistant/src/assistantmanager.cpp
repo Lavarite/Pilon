@@ -14,13 +14,17 @@
 #include <QMimeDatabase>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QQuickTextDocument>
 #include <QRandomGenerator>
 #include <QRegularExpression>
 #include <QSaveFile>
 #include "../../../src/core/workspace/pilonsettings.h"
 #include <QStandardPaths>
+#include <QSyntaxHighlighter>
 #include <QSysInfo>
 #include <QTcpServer>
+#include <QTextBlock>
+#include <QTextDocument>
 #include <QThread>
 #include <QUuid>
 #include <QtConcurrentRun>
@@ -35,6 +39,39 @@
 #include <sys/resource.h>
 
 namespace {
+// Qt imports Markdown anchors with the application link colour. Highlight
+// those ranges for this bubble without changing the text or the anchor.
+class MessageLinks final : public QSyntaxHighlighter
+{
+public:
+    MessageLinks(QTextDocument *document, const QColor &colour)
+        : QSyntaxHighlighter(document), m_colour(colour) {}
+
+    void setColour(const QColor &colour)
+    {
+        if (m_colour == colour) return;
+        m_colour = colour;
+        rehighlight();
+    }
+
+protected:
+    void highlightBlock(const QString &) override
+    {
+        const auto block = currentBlock();
+        QTextCharFormat linkFormat;
+        linkFormat.setForeground(m_colour);
+        linkFormat.setFontUnderline(true);
+        for (auto it = block.begin(); !it.atEnd(); ++it) {
+            const auto fragment = it.fragment();
+            if (!fragment.charFormat().anchorHref().isEmpty())
+                setFormat(fragment.position() - block.position(), fragment.length(), linkFormat);
+        }
+    }
+
+private:
+    QColor m_colour;
+};
+
 QJsonObject functionTool(const QString &name, const QString &description,
                          const QJsonObject &properties, const QJsonArray &required = {})
 {
@@ -105,6 +142,19 @@ QString locationTargetId(const QVariantMap &bookmark)
                                              bookmark.value("username").toString()}).toJson();
     return "location:" + QString::fromLatin1(QCryptographicHash::hash(key, QCryptographicHash::Sha256).toHex().left(24));
 }
+}
+
+void AssistantManager::styleMessageLinks(QQuickTextDocument *editorDocument, const QColor &colour) const
+{
+    if (!editorDocument || !editorDocument->textDocument()) return;
+    auto *document = editorDocument->textDocument();
+    for (auto *child : document->children()) {
+        if (auto *links = dynamic_cast<MessageLinks *>(child)) {
+            links->setColour(colour);
+            return;
+        }
+    }
+    new MessageLinks(document, colour);
 }
 
 AssistantManager::AssistantManager(QObject *parent) : QObject(parent)

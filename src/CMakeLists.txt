@@ -160,7 +160,7 @@ add_library(pilon_assistant STATIC
     ../addons/assistant/src/codexruntime.cpp ../addons/assistant/src/codexruntime.h ../addons/assistant/src/codexclient.cpp ../addons/assistant/src/codexclient.h ../addons/assistant/src/codexprovider.cpp ../addons/assistant/src/codexprovider.h)
 target_include_directories(pilon_assistant PUBLIC ${PILON_INCLUDE_DIRECTORIES})
 target_link_libraries(pilon_assistant PUBLIC
-    pilon_calendar pilon_devices pilon_assistant_models Qt6::Concurrent Qt6::Multimedia)
+    pilon_calendar pilon_devices pilon_assistant_models Qt6::Concurrent Qt6::Multimedia PRIVATE Qt6::Quick)
 if(ANDROID)
     target_link_libraries(pilon_assistant PRIVATE pilon_documents)
 endif()
