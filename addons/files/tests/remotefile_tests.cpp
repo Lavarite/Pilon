@@ -1496,18 +1496,35 @@ private slots:
         QVERIFY(manager.errorMessage().contains("second-locked"));
     }
 
+    void finalResultsAreCommittedBeforeCompletion_data()
+    {
+        QTest::addColumn<bool>("streamed");
+        QTest::newRow("queued results") << false;
+        QTest::newRow("batched results") << true;
+    }
+
     void finalResultsAreCommittedBeforeCompletion()
     {
+        QFETCH(bool, streamed);
         RemoteFileManager manager;
         manager.m_pendingRequest = {{"kind", "search"}, {"query", "website"}};
         manager.m_searchMode = true;
         manager.setSearching(true);
+        const QVariantMap entry{{"path", "/website"}};
+        QSignalSpy entriesChanged(&manager, &RemoteFileManager::entriesChanged);
+        if (streamed) {
+            manager.m_searchUpdateTimer.setInterval(60000);
+            manager.appendSearchEntry(manager.m_requestGeneration, entry);
+            QVERIFY(manager.m_searchUpdateTimer.isActive());
+            QVERIFY(entriesChanged.isEmpty());
+        }
         bool completeWithResults = false;
         connect(&manager, &RemoteFileManager::searchingChanged, this, [&] {
-            if (!manager.searching()) completeWithResults = manager.entries().size() == 1;
+            if (!manager.searching())
+                completeWithResults = entriesChanged.size() == 1 && manager.entries() == QVariantList{entry};
         });
         finishSearch(manager, {{"status", "cancelled"}, {"searchMode", true},
-            {"entries", QVariantList{QVariantMap{{"path", "/website"}}}}});
+            {"entries", QVariantList{entry}}});
         QTRY_VERIFY(!manager.searching());
         QVERIFY(completeWithResults);
     }

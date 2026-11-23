@@ -3572,13 +3572,13 @@ void RemoteFileManager::handleOperationFinished()
         return;
     }
     if (searchRequest) {
+        const bool resultsAwaitingNotification = m_searchUpdateTimer.isActive();
         m_searchUpdateTimer.stop();
-        // Commit the final snapshot before announcing completion. This includes
-        // results whose queued progress callbacks have not reached the UI yet.
-        if (result.contains("entries")) {
-            const auto entries = result.value("entries").toList();
-            if (m_entries != entries) { m_entries = entries; emit entriesChanged(); }
-        }
+        // Publish both queued and batched results before announcing completion.
+        const auto entries = result.value("entries").toList();
+        const bool resultsChanged = result.contains("entries") && m_entries != entries;
+        if (resultsChanged) m_entries = entries;
+        if (resultsChanged || resultsAwaitingNotification) emit entriesChanged();
         setErrorMessage(error);
         updateFileWatches();
         if ((status == "credential" || status == "hostKey")
