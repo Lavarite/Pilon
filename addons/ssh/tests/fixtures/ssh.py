@@ -17,6 +17,9 @@ if mode == 'refused':
 if mode == 'timeout':
     print('ssh: connect to host host.fixture.invalid port 22: Connection timed out', flush=True)
     sys.exit(255)
+if mode == 'waiting':
+    sys.stdin.readline()
+    sys.exit(0)
 if mode == 'denied':
     print('ssh: connect to host host.fixture.invalid port 22: Permission denied', flush=True)
     sys.exit(255)

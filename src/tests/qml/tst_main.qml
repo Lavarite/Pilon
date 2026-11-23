@@ -1063,6 +1063,21 @@ TestCase {
     function test_configurationImportRequiresReview_data() {
         return [{tag: "desktop", width: 1000, height: 720}, {tag: "narrow", width: 360, height: 640}]
     }
+    function test_mainWindowCanMoveFromTheTopEdge() {
+        const screen = tabletInput.screenGeometry()
+        try {
+            tabletInput.setScreenGeometry(Qt.rect(0, 0, 1200, 900))
+            tabletInput.configureWindow(appWindow, 800, 600)
+            appWindow.x = 100; appWindow.y = 100
+            renderWindow(appWindow)
+            const area = findVisualControl(appWindow.contentItem, "windowMoveArea")
+            verify(area && area.enabled)
+            mousePress(area, area.width / 2, 8)
+            mouseMove(area, area.width / 2 + 40, 38, 20)
+            mouseRelease(area, area.width / 2 + 40, 38)
+            tryVerify(() => appWindow.x > 100 && appWindow.y > 100)
+        } finally { tabletInput.setScreenGeometry(screen) }
+    }
     function test_configurationImportRequiresReview(data) {
         waitForWorkspaceIdle()
         service.configurationActions = []
