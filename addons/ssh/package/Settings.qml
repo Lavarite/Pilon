@@ -108,15 +108,10 @@ PilonScrollView {
                 readonly property alias includeButton: included
                 objectName: "sshDeviceUsernameRow-" + modelData.id
                 Layout.fillWidth: true; Layout.minimumWidth: 0
-                GridLayout {
-                    id: row
+                RowLayout {
                     visible: page.editingDeviceId !== deviceRow.modelData.id
                     Layout.fillWidth: true; Layout.minimumWidth: 0
-                    readonly property real usernameWidth: width - Math.ceil(hostMetrics.advanceWidth) - atLabel.implicitWidth
-                        - 28 - (deviceRow.modelData.saved ? actions.implicitWidth + columnSpacing : 0) - columnSpacing * 3
-                    readonly property bool compact: usernameWidth < Math.max(100, username.implicitHeight * 2.5)
-                    columns: compact ? 3 : 5
-                    columnSpacing: 8; rowSpacing: 4
+                    spacing: 8
                     RoundedCheckBox {
                         id: included
                         objectName: "sshDeviceIncluded-" + deviceRow.modelData.id
@@ -133,13 +128,13 @@ PilonScrollView {
                     PilonTextField {
                         id: username
                         objectName: "sshDeviceUsername-" + deviceRow.modelData.id
-                        Layout.fillWidth: true; Layout.minimumWidth: 0
-                        Layout.preferredWidth: 120; Layout.maximumWidth: row.compact ? Infinity : Math.min(160, row.usernameWidth)
-                        Layout.columnSpan: row.compact ? 2 : 1
+                        Layout.preferredWidth: Math.min(110, Math.round(page.availableWidth * .28))
+                        Layout.minimumWidth: 0
                         text: page.addon.fileWorkspace.deviceUsernames[deviceRow.modelData.id] || ""
                         placeholderText: page.addon.fileWorkspace.username
                         Accessible.name: qsTr("%1 SSH username").arg(deviceRow.modelData.name)
                         selectByMouse: true
+                        elideWhenUnfocused: true
                         onEditingFinished: page.addon.fileWorkspace.setDeviceUsername(deviceRow.modelData.id, text)
                     }
                     Label {
@@ -148,24 +143,16 @@ PilonScrollView {
                         text: "@"; color: page.addon.selectedTextColour
                     }
                     Label {
-                        id: hostLabel
                         objectName: "sshDeviceHost-" + deviceRow.modelData.id
-                        Layout.fillWidth: true
-                        Layout.minimumWidth: row.compact ? 0 : Math.ceil(hostMetrics.advanceWidth)
-                        Layout.columnSpan: row.compact && !deviceRow.modelData.saved ? 2 : 1
-                        readonly property string deviceName: deviceRow.modelData.name || ""
-                        readonly property string address: deviceRow.modelData.ip || ""
-                        text: deviceName && address && deviceName !== address ? deviceName + " " + address
-                            : deviceName || address || deviceRow.modelData.id
+                        Layout.fillWidth: true; Layout.minimumWidth: 0
+                        text: deviceRow.modelData.name || deviceRow.modelData.id
                         color: page.addon.selectedTextColour
                         textFormat: Text.PlainText
-                        wrapMode: row.compact ? Text.WrapAnywhere : Text.NoWrap
-                        elide: row.compact ? Text.ElideNone : Text.ElideRight
+                        elide: Text.ElideRight
                         HoverHandler { id: addressHover }
                         ToolTip.visible: addressHover.hovered && truncated
                         ToolTip.text: text
                     }
-                    TextMetrics { id: hostMetrics; text: hostLabel.text; font: hostLabel.font }
                     PilonButton {
                         id: actions
                         objectName: "sshDeviceActions-" + deviceRow.modelData.id

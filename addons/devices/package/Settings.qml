@@ -114,9 +114,9 @@ PilonScrollView {
             Layout.fillWidth: true; spacing: 12
             PilonSectionHeader { Layout.fillWidth: true; text: qsTr("Device discovery") }
             Label {
+                visible: !page.discoveryConnected
                 Layout.fillWidth: true; wrapMode: Text.Wrap; color: page.addon.selectedTextColour
-                text: page.discoveryConnected ? qsTr("Read-only device discovery connected")
-                    : qsTr("Connect an OAuth credential with devices:core:read permission to list your Tailscale devices in Pilon.")
+                text: qsTr("Connect an OAuth credential with devices:core:read permission to list your Tailscale devices in Pilon.")
             }
             PilonWrapButton {
                 objectName: "devicesCreateCredential"
