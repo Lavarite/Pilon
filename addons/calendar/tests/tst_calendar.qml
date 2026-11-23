@@ -1272,11 +1272,11 @@ TestCase {
         verify(bodyTop - titleBottom >= 0 && bodyTop - titleBottom <= 20, "Confirmation title and message should be adjacent")
         verify(confirmation.height < 180, "A short confirmation must not reserve a blank title bar")
         capture(confirmation.contentItem, "/tmp/pilon-calendar-delete.png")
-        mouseClick(findChild(confirmation.contentItem, "calendarDeleteCancel"))
+        mouseClick(confirmation.cancelButton)
         verify(testCalendar.event(id).title === "Design review")
         mouseClick(editorChild(page.eventEditor, "calendarEventDelete"))
         tryCompare(confirmation, "opened", true); waitForRendering(confirmation.contentItem)
-        mouseClick(findChild(confirmation.contentItem, "calendarDeleteAccept"))
+        mouseClick(confirmation.confirmButton)
         compare(testCalendar.event(id).deleted, true)
         verify(!testCalendar.events("2026-11-01", "2026-11-02").some(e => e.id === id))
     }
