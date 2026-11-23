@@ -12,7 +12,7 @@ Flickable {
     acceptedButtons: Qt.NoButton
     interactive: !pinch.active
     flickableDirection: Flickable.AutoFlickIfNeeded
-    boundsBehavior: Flickable.StopAtBounds
+    PilonScrollMotion { view: surface }
     clip: true
     // Handlers belong to the viewport, so scrolling doesn't move their coordinates.
     Item {

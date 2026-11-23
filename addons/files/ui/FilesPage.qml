@@ -255,6 +255,7 @@ Control {
 
                         clip: true
                         model: filesPage.devices
+                        PilonScrollMotion { view: deviceChoices }
 
                         delegate: Item {
                             required property var modelData
@@ -951,7 +952,7 @@ Control {
             onContentHeightChanged: if (contentY > Math.max(0, contentHeight - height)) {
                 cancelFlick(); contentY = Math.max(0, contentHeight - height)
             }
-            boundsBehavior: Flickable.StopAtBounds
+            PilonScrollMotion { view: locationsViewport }
             ScrollBar.vertical: PilonScrollBar { policy: locationsViewport.interactive ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff }
 
             TileSplitView {

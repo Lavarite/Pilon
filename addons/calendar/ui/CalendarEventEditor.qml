@@ -231,7 +231,6 @@ PilonPopup {
             ScrollBar.vertical.interactive: true
             contentItem: Flickable {
                 clip: true; interactive: true; contentWidth: width; contentHeight: form.implicitHeight
-                boundsBehavior: Flickable.StopAtBounds
                 ColumnLayout {
                 id: form
                 width: formScroll.contentItem.width

@@ -1404,7 +1404,7 @@ Window {
                 contentWidth: width
                 contentHeight: applicationContents.implicitHeight
                 clip: true
-                boundsBehavior: Flickable.StopAtBounds
+                PilonScrollMotion { view: applicationPage }
                 ScrollBar.vertical: PilonScrollBar { }
 
                 Column {
@@ -1830,7 +1830,7 @@ Window {
             contentWidth: width
             contentHeight: sshConnectionContents.height
             clip: true
-            boundsBehavior: Flickable.StopAtBounds
+            PilonScrollMotion { view: sshConnectionScroll }
             ScrollBar.vertical: PilonScrollBar { }
             ColumnLayout {
                 id: sshConnectionContents

@@ -73,6 +73,7 @@ Basic.ComboBox {
             clip: true; implicitHeight: contentHeight
             model: control.popup.visible ? control.delegateModel : null
             currentIndex: control.highlightedIndex
+            PilonScrollMotion { view: choices }
             Basic.ScrollIndicator.vertical: Basic.ScrollIndicator {}
         }
         background: Rectangle {

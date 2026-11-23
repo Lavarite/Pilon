@@ -111,7 +111,7 @@ Column {
         cellWidth: width / columns
         cellHeight: Math.max(84, sizeSlider.value + 48)
         clip: true
-        boundsBehavior: Flickable.StopAtBounds
+        PilonScrollMotion { view: grid }
         activeFocusOnTab: count > 0
         keyNavigationEnabled: true
         Accessible.name: qsTr("Icons")

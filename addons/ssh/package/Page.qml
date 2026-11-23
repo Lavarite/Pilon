@@ -356,6 +356,7 @@ Item {
                         currentIndex: sshDevice.highlightedIndex
                         highlightMoveDuration: 0
                         ScrollIndicator.vertical: ScrollIndicator { }
+                        PilonScrollMotion { view: deviceChoices }
                         header: Item {
                             width: deviceChoices.width
                             height: input.height + 8
@@ -473,9 +474,9 @@ Item {
         contentHeight: terminalKeyFlow.implicitHeight
         flickableDirection: Flickable.HorizontalFlick
         interactive: horizontal
-        boundsBehavior: Flickable.StopAtBounds
         clip: true
         ScrollIndicator.horizontal: ScrollIndicator { }
+        PilonScrollMotion { view: terminalKeys }
 
         Flow {
             id: terminalKeyFlow
