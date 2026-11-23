@@ -26,6 +26,27 @@ TestCase {
         property bool offline: false
         property string error: ""
         property bool quitCancelled: false
+        property var configurationActions: []
+        property url nextConfigurationFile: ""
+        function chooseConfigurationBundle(owner, exporting, title, filter) {
+            test.compare(owner, test.findControl(appWindow, "settingsMenu"))
+            test.verify(filter.includes("*.piconfpack"))
+            configurationActions.push(exporting ? "save dialog" : "open dialog")
+            return nextConfigurationFile
+        }
+        function exportConfiguration(file) {
+            test.compare(file.toString(), nextConfigurationFile.toString())
+            configurationActions.push("export")
+            return true
+        }
+        function previewConfiguration(file, installed) {
+            test.compare(file.toString(), nextConfigurationFile.toString())
+            test.verify(installed.some(row => row.id === "files"))
+            configurationActions.push("preview")
+            return {summary: "Import and reopen Pilon?", details: "appearance.frostiness", different: true}
+        }
+        function cancelConfigurationImport() { configurationActions.push("cancel") }
+        function confirmConfigurationImport(installed) { configurationActions.push("import"); return true }
         property var iconColours: []
         function setIconColours(foreground, background, accent) { iconColours = [foreground, background, accent]; return true }
         property rect foldBounds: Qt.rect(0,0,0,0)
@@ -930,6 +951,46 @@ TestCase {
         verify(label)
         label.palette.windowText = "#000000"
         fuzzyCompare(label.color, settings.palette.windowText, 1 / 65535)
+    }
+    function test_configurationImportRequiresReview_data() {
+        return [{tag: "desktop", width: 1000, height: 720}, {tag: "narrow", width: 360, height: 640}]
+    }
+    function test_configurationImportRequiresReview(data) {
+        waitForWorkspaceIdle()
+        service.configurationActions = []
+        const screen = tabletInput.screenGeometry()
+        try {
+            tabletInput.setScreenGeometry(Qt.rect(0, 0, data.width, data.height))
+            tabletInput.configureWindow(appWindow, data.width, data.height)
+            verify(appWindow.openSettings("application"))
+            const settings = findControl(appWindow, "settingsMenu")
+            settings.width = data.width; settings.height = data.height
+            renderWindow(settings)
+            const review = findControl(settings, "configurationImportReview")
+            service.nextConfigurationFile = service.settingsLocation
+            tap(findControl(settings, "exportConfiguration"), null, false)
+            compare(service.configurationActions.join(","), "save dialog,export")
+            service.nextConfigurationFile = ""
+            tap(findControl(settings, "importConfiguration"), null, false)
+            compare(service.configurationActions.join(","), "save dialog,export,open dialog")
+            verify(!review.opened)
+            service.nextConfigurationFile = service.settingsLocation
+            for (const decision of ["cancel", "import"]) {
+                service.configurationActions = []
+                tap(findControl(settings, "importConfiguration"), null, false)
+                tryCompare(review, "opened", true)
+                compare(review.details, "appearance.frostiness")
+                compare(service.configurationActions.join(","), "open dialog,preview")
+                const action = decision === "cancel" ? review.cancelButton : review.confirmButton
+                revealControl(action)
+                verifyNativeBounds(action, action.Window.window)
+                mouseClick(action)
+                tryCompare(review, "opened", false)
+                tryVerify(() => service.configurationActions[service.configurationActions.length - 1] === decision)
+            }
+        } finally {
+            tabletInput.setScreenGeometry(screen)
+        }
     }
     function test_workspaceErrorPreservesPageAndEmptyStateGeometry(data) {
         appWindow.touchMode=data.touch;tabletInput.configureWindow(appWindow,data.width,data.height)

@@ -4,10 +4,12 @@
 #include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
+#include <QFileDialog>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QKeyEvent>
 #include <QUrl>
 #include <QUrlQuery>
 #include <QRegularExpression>
@@ -170,6 +172,14 @@ void ApplicationService::updateFoldState(const QRect &bounds, bool vertical, boo
 }
 
 bool ApplicationService::eventFilter(QObject *object, QEvent *event) {
+    // The Settings window also binds Escape. Let its modal file picker receive
+    // the key before Qt Quick considers shortcuts in the transient parent.
+    if (event->type() == QEvent::ShortcutOverride
+        && static_cast<QKeyEvent *>(event)->matches(QKeySequence::Cancel)
+        && qobject_cast<QFileDialog *>(QApplication::activeModalWidget())) {
+        event->accept();
+        return true;
+    }
     if (object == qApp && event->type() == QEvent::FileOpen
         && receiveWidgetUrl(static_cast<QFileOpenEvent *>(event)->url())) return true;
     if (object == m_window && event->type() == QEvent::DevicePixelRatioChange) emit foldChanged();
@@ -230,6 +240,18 @@ void ApplicationService::attachAndroidFoldObserver() {
     });
 }
 #endif
+
+QUrl ApplicationService::chooseConfigurationBundle(QWindow *owner, bool exporting, const QString &title, const QString &filter)
+{
+    QFileDialog picker(nullptr, title, workspaceRoot(), filter);
+    picker.setAcceptMode(exporting ? QFileDialog::AcceptSave : QFileDialog::AcceptOpen);
+    picker.setFileMode(exporting ? QFileDialog::AnyFile : QFileDialog::ExistingFile);
+    if (exporting) picker.setDefaultSuffix(QStringLiteral("piconfpack"));
+    picker.setWindowModality(Qt::WindowModal);
+    picker.winId();
+    picker.windowHandle()->setTransientParent(owner);
+    return picker.exec() == QDialog::Accepted ? picker.selectedUrls().value(0) : QUrl{};
+}
 
 QString ApplicationService::workspaceRoot() const { return PilonWorkspace::configuredRoot(); }
 QString ApplicationService::settingsFile() const { return PilonWorkspace::settingsFile(); }
