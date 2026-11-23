@@ -1,6 +1,7 @@
 #include "../../git/src/gitfolderguard.h"
 #include "../../../src/core/workspace/pilonworkspace.h"
 #include "calendarmanager.h"
+#include "../../../src/core/workspace/piconfpreferences.h"
 #include "calendarformat.h"
 #if defined(Q_OS_ANDROID)
 #include <QJniObject>
@@ -113,6 +114,21 @@ CalendarManager::CalendarManager(const QString &directory, QObject *parent, bool
     }
     if (m_preferences.isEmpty())
         m_preferences = defaultPreferences();
+    if (m_background && PiconfPreferences::instance().active()) {
+        PilonSettings settings;
+        if (settings.value("calendar/portablePreferencesPending").toBool()) {
+            auto requested = defaultPreferences();
+            requested.insert(settings.value("calendar/portablePreferences").toMap());
+            QSqlQuery save(m_db);
+            save.prepare("INSERT OR REPLACE INTO records(kind,id,data) VALUES('preferences','main',?)");
+            save.addBindValue(QJsonDocument::fromVariant(requested).toJson(QJsonDocument::Compact));
+            if (!save.exec()) { fail(save.lastError().text()); return; }
+            m_preferences = requested;
+            settings.remove("calendar/portablePreferencesPending");
+        }
+        if (settings.value("calendar/portablePreferences").toMap() != m_preferences)
+            settings.setValue("calendar/portablePreferences", m_preferences);
+    }
     m_calendars["pilon"] = {
         {"id", "pilon"}, {"name", "Pilon"}, {"enabled", true}, {"writable", true}, {"provider", "local"}};
     // Explicit storage constructors (including tests) stay inside their own directory.
@@ -215,7 +231,9 @@ bool CalendarManager::resetPreferences(bool apply) {
     query.addBindValue(QJsonDocument::fromVariant(defaults).toJson(QJsonDocument::Compact));
     ok = ok && query.exec();
     if (!ok || !m_db.commit()) { m_db.rollback(); fail(tr("Calendar preferences could not be reset: %1").arg(query.lastError().text())); return false; }
-    m_preferences = defaults; m_error.clear(); emit changed(); return true;
+    m_preferences = defaults;
+    if (m_background && PiconfPreferences::instance().active()) PilonSettings().setValue("calendar/portablePreferences",defaults);
+    m_error.clear(); emit changed(); return true;
 }
 bool CalendarManager::prepareDisable() {
     const auto reason = disableBlockedReason();
@@ -691,8 +709,11 @@ void CalendarManager::setPreferences(const QVariantMap &v) {
         fail(tr("Unknown time zone."));
         return;
     }
+    const auto previous = m_preferences;
     m_preferences = next;
-    persist();
+    if (!persist()) m_preferences = previous;
+    else if (m_background && PiconfPreferences::instance().active())
+        PilonSettings().setValue("calendar/portablePreferences",next);
 }
 void CalendarManager::setCalendarEnabled(const QString &id, bool enabled) {
     if (m_gitUpdating) { fail(tr("Finish or abort Calendar's Git update first.")); return; }

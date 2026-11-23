@@ -173,6 +173,7 @@ private:
     bool folderExists(const QString &id) const;
     bool writeJson(const QString &name, const QVariantMap &object);
     bool saveSettings();
+    QVariantMap preferenceValues() const;
     bool saveFolders(const QVariantList &folders);
     QString notePreview(const QString &id) const;
     struct LoadedLibrary {
@@ -185,6 +186,7 @@ private:
         bool pressureSensitive = true;
     };
     static LoadedLibrary readSettings(const QString &directory);
+    static LoadedLibrary decodeSettings(const QVariantMap &object);
     static LoadedLibrary readGitSnapshot(const QString &directory, const QString &assetRoot);
     static LoadedLibrary readLibrary(const QString &directory, const QString &assetRoot, bool strict = false);
     void applySettings(const LoadedLibrary &data);

@@ -1,5 +1,6 @@
 #include "applicationreset.h"
 #include "../core/workspace/pilonsettings.h"
+#include "../core/workspace/piconfdocument.h"
 #include "../core/workspace/pilonworkspace.h"
 #include <QDir>
 #include <QFile>
@@ -57,6 +58,14 @@ bool plan(const QVariantMap &keep, const QVariantMap &owned, const Locations &pa
             auto &list = keep.value(field.key(), true).toBool() ? result.kept : result.selected;
             if (!list.contains(path)) list.append(path);
         }
+    }
+    // Preferences are reset through their stores. Their editable graph can contain includes and comments.
+    if (QFileInfo::exists(root + '/' + PiconfDocument::MainPath)) {
+        PiconfDocument config;
+        QString problem;
+        if (!config.load(root,problem)) return fail(error,problem);
+        for (const auto &path : config.files().keys()) result.kept.append(root + '/' + path);
+        result.kept.append(root + "/.pilon/piconf-baseline.json");
     }
     for (const auto &path : result.selected) if (result.kept.contains(path))
         return fail(error, QObject::tr("The same owned path has conflicting keep choices: %1").arg(path));
