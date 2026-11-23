@@ -745,6 +745,14 @@ Window {
     Overlay.overlay.width: window.width / window.uiScale
     Overlay.overlay.height: window.height / window.uiScale
 
+    PilonWindowChrome {
+        window: window
+        showBoundary: false
+        fillsBounds: window.mobilePlatform || window.visibility === Window.Maximized || window.visibility === Window.FullScreen
+        placementBounds: Qt.rect(window.Screen.virtualX, window.Screen.virtualY,
+            window.Screen.width, window.Screen.height)
+    }
+
     Item {
         id: uiContent
         objectName: "scaledInterface"
@@ -1765,7 +1773,7 @@ Window {
         readonly property bool hostConfirmation: sshManager.promptKind === Backend.SshManager.HostTrustPrompt
         readonly property bool connecting: sshManager.connecting
         readonly property string details: sshManager.connectionText
-        contentSizedWindow: hostConfirmation
+        contentSizedWindow: true
         property real lastPromptRevision: -1
 
         function refresh() {
@@ -1800,7 +1808,7 @@ Window {
         x: Math.round((uiContent.width - width) / 2)
         y: Math.round((uiContent.height - height) / 2)
         width: Math.min(480, uiContent.width - 32, maximumContentWidth)
-        height: Math.min(sshConnectionContents.implicitHeight + topPadding + bottomPadding,
+        height: Math.min(Math.max(2 * padding + 42, sshConnectionContents.implicitHeight + topPadding + bottomPadding),
             maximumContentHeight)
         padding: 16
         modal: connecting || prompting
@@ -1837,9 +1845,8 @@ Window {
                 }
                 Label {
                     Layout.fillWidth: true
-                    visible: sshLoginNotification.prompting || (sshLoginNotification.connecting
-                        && sshLoginNotification.details.length === 0)
-                    text: sshLoginNotification.prompting ? sshManager.promptText : qsTr("Connecting…")
+                    visible: sshLoginNotification.prompting
+                    text: sshManager.promptText
                     textFormat: Text.PlainText
                     color: window.selectedTextColour
                     wrapMode: Text.Wrap
@@ -1886,26 +1893,41 @@ Window {
                     Layout.fillWidth: true
                     text: qsTr("Save password")
                 }
-                Flow {
+                RowLayout {
                     Layout.fillWidth: true
                     visible: sshLoginNotification.connecting || sshLoginNotification.prompting
-                    layoutDirection: Qt.RightToLeft
                     spacing: 8
-                    PilonButton {
-                        objectName: "sshContinueConnection"
-                        visible: sshLoginNotification.prompting
-                        width: Math.min(implicitWidth, parent.width)
-                        text: sshLoginNotification.hostConfirmation ? qsTr("Trust and connect") : qsTr("Continue")
-                        highlighted: true
-                        enabled: sshLoginNotification.hostConfirmation || sshPromptInput.text.length > 0
-                        onClicked: sshLoginNotification.submit()
+                    Label {
+                        id: sshConnectingStatus
+                        objectName: "sshConnectingStatus"
+                        Layout.fillWidth: true
+                        visible: !sshLoginNotification.prompting && sshLoginNotification.details.length === 0
+                        text: qsTr("Connecting…")
+                        color: window.selectedTextColour
+                        wrapMode: Text.Wrap
                     }
-                    PilonButton {
-                        id: sshCancel
-                        objectName: "sshCancelConnection"
-                        width: Math.min(implicitWidth, parent.width)
-                        text: qsTr("Cancel")
-                        onClicked: sshLoginNotification.close()
+                    Flow {
+                        Layout.fillWidth: !sshConnectingStatus.visible
+                        Layout.minimumWidth: 0
+                        Layout.preferredWidth: sshConnectingStatus.visible ? sshCancel.implicitWidth : sshLoginNotification.availableWidth
+                        layoutDirection: Qt.RightToLeft
+                        spacing: 8
+                        PilonWrapButton {
+                            objectName: "sshContinueConnection"
+                            visible: sshLoginNotification.prompting
+                            width: Math.min(implicitWidth, parent.width)
+                            text: sshLoginNotification.hostConfirmation ? qsTr("Trust and connect") : qsTr("Continue")
+                            highlighted: true
+                            enabled: sshLoginNotification.hostConfirmation || sshPromptInput.text.length > 0
+                            onClicked: sshLoginNotification.submit()
+                        }
+                        PilonWrapButton {
+                            id: sshCancel
+                            objectName: "sshCancelConnection"
+                            width: Math.min(implicitWidth, parent.width)
+                            text: qsTr("Cancel")
+                            onClicked: sshLoginNotification.close()
+                        }
                     }
                 }
             }

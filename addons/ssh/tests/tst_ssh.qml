@@ -126,6 +126,19 @@ TestCase {
         contained(dialog, "sshCancelConnection")
         tabletInput.saveWindow(dialog.dialogWindow.contentItem, "/tmp/pilon-ssh-approval.png")
     }
+    function test_connectingFitsItsStatusAndCancelOnOneRow() {
+        const dialog = openConnection("waiting", {width: 380, height: 760, touch: true})
+        renderConnectionDialog(dialog)
+        verify(dialog.dialogWindow.height < 200)
+        const status = contained(dialog, "sshConnectingStatus")
+        const cancel = contained(dialog, "sshCancelConnection")
+        const center = status.mapToGlobal(0, status.height / 2)
+        const action = cancel.mapToGlobal(0, cancel.height / 2)
+        verify(action.x > center.x && Math.abs(action.y - center.y) <= 2)
+        mouseClick(cancel)
+        tryCompare(dialog, "opened", false)
+        tryCompare(findChild(appWindow, "sshManager"), "running", false)
+    }
     function test_passwordActionsRemainReachableInShortWindow() {
         const dialog=openConnection("password",{width:800,height:600,touch:true})
         const manager = waitForConnectionPrompt(dialog)
