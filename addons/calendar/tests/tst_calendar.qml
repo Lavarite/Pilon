@@ -1718,6 +1718,41 @@ TestCase {
         compare(testCalendar.event(id).end.substring(11, 16), "14:00")
         testCalendar.deleteEvent(id, "series")
     }
+    function test_horizontalTouchOverTimelineEventIsNotATap_data() {
+        return [{tag: "body", target: "calendarMove-", mode: 0, width: 360, next: "2026-11-05"},
+                {tag: "resize-edge", target: "calendarResize-", mode: 0, width: 360, next: "2026-11-05"},
+                {tag: "week", target: "calendarMove-", mode: 1, width: 1440, next: "2026-11-11"}]
+    }
+    function test_horizontalTouchOverTimelineEventIsNotATap(data) {
+        window.width = data.width; window.height = 620
+        page.selectedDate = new Date(2026, 10, 4, 12); page.viewMode = data.mode
+        const value = testCalendar.newEvent("2026-11-04", 540)
+        value.title = "Appointment under swipe"
+        value.end = "2026-11-04T11:00:00"
+        const id = testCalendar.saveEvent(value)
+        try {
+            const timeline = findChild(page, "calendarTimeline")
+            timeline.contentY = 480; timeline.contentX = timeline.contentWidth - timeline.width
+            waitForRendering(page)
+            const area = findChild(page, data.target + id + "-2026-11-04")
+            verify(area)
+            const point = area.mapToItem(page, area.width * .75, area.height / 2)
+            const touch = touchEvent(page)
+            touch.press(0, page, point.x, point.y).commit()
+            for (let step = 1; step <= 6; ++step) {
+                touch.move(0, page, point.x - step * 16, point.y).commit()
+                wait(20)
+            }
+            touch.release(0, page, point.x - 96, point.y).commit()
+            tryVerify(() => page.iso(page.selectedDate) === data.next)
+            tryCompare(page, "periodOffset", 0)
+            verify(!page.eventEditor.opened, "A horizontal swipe must not open the event under the initial touch")
+            compare(testCalendar.event(id).start, value.start)
+        } finally {
+            page.eventEditor.close()
+            testCalendar.deleteEvent(id, "series")
+        }
+    }
     function test_touchTimelineTargetsPreserveEventTimes() {
         window.uiScale = 1.4
         const event = testCalendar.newEvent("2026-11-06", 540)
