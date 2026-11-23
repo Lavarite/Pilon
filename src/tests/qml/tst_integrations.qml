@@ -47,6 +47,7 @@ TestCase {
         tryCompare(page.children,"length",2)
         const action=findChild(page,"augmentedAction")
         compare(action.objectName,"augmentedAction")
+        action.Window.window.update()
         verify(waitForRendering(action))
         compare(existing.y,0)
         compare(action.y,existing.height+page.spacing)

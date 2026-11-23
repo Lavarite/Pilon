@@ -1128,11 +1128,20 @@ TestCase {
             }
             tryCompare(dialog, "opened", true)
             // A constrained screen must keep the action reachable even when the form is taller.
-            dialog.height = 130; wait(40)
+            dialog.height = data.tag === "delete" ? 210 : 130; wait(40)
             const scroller = dialog.contentItem
-            tryCompare(scroller, "height", dialog.availableHeight)
+            if (data.tag === "delete") {
+                tryCompare(scroller, "height", dialog.availableHeight - dialog.footer.height - dialog.spacing)
+                const action = dialog.confirmButton
+                const y = action.mapToItem(dialog.dialogWindow.contentItem, 0, action.height).y
+                verify(y <= dialog.dialogWindow.height)
+                scroller.contentItem.contentY = scroller.contentItem.contentHeight - scroller.contentItem.height
+                compare(action.mapToItem(dialog.dialogWindow.contentItem, 0, action.height).y, y)
+            } else {
+                tryCompare(scroller, "height", dialog.availableHeight)
+                revealDialogControl(dialog, child(data.action))
+            }
             verify(scroller.contentItem.contentHeight > scroller.contentItem.height)
-            revealDialogControl(dialog, child(data.action))
             if (data.tag === "pen" && child("removeNotePen").visible) revealDialogControl(dialog, child("removeNotePen"))
         } finally {
             dialog.close()

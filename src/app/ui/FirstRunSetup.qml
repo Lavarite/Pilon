@@ -312,6 +312,7 @@ FilePickerWindow {
                     notices: setup.addonNotices
                     showSettings: false
                     changeEnabled: setup.stageAddon
+                    deferEnableChange: false
                     checkedOverrides: setup.draftAddonChoices
                     changesBusy: setup.awaitingAddonSave
                     removeAddon: setup.removeAddon || (id => setup.addonRegistry.finalizeRemoval(id))

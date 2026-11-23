@@ -1383,7 +1383,7 @@ TestCase {
         const confirmation = findControl(appWindow, "disableDependentsConfirmation")
         tryCompare(confirmation, "opened", true)
         compare(findControl(confirmation.contentItem, "dependentAddonNames").text, "Tailscale")
-        findControl(confirmation.contentItem, "confirmDisableDependents").clicked()
+        mouseClick(confirmation.confirmButton)
         tryVerify(() => result !== null)
         compare(result, true)
         verify(!appWindow.addonRegistryObject.isEnabled("devices"))

@@ -18,12 +18,14 @@ ColumnLayout {
     Component.onCompleted: if (registry?.error) report("", registry.error)
     property var pendingIds: ({})
     property var checkedOverrides: ({})
+    property bool deferEnableChange: true
     property bool changesBusy: false
     property bool widgetsAvailable: false
     property var createWidget: null
     signal settingsRequested(string addonId)
     spacing: 12
     function checkedValue(addon) {
+        if (applyToggle.addonId === addon.id) return applyToggle.requested
         if (checkedOverrides[addon.id] !== undefined) return checkedOverrides[addon.id]
         return addon.configuredEnabled === undefined ? addon.enabled : addon.configuredEnabled
     }
@@ -32,20 +34,20 @@ ColumnLayout {
         if (pending) ids[id] = true; else delete ids[id]
         pendingIds = ids
     }
+    function submitToggle(id, requested) {
+        Promise.resolve().then(() => changeEnabled(id, requested)).then(result => {
+            report(id, result === true ? "" : (typeof result === "string" ? result : registry.error))
+        }).catch(error => report(id, String(error))).then(() => {
+            if (applyToggle.addonId === id) applyToggle.addonId = ""
+            setPending(id, false)
+        })
+    }
     Timer {
         id: applyToggle
         interval: 34
         property string addonId
         property bool requested
-        onTriggered: {
-            const id = addonId
-            Promise.resolve().then(() => page.changeEnabled(id, requested)).then(result => {
-                page.report(id, result === true ? "" : (typeof result === "string" ? result : page.registry.error))
-            }).catch(error => page.report(id, String(error))).then(() => {
-                page.checkedOverrides = ({})
-                page.setPending(id, false)
-            })
-        }
+        onTriggered: page.submitToggle(addonId, requested)
     }
     function report(id, message) {
         const errors = Object.assign({}, operationErrors)
@@ -132,21 +134,23 @@ ColumnLayout {
                             opacity: choice.enabled ? 1 : .4
                         }
                         checked: page.checkedValue(card.modelData)
-                        enabled: !page.changesBusy && Object.keys(page.checkedOverrides).length === 0
+                        enabled: !page.changesBusy && !applyToggle.addonId
                             && !page.pendingIds[card.modelData.id] && !card.modelData.error
                         onToggled: {
                             const id = card.modelData.id, requested = checked
-                            page.checkedOverrides = {[id]: requested}
+                            if (page.deferEnableChange) {
+                                applyToggle.requested = requested
+                                applyToggle.addonId = id
+                            }
                             page.setPending(id, true)
                             checked = Qt.binding(() => page.checkedValue(card.modelData))
-                            applyToggle.addonId = id
-                            applyToggle.requested = requested
-                            applyToggle.restart()
+                            if (page.deferEnableChange) applyToggle.restart()
+                            else page.submitToggle(id, requested)
                         }
                         ProgressBar {
                             anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
                             height: 2
-                            visible: page.checkedOverrides[card.modelData.id] !== undefined
+                            visible: applyToggle.addonId === card.modelData.id
                             indeterminate: visible
                             Accessible.ignored: true
                         }
