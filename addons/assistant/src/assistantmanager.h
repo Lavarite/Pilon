@@ -27,6 +27,8 @@
 #include <functional>
 
 class QNetworkReply;
+class QQuickTextDocument;
+Q_MOC_INCLUDE(<QQuickTextDocument>)
 
 class AssistantManager : public QObject
 {
@@ -161,6 +163,7 @@ public:
     Q_INVOKABLE void previewVoice(const QString &prompt, int speed);
     Q_INVOKABLE void openArtifact(const QString &id);
     Q_INVOKABLE void startArtifactDrag(const QString &id);
+    Q_INVOKABLE void styleMessageLinks(QQuickTextDocument *editorDocument, const QColor &colour) const;
 
 signals:
     void activeChanged();

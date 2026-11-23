@@ -1053,6 +1053,7 @@ Control {
                         }
                         TextEdit {
                             objectName: "messageText_" + message.modelData.role
+                            readonly property color linkColour: page.readableText(page.accentColour, bubble.color)
                             width: parent.width
                             visible: !message.activity && text.length > 0
                             text: message.modelData.text || ""
@@ -1071,6 +1072,12 @@ Control {
                                 ? page.alpha(page.accentColour, 1) : bubble.foreground
                             selectedTextColor: page.readableText(page.accentTextColour, selectionColor)
                             font: page.font
+                            function styleLinks() {
+                                if (textFormat === TextEdit.MarkdownText && page.assistant.styleMessageLinks)
+                                    page.assistant.styleMessageLinks(textDocument, linkColour)
+                            }
+                            Component.onCompleted: styleLinks()
+                            onLinkColourChanged: styleLinks()
                             onLinkActivated: function(link) {
                                 if (/^https?:\/\//.test(link))
                                     Qt.openUrlExternally(link)

@@ -13,6 +13,7 @@ TestCase {
     visible: true
     when: windowShown
 
+    AssistantManager { id: messageFormatter }
     QtObject {
         id: backend
         property var messages: []
@@ -49,6 +50,7 @@ TestCase {
         property bool recording: false
         property string error: ""
         function dismissError() { error = "" }
+        function styleMessageLinks(document, colour) { messageFormatter.styleMessageLinks(document, colour) }
         property string status: ""
         property QtObject connection: QtObject {
             property string promptText: ""
@@ -267,7 +269,7 @@ TestCase {
     }
     function test_messageSurfacesRemainReadable(data) {
         backend.messages = [{role:"user", text:"Can you summarise the changes?"},
-                            {role:"assistant", text:"The **navigation** now keeps your active tab in view."}]
+                            {role:"assistant", text:"[**Documentation**](#reference)\n\nThe navigation keeps your active tab in view."}]
         const host = createTemporaryObject(nativeChatComponent, test, {
             width:360, height:720, chatBackground:data.background, chatPanel:data.panel,
             chatText:data.foreground, chatMuted:data.muted, chatAccent:data.accent
@@ -294,6 +296,23 @@ TestCase {
                     role + " border separates from the window")
             }
             verify(waitForRendering(host.contentItem))
+            const reply = findChild(subject, "chatBubble_assistant")
+            const body = findChild(reply, "messageText_assistant")
+            const start = body.positionToRectangle(0)
+            const end = body.positionToRectangle("Documentation".length)
+            const linkX = Math.round((start.x + end.x) / 2)
+            const linkY = Math.round(start.y + start.height / 2)
+            compare(body.linkAt(linkX, linkY), "#reference")
+            const image = grabImage(host.contentItem)
+            const firstPixel = body.mapToItem(host.contentItem, start.x, start.y)
+            const lastPixel = body.mapToItem(host.contentItem, end.x, start.y + start.height)
+            const scaleX = image.width / host.contentItem.width
+            const scaleY = image.height / host.contentItem.height
+            let linkContrast = 0
+            for (let y = Math.ceil(firstPixel.y * scaleY); y < Math.min(image.height, lastPixel.y * scaleY); ++y)
+                for (let x = Math.ceil(firstPixel.x * scaleX); x < Math.min(image.width, lastPixel.x * scaleX); ++x)
+                    linkContrast = Math.max(linkContrast, contrast(image.pixel(x, y), reply.color))
+            verify(linkContrast >= 4.5, "Rendered link contrast was " + linkContrast)
         } finally {
             host.close()
             page.visible = true
