@@ -247,6 +247,27 @@ bool validEntryName(const QString &name)
            && !name.contains(QLatin1Char('\0'));
 }
 
+bool redundantMove(const QString &source, const QString &destination, bool directory, bool local)
+{
+    if (!source.startsWith('/') || !destination.startsWith('/')
+        || !validRemotePath(source) || !validRemotePath(destination))
+        return false;
+    const auto sameOrBelow = [&](const QString &from, const QString &to) {
+        return from == to || (directory && to.startsWith(from + '/'));
+    };
+    if (source == destination) return true;
+    if (local) {
+        const auto resolved = [](const QString &path) {
+            const auto parent = QFileInfo(parentPath(path)).canonicalFilePath();
+            return parent.isEmpty() ? QString{} : joinedPath(parent, path.section('/', -1));
+        };
+        const auto from = resolved(source), to = resolved(destination);
+        if (!from.isEmpty() && !to.isEmpty())
+            return sameOrBelow(from, to);
+    }
+    return sameOrBelow(QDir::cleanPath(source), QDir::cleanPath(destination));
+}
+
 QVariantMap deviceFromEntry(const QVariantMap &entry)
 {
     QVariantMap device{{QStringLiteral("id"), entry.value(QStringLiteral("deviceId"))},
@@ -2800,6 +2821,11 @@ void RemoteFileManager::deleteEntries(const QVariantList &entries, const QString
 void RemoteFileManager::moveEntry(const QVariantMap &entry, const QString &username,
                                   const QString &destination)
 {
+    const auto source = entry.value("path").toString();
+    const auto requested = destination.trimmed();
+    const auto target = requested.startsWith('/') ? requested : joinedPath(parentPath(source), requested);
+    if (redundantMove(source, target, entry.value("directory").toBool(), entry.value("deviceId") == "local"))
+        return;
     startRequest({{QStringLiteral("kind"), QStringLiteral("move")},
                   {QStringLiteral("devices"), QVariantList{deviceFromEntry(entry)}},
                   {QStringLiteral("username"), username.trimmed()},
@@ -2826,16 +2852,25 @@ void RemoteFileManager::pasteEntries(const QVariantList &entries, const QVariant
     QVariantMap destinationDevice = device;
     destinationDevice.insert("username", username.trimmed());
     QVariantList devices{destinationDevice};
-    QSet<QString> deviceIds{device.value(QStringLiteral("id")).toString()};
-    const QVariantList limitedEntries = entries.mid(0, 10'000);
-    for (const QVariant &entryValue : limitedEntries) {
-        const QVariantMap sourceDevice = deviceFromEntry(entryValue.toMap());
+    const auto destinationId = device.value("id").toString();
+    QSet<QString> deviceIds{destinationId};
+    QVariantList limitedEntries;
+    for (const QVariant &entryValue : entries.mid(0, 10'000)) {
+        const auto entry = entryValue.toMap();
+        const QVariantMap sourceDevice = deviceFromEntry(entry);
         const QString deviceId = sourceDevice.value(QStringLiteral("id")).toString();
+        const auto name = entry.value("name").toString();
+        if (move && destinationId == deviceId && validEntryName(name)
+            && redundantMove(entry.value("path").toString(), joinedPath(remoteDirectory, name),
+                             entry.value("directory").toBool(), deviceId == "local"))
+            continue;
+        limitedEntries.append(entryValue);
         if (!deviceId.isEmpty() && !deviceIds.contains(deviceId)) {
             deviceIds.insert(deviceId);
             devices.append(sourceDevice);
         }
     }
+    if (limitedEntries.isEmpty()) return;
     startRequest({{QStringLiteral("kind"), QStringLiteral("paste")},
                   {QStringLiteral("devices"), devices},
                   {QStringLiteral("username"), username.trimmed()},

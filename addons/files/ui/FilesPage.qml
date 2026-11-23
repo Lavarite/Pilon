@@ -31,6 +31,9 @@ Control {
     property var tiles: []
     property var activeTile: null
     readonly property bool compactTiles: columns.width < 570
+    readonly property int tilesPerRow: compactTiles ? 1 : 2
+    readonly property int minimumTileHeight: compactTiles ? 244 : 150
+    readonly property int tileLimit: tilesPerRow * (locationsViewport.height >= 2 * minimumTileHeight + 10 ? 2 : 1)
     onCompactTilesChanged: if (tiles.length) Qt.callLater(arrangeTiles)
     readonly property var activeRemoteFiles: activeTile !== null ? activeTile.remoteFiles : remoteFiles
     property var searchManager: null
@@ -413,7 +416,7 @@ Control {
         })
     }
     function addTile(entry) {
-        if (tiles.length >= 4)
+        if (tiles.length >= Math.max(1, tileLimit))
             return null
         const manager = tiles.length === 0 ? remoteFiles : fileManagerComponent.createObject(filesPage)
         watchPreview(manager)
@@ -465,7 +468,7 @@ Control {
     AppShortcut { action: "search"; active: filesPage.visible && !filePreview.visible; onActivated: { fileSearchInput.forceActiveFocus(); fileSearchInput.selectAll() } }
 
     function openSearchLocation(entry) {
-        if (tiles.length < 4) {
+        if (tiles.length < tileLimit) {
             addTile(entry)
         } else if (activeTile !== null && !activeTile.remoteFiles.busy) {
             const device = fileWorkspace.deviceForId(entry.deviceId)
@@ -834,7 +837,15 @@ Control {
                         }
                     }
                 }
-                BusyIndicator { objectName: "previewLoadingIndicator"; anchors.centerIn: parent; running: (filePreview.manager !== null && filePreview.manager.previewLoading) || documentView.document.loading; visible: running }
+                ProgressBar {
+                    objectName: "previewLoadingIndicator"
+                    anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
+                    readonly property bool running: (filePreview.manager !== null && filePreview.manager.previewLoading)
+                        || documentView.document.loading
+                    visible: running
+                    indeterminate: running
+                    palette.highlight: filesPage.accentColour
+                }
                 PilonErrorPopup {
                     objectName: "filePreviewError"
                     owner: previewContent
@@ -858,7 +869,7 @@ Control {
             errorInPreview: filePreview.visible && filePreview.manager === remoteFiles
             workspace: filesPage
             fileWorkspace: filesPage.fileWorkspace
-            SplitView.minimumHeight: filesPage.compactTiles ? 244 : 150
+            SplitView.minimumHeight: filesPage.minimumTileHeight
             SplitView.minimumWidth: Math.min(280, columns.width)
             onActivated: filesPage.activeTile = tile
             onAddTileRequested: filesPage.duplicateTile(tile)
@@ -935,7 +946,7 @@ Control {
             clip: true
             contentWidth: width
             contentHeight: columns.height
-            interactive: filesPage.compactTiles && contentHeight > height
+            interactive: contentHeight > height
             onInteractiveChanged: if (!interactive) { cancelFlick(); contentY = 0 }
             onContentHeightChanged: if (contentY > Math.max(0, contentHeight - height)) {
                 cancelFlick(); contentY = Math.max(0, contentHeight - height)
@@ -947,8 +958,8 @@ Control {
                 id: columns
                 objectName: "fileTileColumns"
                 width: locationsViewport.width
-                height: Math.max(locationsViewport.height, filesPage.compactTiles
-                                 ? filesPage.tiles.length * 244 + (filesPage.tiles.length - 1) * 10 : 0)
+                readonly property int rows: Math.max(1, Math.ceil(filesPage.tiles.length / filesPage.tilesPerRow))
+                height: Math.max(locationsViewport.height, rows * filesPage.minimumTileHeight + (rows - 1) * 10)
                 orientation: Qt.Horizontal
 
                 TileSplitView {

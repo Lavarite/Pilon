@@ -21,6 +21,7 @@ Item {
         && (pickerSelectionMode || !fileWorkspace.filePickerOpen)
     readonly property bool cachedListing: remoteFiles.cachedListing === true
     property bool multipleSelection: false
+    property bool selecting: false
     property real placesBottomInset: 0
     property real minimumPlacesWidth: 100
     readonly property bool compactPlaces: width < 540
@@ -237,6 +238,11 @@ Item {
         selectedEntries = []
         selectionAnchorIndex = -1
         fileEntryList.currentIndex = -1
+    }
+
+    function endSelectionMode() {
+        selecting = false
+        clearSelection()
     }
 
     function selectAllEntries() {
@@ -577,6 +583,7 @@ Item {
                 columns: Math.max(1, Math.min(5, Math.floor((parent.width + 8) / 50)))
                 spacing: 8
                 StyledButton {
+                    id: filePlacesToggle
                     objectName: "filePlacesToggle"
                     visible: filesPage.compactPlaces && !filesPage.searchResults
                     width: 42; height: 42
@@ -628,8 +635,21 @@ Item {
                     onClicked: filesPage.remoteFiles.toggleCurrentBookmark()
                 }
                 StyledButton {
+                    objectName: "finishFileSelection"
+                    visible: filesPage.selecting
+                    width: 42; height: 42
+                    display: AbstractButton.IconOnly
+                    icon.source: "icons/check.svg"
+                    Accessible.name: qsTr("Finish selecting")
+                    ToolTip.visible: hovered
+                    ToolTip.text: Accessible.name
+                    fillColour: filesPage.accentColour
+                    foregroundColour: filesPage.accentTextColour
+                    onClicked: filesPage.endSelectionMode()
+                }
+                StyledButton {
                     objectName: "addFileTile"
-                    visible: !filesPage.searchResults && !filesPage.pickerSelectionMode
+                    visible: !filesPage.searchResults && !filesPage.pickerSelectionMode && !filesPage.selecting
                     width: 42
                     height: 42
                     leftPadding: 4
@@ -641,7 +661,7 @@ Item {
                     Accessible.name: qsTr("Open another location")
                     ToolTip.visible: hovered
                     ToolTip.text: Accessible.name
-                    enabled: !filesPage.pickerSelectionMode && filesPage.workspace.tiles.length < 4
+                    enabled: !filesPage.pickerSelectionMode && filesPage.workspace.tiles.length < filesPage.workspace.tileLimit
                     fillColour: filesPage.withOpacity(filesPage.textColour, 0.08)
                     onClicked: filesPage.addTileRequested()
                 }
@@ -662,27 +682,57 @@ Item {
     Popup {
         id: filePlacesPopup
         objectName: "filePlacesPopup"
-        parent: filesPage
+        readonly property var ownerWindow: filePlacesToggle.Window.window
+        readonly property real preferredHeight: 20 + (filesPage.sshEnabled ? 34 + filesPage.devices.length * 40 : 0)
+            + (bookmarksHeading.included ? 28 + (filePlacesPane.bookmarkCount ? 6 + filePlacesPane.bookmarkCount * 50 : 0) : 0)
+        readonly property real preferredWidth: Math.min(320, filesPage.width)
+
+        function place() {
+            const window = ownerWindow
+            if (!window) return
+            const area = window.usableGeometry || Qt.rect(0, 0, window.width, window.height)
+            const origin = filePlacesToggle.mapToItem(window.contentItem, 0, 0)
+            const unit = filePlacesToggle.mapToItem(window.contentItem, 1, 1)
+            const sx = Math.max(.01, unit.x - origin.x), sy = Math.max(.01, unit.y - origin.y)
+            const safeBottom = Math.min(area.y + area.height, window.errorPopupBottom ?? area.y + area.height)
+            const below = (safeBottom - 8 - origin.y) / sy - filePlacesToggle.height - 8
+            const above = (origin.y - area.y - 8) / sy - 8
+            const openBelow = below >= preferredHeight || below >= above
+            width = Math.max(0, Math.min(preferredWidth, (area.width - 16) / sx))
+            height = Math.max(0, Math.min(preferredHeight, openBelow ? below : above))
+            x = Math.max((area.x + 8 - origin.x) / sx, Math.min(0, (area.x + area.width - 8 - origin.x) / sx - width))
+            y = openBelow ? filePlacesToggle.height + 8 : -height - 8
+        }
+
+        parent: filePlacesToggle
         popupType: Popup.Item
-        x: 0; y: fileLocationToolbar.height + 12
-        width: filesPage.width
-        height: Math.max(0, filesPage.height - y)
         padding: 0
         focus: true
-        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
         background: Item {}
         contentItem: Item {}
+        onAboutToShow: place()
+        onPreferredHeightChanged: if (visible) Qt.callLater(place)
+        onPreferredWidthChanged: if (visible) Qt.callLater(place)
+        Connections {
+            target: filePlacesPopup.ownerWindow
+            ignoreUnknownSignals: true
+            function onWidthChanged() { if (filePlacesPopup.visible) Qt.callLater(filePlacesPopup.place) }
+            function onHeightChanged() { if (filePlacesPopup.visible) Qt.callLater(filePlacesPopup.place) }
+            function onUsableGeometryChanged() { if (filePlacesPopup.visible) Qt.callLater(filePlacesPopup.place) }
+        }
     }
 
     Rectangle {
         id: filePlacesPane
+        readonly property int bookmarkCount: filesPage.remoteFiles.bookmarks.filter(entry => filesPage.deviceAllowed(entry.deviceId)).length
 
         objectName: "filePlacesPane"
         parent: filesPage.compactPlaces ? filePlacesPopup.contentItem : filesPage
         visible: !filesPage.searchResults && (!filesPage.compactPlaces || filePlacesPopup.opened)
         x: !filesPage.compactPlaces && filesPage.bookmarksOnRight ? filesPage.width - width : 0
         y: filesPage.compactPlaces ? 0 : fileLocationToolbar.height + 12
-        height: Math.max(0, parent.height - y - filesPage.placesBottomInset)
+        height: Math.max(0, parent.height - y - (filesPage.compactPlaces ? 0 : filesPage.placesBottomInset))
         width: filesPage.compactPlaces ? parent.width
             : Math.min(Math.max(190, filesPage.minimumPlacesWidth), Math.max(filesPage.minimumPlacesWidth, filesPage.width * 0.25))
         radius: 14
@@ -706,11 +756,15 @@ Item {
             }
 
             ListView {
+                objectName: "filePlacesDevicesList"
                 visible: filesPage.sshEnabled
                 width: parent.width
-                height: Math.min(contentHeight, Math.max(44, (parent.height - 74) * 0.44))
+                height: Math.max(0, Math.min(filesPage.devices.length * 40, filesPage.compactPlaces
+                    ? parent.height - 34 - (filePlacesPane.bookmarkCount ? Math.min(90, parent.height / 2) : 0)
+                    : Math.max(44, (parent.height - 74) * .44)))
                 clip: true
                 model: filesPage.devices
+                ScrollBar.vertical: PilonScrollBar {}
 
                 delegate: ItemDelegate {
                     id: fileDeviceDelegate
@@ -752,6 +806,8 @@ Item {
 
             Label {
                 id: bookmarksHeading
+                readonly property bool included: !filesPage.compactPlaces || !filesPage.sshEnabled || filePlacesPane.bookmarkCount > 0
+                visible: included
                 width: parent.width
                 height: 28
                 text: qsTr("Bookmarks")
@@ -762,6 +818,7 @@ Item {
             ListView {
                 id: bookmarkList
                 objectName: "fileBookmarks"
+                visible: bookmarksHeading.included
                 width: parent.width
                 height: Math.max(0, parent.height - y)
                 clip: true
@@ -953,7 +1010,6 @@ Item {
         anchors.bottom: parent.bottom
         radius: 14
         color: filesPage.withOpacity(filesPage.secondaryColour, 0.42)
-        border.color: filesPage.withOpacity(filesPage.textColour, 0.18)
 
         Label {
             id: savedListingStatus
@@ -971,8 +1027,8 @@ Item {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: savedListingStatus.bottom
-            anchors.leftMargin: 12
-            anchors.rightMargin: 12
+            anchors.leftMargin: 8
+            anchors.rightMargin: 8
             height: filesPage.largeIconView ? 0 : 34
             visible: !filesPage.largeIconView
 
@@ -1045,6 +1101,7 @@ Item {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: fileColumns.bottom
+            anchors.topMargin: filesPage.largeIconView ? 8 : 0
             anchors.bottom: parent.bottom
             anchors.leftMargin: 8
             anchors.rightMargin: 8
@@ -1058,21 +1115,25 @@ Item {
                     filesPage.activated()
                     fileEntryList.forceActiveFocus()
                     const index = filePointerArea.indexAt(point.position.x, point.position.y)
-                    if (index < 0) { filesPage.clearSelection(); return }
+                    if (index < 0) {
+                        if (!filesPage.selecting) filesPage.clearSelection()
+                        return
+                    }
                     const entry = filesPage.displayedEntries[index]
                     if (filesPage.chooseSaveDestination && entry.directory) filesPage.browseEntry(entry)
-                    else filesPage.selectEntry(entry, index, Qt.NoModifier)
+                    else filesPage.selectEntry(entry, index, filesPage.selecting ? Qt.ControlModifier : Qt.NoModifier)
                 }
                 onDoubleTapped: {
                     const index = filePointerArea.indexAt(point.position.x, point.position.y)
-                    if (index >= 0 && !filesPage.chooseSaveDestination) filesPage.browseEntry(filesPage.displayedEntries[index])
+                    if (index >= 0 && !filesPage.chooseSaveDestination && !filesPage.selecting)
+                        filesPage.browseEntry(filesPage.displayedEntries[index])
                 }
                 onLongPressed: {
                     filesPage.activated()
                     const index = filePointerArea.indexAt(point.position.x, point.position.y)
-                    if (index >= 0 && !filesPage.isEntrySelected(filesPage.displayedEntries[index]))
+                    if (!filesPage.selecting && index >= 0 && !filesPage.isEntrySelected(filesPage.displayedEntries[index]))
                         filesPage.selectEntry(filesPage.displayedEntries[index], index, Qt.NoModifier)
-                    else if (index < 0) filesPage.clearSelection()
+                    else if (!filesPage.selecting && index < 0) filesPage.clearSelection()
                     const position = fileEntryList.mapToItem(filesPage, point.position.x, point.position.y)
                     fileContextMenu.openAt(position.x, position.y)
                 }
@@ -1085,7 +1146,7 @@ Item {
                 return width / columns
             }
             cellHeight: filesPage.largeIconView
-                        ? 108 + (filesPage.fileZoomLevel - 2) * 16
+                        ? 108 + (filesPage.fileZoomLevel - 2) * 14
                         : 42 + filesPage.fileZoomLevel * 4
 
             delegate: Item {
@@ -1096,11 +1157,6 @@ Item {
                 property bool hovered: filePointerArea.containsMouse
                                        && filePointerArea.hoverIndex === index
                 property bool selected: filesPage.isEntrySelected(modelData)
-                readonly property int columns: Math.max(1, Math.floor(fileEntryList.width / fileEntryList.cellWidth))
-                property bool previousSelected: index >= columns && filesPage.isEntrySelected(filesPage.displayedEntries[index - columns])
-                property bool nextSelected: index + columns < filesPage.displayedEntries.length && filesPage.isEntrySelected(filesPage.displayedEntries[index + columns])
-                readonly property bool leftSelected: index % columns > 0 && filesPage.isEntrySelected(filesPage.displayedEntries[index - 1])
-                readonly property bool rightSelected: index % columns + 1 < columns && index + 1 < filesPage.displayedEntries.length && filesPage.isEntrySelected(filesPage.displayedEntries[index + 1])
                 property bool dropTarget: modelData.directory
                                           && filesPage.dragHoverIndex === index
 
@@ -1108,29 +1164,12 @@ Item {
                 height: GridView.view.cellHeight
                 z: 1
 
-                Item {
-                    id: fileEntryBackground
-
-                    property real cornerRadius: filesPage.largeIconView ? 10 : 8
-                    property bool connectsAbove: fileEntryDelegate.selected
-                                                 && fileEntryDelegate.previousSelected
-                    property bool connectsBelow: fileEntryDelegate.selected
-                                                 && fileEntryDelegate.nextSelected
-
+                Rectangle {
                     anchors.fill: parent
-                    anchors.leftMargin: filesPage.largeIconView && !(fileEntryDelegate.selected && fileEntryDelegate.leftSelected) ? 4 : 0
-                    anchors.rightMargin: filesPage.largeIconView && !(fileEntryDelegate.selected && fileEntryDelegate.rightSelected) ? 4 : 0
-                    anchors.topMargin: filesPage.largeIconView && !connectsAbove ? 4 : 0
-                    anchors.bottomMargin: filesPage.largeIconView && !connectsBelow ? 4 : 0
-                    Rectangle {
-                        anchors.fill: parent
-                        topLeftRadius: fileEntryBackground.connectsAbove || (fileEntryDelegate.selected && fileEntryDelegate.leftSelected) ? 0 : fileEntryBackground.cornerRadius
-                        topRightRadius: fileEntryBackground.connectsAbove || (fileEntryDelegate.selected && fileEntryDelegate.rightSelected) ? 0 : fileEntryBackground.cornerRadius
-                        bottomLeftRadius: fileEntryBackground.connectsBelow || (fileEntryDelegate.selected && fileEntryDelegate.leftSelected) ? 0 : fileEntryBackground.cornerRadius
-                        bottomRightRadius: fileEntryBackground.connectsBelow || (fileEntryDelegate.selected && fileEntryDelegate.rightSelected) ? 0 : fileEntryBackground.cornerRadius
-                        color: fileEntryDelegate.dropTarget || fileEntryDelegate.selected ? filesPage.accentColour : filesPage.textColour
-                        opacity: fileEntryDelegate.dropTarget ? .46 : fileEntryDelegate.selected ? .3 : fileEntryDelegate.hovered ? .1 : 0
-                    }
+                    anchors.margins: filesPage.largeIconView ? 4 : 0
+                    radius: filesPage.largeIconView ? 10 : 8
+                    color: fileEntryDelegate.dropTarget || fileEntryDelegate.selected ? filesPage.accentColour : filesPage.textColour
+                    opacity: fileEntryDelegate.dropTarget ? .46 : fileEntryDelegate.selected ? .3 : fileEntryDelegate.hovered ? .1 : 0
                 }
 
                 Row {
@@ -1207,14 +1246,16 @@ Item {
                 }
 
                 Column {
-                    anchors.fill: parent
-                    anchors.margins: 10
+                    width: parent.width - 16
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    anchors.verticalCenter: parent.verticalCenter
                     visible: filesPage.largeIconView
-                    spacing: 6
+                    spacing: 8
 
                     ControlsImpl.ColorImage {
+                        objectName: "fileGridIcon"
                         anchors.horizontalCenter: parent.horizontalCenter
-                        width: 44 + (filesPage.fileZoomLevel - 2) * 8
+                        width: Math.min(parent.width, 64 + (filesPage.fileZoomLevel - 2) * 12)
                         height: width
                         sourceSize: Qt.size(128, 128)
                         source: filesPage.fileWorkspace.appearance.iconForEntry(filesPage.entryWithAccount(fileEntryDelegate.modelData))
@@ -1222,15 +1263,13 @@ Item {
                     }
 
                     Label {
+                        objectName: "fileGridLabel"
                         width: parent.width
-                        height: 38
                         text: fileEntryDelegate.modelData.name
                         color: filesPage.textColour
                         font.pixelSize: 14 + (filesPage.fileZoomLevel - 2)
                         horizontalAlignment: Text.AlignHCenter
                         verticalAlignment: Text.AlignTop
-                        wrapMode: Text.Wrap
-                        maximumLineCount: 2
                         elide: Text.ElideRight
                     }
                 }
@@ -1306,14 +1345,16 @@ Item {
                 const modified = (mouse.modifiers & (Qt.ControlModifier | Qt.ShiftModifier)) !== 0
                 initialSelection = modified ? filesPage.selectedEntries.slice() : []
                 if (pressedIndex < 0) {
-                    if (!modified)
+                    if (!modified && !filesPage.selecting)
                         filesPage.clearSelection()
                     return
                 }
                 const entry = pressedEntry
                 if (mouse.button === Qt.RightButton) {
-                    if (!filesPage.isEntrySelected(entry))
+                    if (!filesPage.selecting && !filesPage.isEntrySelected(entry))
                         filesPage.selectEntry(entry, pressedIndex, Qt.NoModifier)
+                } else if (filesPage.selecting) {
+                    return
                 } else if (modified || !filesPage.isEntrySelected(entry)) {
                     filesPage.selectEntry(entry, pressedIndex, mouse.modifiers)
                 } else {
@@ -1323,7 +1364,7 @@ Item {
             }
             onPositionChanged: function(mouse) {
                 hoverIndex = indexAt(mouse.x, mouse.y)
-                if (!(pressedButtons & Qt.LeftButton) || itemDragging || contextHeld)
+                if (filesPage.selecting || !(pressedButtons & Qt.LeftButton) || itemDragging || contextHeld)
                     return
                 const distance = Math.hypot(mouse.x - startX, mouse.y - startY)
                 if (!rubberBandSelection.visible && distance < Qt.styleHints.startDragDistance)
@@ -1357,7 +1398,7 @@ Item {
                 if (itemDragging || rubberBandSelection.visible) return
                 contextHeld = true
                 collapseOnRelease = false
-                if (pressedEntry !== null && !filesPage.isEntrySelected(pressedEntry))
+                if (!filesPage.selecting && pressedEntry !== null && !filesPage.isEntrySelected(pressedEntry))
                     filesPage.selectEntry(pressedEntry, pressedIndex, Qt.NoModifier)
                 const point = mapToItem(filesPage, mouse.x, mouse.y)
                 fileContextMenu.openAt(point.x, point.y)
@@ -1374,12 +1415,15 @@ Item {
                 if (mouse.button === Qt.RightButton) {
                     const position = mapToItem(filesPage, mouse.x, mouse.y)
                     fileContextMenu.openAt(position.x, position.y)
+                } else if (filesPage.selecting && pressedEntry && !contextHeld
+                           && filesPage.sameEntry(pressedEntry, filesPage.displayedEntries[indexAt(mouse.x, mouse.y)] || null)) {
+                    filesPage.selectEntry(pressedEntry, indexAt(mouse.x, mouse.y), Qt.ControlModifier | mouse.modifiers)
                 } else if (filesPage.chooseSaveDestination && pressedEntry?.directory && !itemDragging && !contextHeld)
                     filesPage.browseEntry(pressedEntry)
             }
             onDoubleClicked: function(mouse) {
                 const index = indexAt(mouse.x, mouse.y)
-                if (mouse.button === Qt.LeftButton && index >= 0 && !filesPage.chooseSaveDestination)
+                if (mouse.button === Qt.LeftButton && index >= 0 && !filesPage.chooseSaveDestination && !filesPage.selecting)
                     filesPage.browseEntry(filesPage.displayedEntries[index])
             }
             onCanceled: {
@@ -1457,12 +1501,38 @@ Item {
             }
         }
 
-        BusyIndicator {
+        Grid {
+            id: pendingEntries
             objectName: "fileLocationLoadingIndicator"
-            anchors.centerIn: parent
-            running: filesPage.remoteFiles.busy && !filesPage.remoteFiles.previewLoading && !filesPage.cachedListing
-            visible: running
-            palette.highlight: filesPage.accentColour
+            anchors.fill: fileEntryList
+            clip: true
+            readonly property bool running: filesPage.remoteFiles.busy && !filesPage.remoteFiles.previewLoading
+            visible: running && filesPage.displayedEntries.length === 0
+            columns: Math.max(1, Math.round(width / Math.max(1, fileEntryList.cellWidth)))
+            Repeater {
+                model: pendingEntries.visible ? pendingEntries.columns * 3 : 0
+                delegate: Item {
+                    width: fileEntryList.cellWidth
+                    height: fileEntryList.cellHeight
+                    Rectangle {
+                        id: pendingIcon
+                        width: Math.min(parent.width - 16, filesPage.largeIconView ? 64 : 18)
+                        height: width
+                        x: filesPage.largeIconView ? (parent.width - width) / 2 : 4
+                        y: filesPage.largeIconView ? 10 : (parent.height - height) / 2
+                        radius: 4
+                        color: filesPage.withOpacity(filesPage.textColour, .10)
+                    }
+                    Rectangle {
+                        width: Math.max(0, Math.min(110, parent.width - x - 8))
+                        height: 12
+                        x: filesPage.largeIconView ? (parent.width - Math.min(110, parent.width - 16)) / 2 : pendingIcon.x + pendingIcon.width + 8
+                        y: filesPage.largeIconView ? pendingIcon.y + pendingIcon.height + 8 : (parent.height - height) / 2
+                        radius: 4
+                        color: pendingIcon.color
+                    }
+                }
+            }
         }
     }
 
@@ -1598,10 +1668,6 @@ Item {
         property bool hasSelection: false
         readonly property bool canEditAppearance: !filesPage.pickerSelectionMode && hasSelection
             && filesPage.selectedEntry !== null && filesPage.fileWorkspace.appearance.loaded
-        delegate: PilonMenuItem {
-            objectName: subMenu === fileAppearanceMenu ? "fileAppearanceAction" : ""
-            shown: subMenu !== fileAppearanceMenu || fileContextMenu.canEditAppearance
-        }
 
         function openAt(horizontalPosition, verticalPosition) {
             if (filesPage.cachedListing) return
@@ -1650,17 +1716,17 @@ Item {
             }
         }
 
-        PilonMenu {
-            id: fileAppearanceMenu
-            objectName: "fileAppearanceMenu"
-            title: qsTr("Appearance")
-            StyledMenuItem {
-                objectName: "changeFileIconAction"
-                text: qsTr("Change icon…")
-                width: parent.width
-                onClicked: {
-                    fileContextMenu.dismiss()
-                    filesPage.fileWorkspace.appearance.openPath(filesPage.entryWithAccount(filesPage.selectedEntry), filesPage.Window.window)
+        StyledMenuItem {
+            objectName: "fileSelectModeAction"
+            width: parent.width
+            text: filesPage.selecting ? qsTr("Finish selecting") : qsTr("Select")
+            shown: !filesPage.pickerSelectionMode && filesPage.displayedEntries.length > 0
+            onClicked: {
+                fileContextMenu.close()
+                if (filesPage.selecting) filesPage.endSelectionMode()
+                else {
+                    filesPage.selecting = true
+                    Qt.callLater(filesPage.focusBrowser)
                 }
             }
         }
@@ -1755,6 +1821,17 @@ Item {
         }
 
         StyledMenuItem {
+            objectName: "fileAppearanceAction"
+            width: parent.width
+            text: qsTr("Appearance…")
+            shown: fileContextMenu.canEditAppearance
+            onClicked: {
+                fileContextMenu.close()
+                filesPage.fileWorkspace.appearance.openPath(filesPage.entryWithAccount(filesPage.selectedEntry), filesPage.Window.window)
+            }
+        }
+
+        StyledMenuItem {
             objectName: "fileRenameAction"
             width: parent.width
             text: qsTr("Rename…")
@@ -1835,7 +1912,7 @@ Item {
             width: parent.width
             text: qsTr("Select All")
             shortcutText: qsTr("Ctrl+A")
-            shown: !fileContextMenu.hasSelection
+            shown: filesPage.selecting || (filesPage.pickerSelectionMode && filesPage.multipleSelection)
             enabled: filesPage.displayedEntries.length > 0
             onClicked: {
                 filesPage.selectAllEntries()
@@ -2095,8 +2172,8 @@ Item {
     AppShortcut {
         action: "cancel"
         active: filesPage.keyboardActive && !filesPage.cachedListing && fileEntryList.activeFocus
-                 && filesPage.selectedEntries.length > 0
-        onActivated: filesPage.clearSelection()
+                 && (filesPage.selecting || filesPage.selectedEntries.length > 0)
+        onActivated: filesPage.endSelectionMode()
     }
 
     Connections {
@@ -2109,7 +2186,7 @@ Item {
         }
 
         function onLocationChanged() {
-            filesPage.clearSelection()
+            filesPage.endSelectionMode()
             if (filesPage.artifactBrowsePending || filesPage.artifactToReveal.length === 0
                     || filesPage.remoteFiles.currentDeviceId !== "local"
                     || filesPage.remoteFiles.currentPath !== filesPage.parentPath(filesPage.artifactToReveal))

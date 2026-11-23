@@ -258,6 +258,36 @@ TestCase {
     function test_pilonConfigurationUsesAGear() {
         compare(page.iconForFile("theme.piconf", false), "icons/cog-6-tooth.svg")
     }
+    function test_gridKeepsCompactIconAndLabelSpacing() {
+        page.fileZoomLevel = 2
+        const view = findChild(page, "fileEntriesView")
+        tryVerify(() => view.itemAtIndex(0) !== null && view.itemAtIndex(7) !== null)
+        verify(waitForRendering(view))
+        for (const index of [0, 7]) {
+            const tile = view.itemAtIndex(index)
+            const icon = findChild(tile, "fileGridIcon"), label = findChild(tile, "fileGridLabel")
+            compare(icon.width, 64)
+            tryCompare(label, "y", icon.y + icon.height + 8)
+            verify(label.y + label.height < tile.height)
+        }
+        verify(tabletInput.saveWindow(page, "/tmp/pilon-file-grid-spacing.png"))
+    }
+    function test_loadingKeepsFileChromeAndCachedRowsInPlace() {
+        const loading = findChild(page, "fileLocationLoadingIndicator")
+        const view = findChild(page, "fileEntriesView")
+        const location = findChild(page, "fileLocationBar")
+        const original = view.mapToItem(page, 0, 0)
+        const entries = files.entries
+        files.entries = []
+        files.busy = true
+        verify(location.visible && loading.visible)
+        compare(view.mapToItem(page, 0, 0), original)
+        files.entries = entries
+        tryCompare(view, "count", entries.length)
+        verify(!loading.visible)
+        compare(view.mapToItem(page, 0, 0), original)
+        files.busy = false
+    }
     function test_fileAppearanceContextAndIconSearch() {
         const entry = {name: "Fixture", path: "/tmp/Fixture", deviceId: "local", directory: true}
         page.selectedEntries = [entry]
@@ -266,10 +296,11 @@ TestCase {
         tryCompare(menu, "opened", true)
         const action = findChild(page, "fileAppearanceAction")
         verify(action.shown)
-        const appearanceMenu = findChild(menu, "fileAppearanceMenu")
-        appearanceMenu.open()
-        tryCompare(appearanceMenu, "opened", true)
-        findChild(appearanceMenu, "changeFileIconAction").clicked()
+        const order = Array.from({length: menu.count}, (_, index) => menu.itemAt(index).objectName)
+        compare(order.indexOf("fileAppearanceAction"), order.indexOf("fileMoveAction") + 1)
+        compare(action.subMenu, null)
+        waitForRendering(menu.contentItem)
+        mouseClick(action)
         const editor = findChild(sharedFiles, "fileAppearanceEditor")
         tryCompare(editor, "opened", true)
         verify(editor.dialogWindow !== sharedFiles.ownerWindow)
@@ -1091,21 +1122,30 @@ TestCase {
         compare(files.opened, 0)
         verify(!findChild(page, "bookmarkContextMenu").opened)
     }
-    function test_multipleLocationsStackOnNarrowScreens() {
+    function test_locationCapacityFollowsUsableScreenSize() {
         const beforeWidth = test.width, beforeHeight = test.height
-        test.width = 480; test.height = 480
+        test.width = 360; test.height = 480
         const first = workspace.tiles[0]
-        while (workspace.tiles.length < 4) workspace.duplicateTile(first)
         tryCompare(workspace, "compactTiles", true)
-        wait(100)
+        compare(workspace.addTile(null), null)
+        verify(!findChild(first, "addFileTile").enabled)
+        test.height = 740
+        tryVerify(() => findChild(first, "addFileTile").enabled)
+        mouseClick(findChild(first, "addFileTile"))
+        compare(workspace.tiles.length, 2)
+        compare(workspace.addTile(null), null)
+        test.width = 1000
+        tryCompare(workspace, "compactTiles", false)
+        verify(workspace.addTile(null))
+        verify(workspace.addTile(null))
+        test.width = 480; test.height = 480
+        tryCompare(workspace, "compactTiles", true)
+        tryCompare(findWorkspaceChild("fileLeftColumn"), "count", 4)
         const viewport = findWorkspaceChild("fileLocationsViewport")
         verify(viewport.contentHeight > viewport.height)
         compare(findWorkspaceChild("fileRightColumn").visible, false)
-        for (const tile of workspace.tiles) {
-            compare(tile.parent.width, viewport.width)
-            verify(tile.width <= viewport.width + 1)
-            verify(tile.height >= 240)
-        }
+        tryVerify(() => workspace.tiles.every(tile => tile.parent.width === viewport.width
+            && tile.width <= viewport.width + 1 && tile.height >= 240))
         viewport.contentY = viewport.contentHeight - viewport.height
         verify(viewport.contentY > 0)
         grabImage(workspace).save("/tmp/pilon-files-locations-narrow.png")
@@ -1113,6 +1153,47 @@ TestCase {
         test.width = beforeWidth; test.height = beforeHeight
         tryCompare(viewport, "contentY", 0)
         verify(waitForRendering(area()))
+    }
+    function test_selectModeTogglesItemsAndNeverOpensThem() {
+        const pointer = area(), first = point(0)
+        const menu = findChild(page, "fileContextMenu")
+        const selection = findChild(menu, "fileSelectModeAction")
+        mouseClick(pointer, first.x, first.y, Qt.RightButton)
+        tryCompare(menu, "opened", true)
+        verify(selection.shown)
+        waitForRendering(menu.contentItem)
+        mouseClick(selection)
+        tryCompare(menu, "opened", false)
+        verify(page.selecting)
+        compare(page.selectedEntries.map(entry => entry.path), ["/fixture/0"])
+        clickEntry(1); clickEntry(0)
+        compare(page.selectedEntries.map(entry => entry.path), ["/fixture/1"])
+        const folder = point(7)
+        mouseDoubleClickSequence(pointer, folder.x, folder.y, Qt.LeftButton)
+        compare(files.opened, 0)
+        const done = findChild(page, "finishFileSelection")
+        verify(done.visible)
+        waitForRendering(done)
+        mouseClick(done)
+        tryCompare(done, "visible", false)
+        compare(page.selectedEntries.length, 0)
+        const blankY = pointer.height - 15
+        verify(pointer.indexAt(30, blankY) < 0)
+        const touch = touchEvent(pointer)
+        touch.press(0, pointer, 30, blankY).commit()
+        tryCompare(menu, "opened", true, Qt.styleHints.mousePressAndHoldInterval + 500)
+        touch.release(0, pointer, 30, blankY).commit()
+        waitForRendering(menu.contentItem)
+        mouseClick(selection)
+        tryCompare(menu, "opened", false)
+        verify(page.selecting)
+        touch.press(0, pointer, first.x, first.y).commit().release(0, pointer, first.x, first.y).commit()
+        compare(page.selectedEntries.map(entry => entry.path), ["/fixture/0"])
+        page.Window.window.requestActivate()
+        tryCompare(page.Window.window, "active", true)
+        tryCompare(findChild(page, "fileEntriesView"), "activeFocus", true)
+        keyClick(Qt.Key_Escape)
+        tryCompare(done, "visible", false)
     }
     function test_placesOpenOverNarrowFileListAndCloseAfterChoosing() {
         const before = test.width
@@ -1129,14 +1210,44 @@ TestCase {
         mouseClick(toggle)
         tryCompare(popup, "opened", true)
         verify(places.visible)
+        const window = toggle.Window.window
+        const from = places.mapToItem(window.contentItem, 0, 0)
+        const to = places.mapToItem(window.contentItem, places.width, places.height)
+        verify(from.x >= 7 && to.x <= window.width - 7)
+        verify(from.y >= 7 && to.y <= window.height - 7)
+        verify(places.height < 180, "Two device rows should stay compact")
+        const touch = touchEvent(toggle)
+        touch.press(0, toggle).commit().release(0, toggle).commit()
+        tryCompare(popup, "opened", false)
+        wait(150)
+        compare(popup.opened, false)
+        touch.press(0, toggle).commit().release(0, toggle).commit()
+        tryCompare(popup, "opened", true)
         tryVerify(() => findChild(places, "fileDevice_local") !== null)
         const local = findChild(places, "fileDevice_local")
-        mouseClick(local)
+        touchEvent(local).press(0, local).commit().release(0, local).commit()
         compare(files.lastBrowse.device.id, "local")
+        compare(files.opened, 1)
         tryCompare(popup, "opened", false)
         test.width = before
         tryVerify(() => places.visible)
         verify(!toggle.visible)
+    }
+    function test_placesMenuScrollsLongDeviceLists() {
+        test.width = 360
+        const tile = workspace.tiles[0]
+        const toggle = findChild(tile, "filePlacesToggle")
+        const popup = findChild(tile, "filePlacesPopup")
+        tryCompare(toggle, "visible", true)
+        tailscale.includedDevices = Array.from({length: 30}, (_, index) =>
+            ({id: "host-" + index, name: "Host " + index, ip: "192.0.2." + index, online: true}))
+        mouseClick(toggle)
+        tryCompare(popup, "opened", true)
+        const view = findChild(tile, "filePlacesDevicesList")
+        tryVerify(() => view.contentHeight > view.height && view.height > 0)
+        mouseWheel(view, view.width / 2, view.height / 2, 0, -360)
+        tryVerify(() => view.contentY > 0)
+        popup.close()
     }
     function test_searchAboveLocations_data() {
         return [{tag: "wide", width: 1200}, {tag: "medium", width: 760}, {tag: "narrow", width: 480}]
@@ -1197,6 +1308,8 @@ TestCase {
         compare(noteImportSpy.count, 2); compare(noteImportSpy.signalArguments[1][1], true)
     }
     function init() {
+        test.width = 1000; test.height = 720
+        tailscale.includedDevices = [{id: "fixture", name: "Fixture", ip: "127.0.0.1", online: true}]
         findChild(sharedFiles, "fileAppearanceEditor").close()
         compactAppearanceOwner.close()
         appearanceRegistry.savedAppearance = ""
@@ -1248,7 +1361,7 @@ TestCase {
         page.sortColumn = ""
         page.sortDirection = 0
         page.updateDisplayedEntries()
-        page.clearSelection()
+        page.endSelectionMode()
         wait(80)
     }
     function test_column_sort_cycles_data() {

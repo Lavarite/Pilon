@@ -1191,6 +1191,42 @@ private slots:
         QVERIFY(!manager.searching());
     }
 
+    void redundantMovesDoNotStartTransfersOrChangeFiles()
+    {
+        QTemporaryDir workspace;
+        QVERIFY(QDir().mkpath(workspace.filePath("folder/child")));
+        QVERIFY(touch(workspace.filePath("report.txt")));
+        RemoteFileManager files;
+        files.setAutomaticRefreshEnabled(false);
+        files.browse(files.localDevice(), {}, workspace.path());
+        QTRY_VERIFY(!files.busy());
+        const auto entries = files.entries();
+        QCOMPARE(entries.size(), 2);
+        const auto folder = std::find_if(entries.cbegin(), entries.cend(), [](const QVariant &entry) {
+            return entry.toMap().value("directory").toBool();
+        });
+        QVERIFY(folder != entries.cend());
+        QSignalSpy started(&files, &RemoteFileManager::busyChanged);
+        files.pasteEntries(entries, files.localDevice(), {}, workspace.path() + "/.", true);
+        files.pasteEntries({*folder}, files.localDevice(), {}, workspace.filePath("folder/child"), true);
+        files.moveEntry(folder->toMap(), {}, "folder");
+        files.moveEntry(folder->toMap(), {}, workspace.filePath("folder/child"));
+        QVERIFY(!files.busy());
+        QCOMPARE(started.size(), 0);
+        QVERIFY(files.errorMessage().isEmpty());
+        QVERIFY(!files.canUndo());
+        QVERIFY(QFileInfo::exists(workspace.filePath("folder/child")));
+        QVERIFY(QFileInfo::exists(workspace.filePath("report.txt")));
+
+        files.pasteEntries(entries, files.localDevice(), {}, workspace.filePath("folder/child"), true);
+        QTRY_VERIFY(!files.busy());
+        QVERIFY(files.errorMessage().isEmpty());
+        QVERIFY(QFileInfo::exists(workspace.filePath("folder/child/report.txt")));
+        files.undo();
+        QTRY_VERIFY(!files.busy());
+        QVERIFY(QFileInfo::exists(workspace.filePath("report.txt")));
+    }
+
     void completedMutationsAlreadyHaveFreshEntries()
     {
         QTemporaryDir directory;
