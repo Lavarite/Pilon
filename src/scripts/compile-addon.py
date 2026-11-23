@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import xml.etree.ElementTree as ET
+from urllib.parse import urlsplit
 
 BUILTINS = {"files", "ssh", "assistant", "notes", "calendar", "git", "devices"}
 PACKAGE_ID = re.compile(r"[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)+")
@@ -36,11 +37,21 @@ def validate(folder, builtin):
     data = json.loads(manifest.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise ValueError("manifest.json must be an object.")
-    allowed = {"id", "name", "description", "version", "apiVersion", "page", "settings", "runtime", "startOnEnable", "icon", "dependencies", "extensionPoints", "integrations", "lifecycle", "widgets"}
+    allowed = {"id", "name", "description", "version", "apiVersion", "page", "settings", "runtime", "startOnEnable", "icon", "dependencies", "extensionPoints", "integrations", "lifecycle", "widgets", "source", "portableSettings"}
     if data.keys() - allowed:
         raise ValueError("Unknown manifest fields: " + ", ".join(sorted(data.keys() - allowed)))
     if type(data.get("apiVersion")) is not int or data["apiVersion"] != 1:
         raise ValueError("apiVersion must be 1.")
+    if "source" in data:
+        source = urlsplit(data["source"]) if isinstance(data["source"], str) else None
+        if not source or source.scheme != "https" or not source.hostname or source.username or source.password or source.query or source.fragment:
+            raise ValueError("The add-on source must be a public HTTPS URL.")
+    if "portableSettings" in data:
+        keys = data["portableSettings"]
+        if (not isinstance(keys, list) or len(keys) > 256
+                or any(not isinstance(key, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", key) for key in keys)
+                or len(set(keys)) != len(keys)):
+            raise ValueError("Portable settings must have unique setting names.")
     addon_id = data.get("id")
     def valid_id(value):
         return isinstance(value, str) and len(value) <= 128 and (value in BUILTINS or PACKAGE_ID.fullmatch(value))

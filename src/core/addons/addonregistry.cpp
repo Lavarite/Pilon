@@ -1,3 +1,4 @@
+#include "../workspace/piconfpreferences.h"
 #include "addonregistry.h"
 #include "../workspace/pilonsettings.h"
 #include "../workspace/pilonworkspace.h"
@@ -215,7 +216,7 @@ QVariantMap readPackage(const QString &path, bool builtin, const QString &expect
         const QStringList keys{
             "id",           "name",     "description",   "version", "apiVersion",   "page",
             "settings",     "runtime",  "startOnEnable", "icon",    "dependencies", "extensionPoints",
-            "integrations", "lifecycle", "widgets"};
+            "integrations", "lifecycle", "widgets", "source", "portableSettings"};
         for (auto i = data.begin(); i != data.end(); ++i)
             if (!keys.contains(i.key()))
                 return reject(issue("Unknown manifest field: ") + i.key());
@@ -229,6 +230,24 @@ QVariantMap readPackage(const QString &path, bool builtin, const QString &expect
             return reject(issue("The manifest needs a name and version."));
         row["name"] = data.value("name").toString();
         row["version"] = data.value("version").toString();
+        if (data.contains("source")) {
+            const QUrl source(data.value("source").toString(), QUrl::StrictMode);
+            if (!source.isValid() || source.scheme() != "https" || source.host().isEmpty() ||
+                    !source.userInfo().isEmpty() || source.hasQuery() || source.hasFragment())
+                return reject(issue("The add-on source must be a public HTTPS URL."));
+            row["source"] = source.toString();
+        }
+        if (data.contains("portableSettings")) {
+            const auto keys = data.value("portableSettings");
+            if (!keys.isArray() || keys.toArray().size() > 256) return reject(issue("Invalid portable settings list."));
+            QStringList portable;
+            for (const auto &key : keys.toArray()) {
+                if (!matches(key.toString(), "\\A[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\\z") || portable.contains(key.toString()))
+                    return reject(issue("Portable settings must have unique setting names."));
+                portable.append(key.toString());
+            }
+            row["portableSettings"] = portable;
+        }
         if (data.contains("description") && (!text(data.value("description"), 400) ||
                                              data.value("description").toString().toUcs4().size() > 200))
             return reject(issue("The description must be nonblank text of at most 200 characters without "
@@ -1141,6 +1160,8 @@ void AddonRegistry::refresh() {
             present << id;
             auto receipt = m_receipts.value(id).toMap();
             receipt["id"] = id;
+            receipt["portableSettings"] = row.value("portableSettings").toStringList();
+            if (row.contains("source")) receipt["source"] = row.value("source");
             receipt["name"] = row.value("name");
             receipt["file"] = QFileInfo(paths[i]).fileName();
             receipt["lifecycleDeclared"] =
@@ -1329,7 +1350,7 @@ QVariant AddonRegistry::setting(const QString &id, const QString &key, const QVa
         return fallback;
     }
     PilonSettings settings(path, PilonSettings::IniFormat);
-    const auto value = settings.value(key, fallback);
+    const auto value = PiconfPreferences::scopedValue(settings, key, fallback);
     if (settings.status() != PilonSettings::NoError) {
         fail(issue("Cannot read add-on settings."));
         return fallback;
@@ -1351,6 +1372,10 @@ bool AddonRegistry::setSetting(const QString &id, const QString &key, const QVar
     PilonSettings settings(path, PilonSettings::IniFormat);
     const auto old = settings.value(key);
     const bool hadKey = settings.contains(key);
+    const auto typeKey = "piconf-types/" + key;
+    const auto oldType = settings.value(typeKey);
+    const bool portable = m_receipts.value(id).toMap().value("portableSettings").toStringList().contains(key);
+    if (portable) PiconfPreferences::setScopedType(settings,key,stored);
     settings.setValue(key, stored);
     settings.sync();
     if (settings.status() != PilonSettings::NoError ||
@@ -1359,6 +1384,10 @@ bool AddonRegistry::setSetting(const QString &id, const QString &key, const QVar
             settings.setValue(key, old);
         else
             settings.remove(key);
+        if (portable) {
+            if (oldType.isValid()) settings.setValue(typeKey,oldType);
+            else settings.remove(typeKey);
+        }
         settings.sync();
         if (!existed)
             QFile::remove(path);

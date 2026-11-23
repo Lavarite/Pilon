@@ -74,9 +74,13 @@ KeyBindings::KeyBindings(QObject *parent) : QObject(parent) {
     add("terminalDeleteWord", tr("Delete previous word"), tr("Terminal"), {"Ctrl+Backspace"}, {"terminal"});
     add("activateModel", tr("Select model"), tr("Models"), {"Return", "Space"}, {"models"});
     add("modelMenu", tr("Model menu"), tr("Models"), {"Menu", "Shift+F10"}, {"models"});
+    reloadPreferences();
+    if (qEnvironmentVariableIsSet("PILON_INPUT_DEBUG")) QCoreApplication::instance()->installEventFilter(this);
+}
+void KeyBindings::reloadPreferences() {
     m_custom = PilonSettings().value("keybindings/overrides").toMap();
     m_stylusCustom = PilonSettings().value("keybindings/stylus").toMap();
-    if (qEnvironmentVariableIsSet("PILON_INPUT_DEBUG")) QCoreApplication::instance()->installEventFilter(this);
+    emit changed();
 }
 KeyBindings *KeyBindings::instance() { static auto value = new KeyBindings(QCoreApplication::instance()); return value; }
 KeyBindings *KeyBindings::create(QQmlEngine *, QJSEngine *) { auto value = instance(); QQmlEngine::setObjectOwnership(value, QQmlEngine::CppOwnership); return value; }

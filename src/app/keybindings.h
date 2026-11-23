@@ -20,6 +20,7 @@ class KeyBindings : public QObject {
 public:
     explicit KeyBindings(QObject *parent = nullptr);
     static KeyBindings *instance();
+    void reloadPreferences();
     static KeyBindings *create(QQmlEngine *, QJSEngine *);
     QVariantMap bindings() const;
     QVariantList actions() const;

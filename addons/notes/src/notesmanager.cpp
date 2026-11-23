@@ -1,5 +1,6 @@
 #include "../../../src/core/workspace/pilonworkspace.h"
 #include "notesmanager.h"
+#include "../../../src/core/workspace/piconfpreferences.h"
 #include "notedocument.h"
 #include "../../../src/core/documents/noteimport.h"
 #include "../../git/src/gitfolderguard.h"
@@ -350,10 +351,18 @@ void NotesManager::loadLibrary(bool asynchronous) {
     else applyLibrary(readLibrary(directory, assetRoot));
 }
 void NotesManager::applySettings(const LoadedLibrary &data) {
-    m_defaultPaper = data.paper; m_recognizeShapes = data.recognizeShapes; m_showPageOutlines = data.showPageOutlines;
-    m_drawWithFinger = data.drawWithFinger; m_pressureSensitive = data.pressureSensitive;
-    if (!data.pens.isEmpty()) m_pens = data.pens;
+    const bool portable = PiconfPreferences::instance().active() && m_directory == defaultDirectory(false);
+    PilonSettings settings;
+    const bool imported = portable && settings.value("notes/portablePreferencesPending").toBool();
+    const auto incoming = imported ? decodeSettings(settings.value("notes/portablePreferences").toMap()) : LoadedLibrary{};
+    const auto &options = imported ? incoming : data;
+    m_defaultPaper = options.paper; m_recognizeShapes = options.recognizeShapes; m_showPageOutlines = options.showPageOutlines;
+    m_drawWithFinger = options.drawWithFinger; m_pressureSensitive = options.pressureSensitive;
+    if (!options.pens.isEmpty()) m_pens = options.pens;
     if (!data.error.isEmpty()) error(data.error);
+    else if (imported) saveSettings();
+    else if (portable && settings.value("notes/portablePreferences").toMap() != preferenceValues())
+        settings.setValue("notes/portablePreferences", preferenceValues());
     emit settingsChanged();
 }
 NotesManager::~NotesManager() { m_loadWatcher.waitForFinished(); cancelImport(); m_importWatcher.waitForFinished(); save(); }
@@ -437,7 +446,10 @@ NotesManager::LoadedLibrary NotesManager::readSettings(const QString &directory)
     QJsonParseError parse;
     const auto document = QJsonDocument::fromJson(file.readAll(), &parse);
     if (parse.error != QJsonParseError::NoError || !document.isObject()) { data.error = tr("Unable to read note settings."); return data; }
-    const auto object = document.object().toVariantMap();
+    return decodeSettings(document.object().toVariantMap());
+}
+NotesManager::LoadedLibrary NotesManager::decodeSettings(const QVariantMap &object) {
+    LoadedLibrary data;
     data.paper = NoteDocument::normalizedPaper(object.value("paper").toMap());
     data.recognizeShapes = object.value("recognizeShapes").toBool();
     data.showPageOutlines = object.value("showPageOutlines").toBool();
@@ -1211,10 +1223,22 @@ bool NotesManager::removeFolder(const QString &id) {
     QDir(staging.path()).removeRecursively();
     return true;
 }
+QVariantMap NotesManager::preferenceValues() const {
+    return {{"paper", m_defaultPaper}, {"recognizeShapes", m_recognizeShapes}, {"showPageOutlines", m_showPageOutlines},
+            {"drawWithFinger", m_drawWithFinger}, {"pressureSensitive", m_pressureSensitive}, {"pens", m_pens}};
+}
 bool NotesManager::saveSettings() {
     const auto blocked = GitFolderGuard::blockedReason(m_directory, m_directory);
     if (!blocked.isEmpty()) { error(blocked); return false; }
-    return writeJson(".settings.json", {{"paper", m_defaultPaper}, {"recognizeShapes", m_recognizeShapes}, {"showPageOutlines", m_showPageOutlines}, {"drawWithFinger", m_drawWithFinger}, {"pressureSensitive", m_pressureSensitive}, {"pens", m_pens}}); }
+    const auto values = preferenceValues();
+    if (!writeJson(".settings.json", values)) return false;
+    if (PiconfPreferences::instance().active() && m_directory == defaultDirectory(false)) {
+        PilonSettings settings;
+        settings.setValue("notes/portablePreferences", values);
+        settings.remove("notes/portablePreferencesPending");
+    }
+    return true;
+}
 void NotesManager::setPressureSensitive(bool enabled) {
     if (enabled == m_pressureSensitive) return;
     const bool before = m_pressureSensitive; m_pressureSensitive = enabled;

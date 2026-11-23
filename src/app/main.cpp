@@ -1,5 +1,6 @@
 #include <QApplication>
 #include "../core/workspace/pilonsettings.h"
+#include "../core/workspace/piconfpreferences.h"
 #include "../core/workspace/pilonworkspace.h"
 #include <QMessageBox>
 #include "applicationservice.h"
@@ -83,6 +84,8 @@ int main(int argc, char *argv[])
     int resumeSetupStep = -1;
     ApplicationService service(background);
     if (!service.claimInstance()) return service.error().isEmpty() ? 0 : 1;
+    auto &configuration = PiconfPreferences::instance();
+    configuration.reportError = [&service](const QString &error) { service.reportError(error); };
     for (;;) {
         int result;
         QVariantMap keep, ownedPaths;
@@ -92,7 +95,13 @@ int main(int argc, char *argv[])
             if (QMessageBox::critical(nullptr, QObject::tr("Pilon"), storageError,
                     QMessageBox::Retry | QMessageBox::Cancel, QMessageBox::Retry) != QMessageBox::Retry) return 1;
         }
+        const bool previousStartup = PilonSettings().value("app/backgroundEnabled",false).toBool();
+        bool configurationReady = configuration.start(PilonWorkspace::configuredRoot(), storageError);
+        if (configurationReady && previousStartup != PilonSettings().value("app/backgroundEnabled", false).toBool())
+            configurationReady = service.reconcileConfiguredStartup(previousStartup, storageError);
         service.reloadPreferences(background);
+        KeyBindings::instance()->reloadPreferences();
+        if (!configurationReady) service.reportError(storageError);
         service.setSetupResumeStep(resumeSetupStep); resumeSetupStep = -1;
         if (!resetError.isEmpty()) service.reportError(resetError);
         {
@@ -106,8 +115,24 @@ int main(int argc, char *argv[])
             keep = service.resetChoices(); ownedPaths = service.resetOwnedPaths(); resetRoot = service.resetWorkspaceRoot();
             destination = service.workspaceDestination();
             if (result == ApplicationService::WorkspaceExitCode) resumeSetupStep = service.setupResumeStep();
-            if (result == ApplicationService::ResetExitCode || result == ApplicationService::WorkspaceExitCode) QApplication::setQuitOnLastWindowClosed(false);
+            if (result == ApplicationService::ResetExitCode || result == ApplicationService::WorkspaceExitCode ||
+                result == ApplicationService::ConfigurationExitCode) QApplication::setQuitOnLastWindowClosed(false);
         }
+        // QML Settings has now persisted its pending writes. Finish this workspace before opening another engine.
+        if (result == ApplicationService::ConfigurationExitCode) {
+            resetError.clear();
+            service.finishConfigurationImport(resetError);
+            configuration.stop();
+            background = false;
+            continue;
+        }
+        QString syncError;
+        const bool saved = configuration.flush(syncError);
+        configuration.stop();
+        if (!saved && (result == ApplicationService::ResetExitCode || result == ApplicationService::WorkspaceExitCode)) {
+            resetError = syncError; background = false; continue;
+        }
+        if (!saved) qWarning().noquote() << syncError;
         if (result == ApplicationService::WorkspaceExitCode) {
             resetError.clear();
             if (!PilonWorkspace::relocateStorage(destination, &resetError)) resumeSetupStep = -1;

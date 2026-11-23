@@ -281,6 +281,10 @@ bool AssistantConnections::keyring(const QString &action, const QString &id, QBy
 }
 QByteArray AssistantConnections::apiKey(const QString &id)
 {
+    for (const auto &server : m_servers) {
+        const auto entry = server.toMap();
+        if (entry.value("id") == id && !entry.value("hasKey",true).toBool()) return {};
+    }
     if (!m_keys.contains(id)) { QByteArray key; if (keyring("lookup", id, &key)) m_keys[id] = key; }
     return m_keys.value(id);
 }
