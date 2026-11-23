@@ -165,7 +165,7 @@ TestCase {
             lastPaste = {entries: entries, device: device, username: username, path: path, move: move}
         }
         function reloadBookmarks() { }
-        function appearanceIconNames() { return ["command-line", "film", "pencil", "photo"] }
+        function appearanceIconNames() { return ["command-line", "film", "pencil", "photo", "pilon"] }
         function appearanceIconUrl(name) { return iconResolver.appearanceIconUrl(name) }
         function removeBookmark(deviceId, username, path) {
             bookmarks = bookmarks.filter(function(entry) { return entry.deviceId !== deviceId || entry.username !== username || entry.path !== path })
@@ -277,11 +277,20 @@ TestCase {
         const picker = findChild(editor, "fileAppearanceIconPicker")
         const weight = findChild(editor, "fileAppearanceIconWeight")
         verify(weight)
-        tryCompare(picker, "count", 1512)
+        tryCompare(picker, "count", 1513)
         const size = findChild(editor, "fileAppearanceIconSize")
         verify(size && findChild(editor, "fileAppearanceIconColour"))
         size.value = 64
         tryCompare(picker.itemAtIndex(0).icon, "width", 64)
+        search.text = "=pilon"
+        tryVerify(() => picker.count === 1 && picker.itemAtIndex(0)?.text === "Pilon")
+        const pilonIcon = picker.itemAtIndex(0)
+        verify(pilonIcon.icon.source.toString().endsWith("/icons/pilon.svg"))
+        mouseClick(pilonIcon)
+        compare(editor.choice, "pilon")
+        verify(sharedFiles.appearance.saveType("fixture", editor.choice))
+        compare(page.iconForFile("example.fixture", false), "icons/pilon.svg")
+        verify(sharedFiles.appearance.saveType("fixture", ""))
         search.text = "weather"
         tryVerify(() => picker.count > 10 && picker.count < 1512 && picker.model.includes("cloud-rain"))
         search.text = "not-a-possible-icon-1847"

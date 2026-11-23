@@ -20,7 +20,8 @@ Column {
     readonly property string weight: weights[weightPicker.currentIndex]
     spacing: 8
 
-    function choose(name) { chosen("phosphor/" + weight + "/" + name) }
+    function iconKey(name) { return name === "pilon" ? name : "phosphor/" + weight + "/" + name }
+    function choose(name) { chosen(iconKey(name)) }
 
     function reset() {
         const parts = selection.split("/")
@@ -38,7 +39,7 @@ Column {
             browser.names = result.names
             browser.searched = true
             browser.completedQuery = result.query
-            const selected = browser.names.indexOf(browser.selection.split("/")[2])
+            const selected = browser.names.indexOf(browser.selection.split("/").pop())
             grid.currentIndex = Math.max(0, selected)
             if (grid.count) grid.positionViewAtIndex(grid.currentIndex, GridView.Contain)
         }
@@ -73,7 +74,7 @@ Column {
             Layout.fillWidth: true
             Layout.minimumWidth: 0
             placeholderText: width < 300 ? qsTr("Search icons") : qsTr("Search icons, keywords or categories")
-            Accessible.name: qsTr("Search Phosphor icons")
+            Accessible.name: qsTr("Search icons")
             Accessible.description: qsTr("Search by name, keyword or category")
             onTextChanged: searchDelay.restart()
         }
@@ -113,7 +114,7 @@ Column {
         boundsBehavior: Flickable.StopAtBounds
         activeFocusOnTab: count > 0
         keyNavigationEnabled: true
-        Accessible.name: qsTr("Phosphor icons")
+        Accessible.name: qsTr("Icons")
         ScrollBar.vertical: PilonScrollBar {}
         model: browser.names
         Keys.onReturnPressed: if (currentItem) browser.choose(currentItem.modelData)
@@ -125,15 +126,15 @@ Column {
             height: grid.cellHeight - 8
             flat: true
             activeFocusOnTab: false
-            highlighted: browser.selection === "phosphor/" + browser.weight + "/" + modelData
+            highlighted: browser.selection === browser.iconKey(modelData)
                          || (grid.activeFocus && GridView.isCurrentItem)
             leftPadding: 4; rightPadding: 4; topPadding: 4; bottomPadding: 4; spacing: 8
             display: AbstractButton.TextUnderIcon
-            text: modelData
+            text: modelData === "pilon" ? qsTr("Pilon") : modelData
             Accessible.name: text
             ToolTip.visible: hovered
             ToolTip.text: text
-            icon.source: "qrc:/phosphor/" + browser.weight + "/" + modelData
+            icon.source: modelData === "pilon" ? Qt.resolvedUrl("icons/pilon.svg") : "qrc:/phosphor/" + browser.weight + "/" + modelData
                 + (browser.weight === "regular" ? "" : "-" + browser.weight) + ".svg"
             icon.width: sizeSlider.value; icon.height: sizeSlider.value
             icon.color: browser.previewColour
