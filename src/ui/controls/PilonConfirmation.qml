@@ -24,20 +24,33 @@ PilonDialog {
     rightPadding: closeAbove ? padding : padding + 42 + PilonStyle.controlGap
     width: Math.min(maximumContentWidth, preferredWidth, leftPadding + rightPadding
         + Math.max(prompt.implicitWidth, detail.implicitWidth, cancel.implicitWidth + actions.spacing + confirm.implicitWidth))
-    height: Math.min(implicitHeight, maximumContentHeight)
-    function revealAction(button) {
-        if (!opened || !button.activeFocus) return
-        const view = scroll.contentItem
-        const top = button.mapToItem(view.contentItem, 0, 0).y
-        const bottom = top + button.height
-        if (bottom > view.contentY + view.height) view.contentY = Math.min(view.contentHeight - view.height, bottom - view.height)
-        else if (top < view.contentY) view.contentY = Math.max(0, top)
-    }
+    spacing: PilonStyle.panelGap
+    height: Math.min(implicitHeight, maximumContentHeight, Math.max(240, maximumContentHeight * .75))
     onOpened: {
         scroll.contentItem.contentY = 0
         cancel.forceActiveFocus(Qt.PopupFocusReason)
     }
-    footer: Item { implicitHeight: 0 }
+    footer: Item {
+        implicitHeight: actions.implicitHeight
+        Flow {
+            id: actions
+            x: dialog.leftPadding
+            width: dialog.availableWidth
+            spacing: PilonStyle.controlGap
+            PilonWrapButton {
+                id: cancel
+                text: qsTr("Cancel")
+                onClicked: dialog.reject()
+                Keys.onReturnPressed: dialog.reject()
+                Keys.onEnterPressed: dialog.reject()
+            }
+            PilonWrapButton {
+                id: confirm
+                text: dialog.confirmText
+                onClicked: if (!dialog.perform || dialog.perform() !== false) dialog.accept()
+            }
+        }
+    }
     contentItem: PilonScrollView {
         id: scroll
         implicitHeight: body.implicitHeight
@@ -64,25 +77,6 @@ PilonDialog {
                 textFormat: Text.PlainText
                 wrapMode: Text.Wrap
                 color: dialog.palette.windowText
-            }
-            Flow {
-                id: actions
-                width: parent.width
-                spacing: PilonStyle.controlGap
-                PilonWrapButton {
-                    id: cancel
-                    text: qsTr("Cancel")
-                    onVisualFocusChanged: if (visualFocus) Qt.callLater(dialog.revealAction, cancel)
-                    onClicked: dialog.reject()
-                    Keys.onReturnPressed: dialog.reject()
-                    Keys.onEnterPressed: dialog.reject()
-                }
-                PilonWrapButton {
-                    id: confirm
-                    text: dialog.confirmText
-                    onActiveFocusChanged: if (activeFocus) Qt.callLater(dialog.revealAction, confirm)
-                    onClicked: if (!dialog.perform || dialog.perform() !== false) dialog.accept()
-                }
             }
         }
     }

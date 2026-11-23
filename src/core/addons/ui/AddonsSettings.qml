@@ -32,6 +32,21 @@ ColumnLayout {
         if (pending) ids[id] = true; else delete ids[id]
         pendingIds = ids
     }
+    Timer {
+        id: applyToggle
+        interval: 34
+        property string addonId
+        property bool requested
+        onTriggered: {
+            const id = addonId
+            Promise.resolve().then(() => page.changeEnabled(id, requested)).then(result => {
+                page.report(id, result === true ? "" : (typeof result === "string" ? result : page.registry.error))
+            }).catch(error => page.report(id, String(error))).then(() => {
+                page.checkedOverrides = ({})
+                page.setPending(id, false)
+            })
+        }
+    }
     function report(id, message) {
         const errors = Object.assign({}, operationErrors)
         if (message) {
@@ -60,7 +75,7 @@ ColumnLayout {
         objectName: "reorderSidebarTabs"
         visible: page.showTabOrder
         Layout.maximumWidth: page.width
-        text: qsTr("Reorder sidebar tabs")
+        text: qsTr("Reorder tabs")
         onClicked: tabOrder.open()
     }
     SidebarTabOrderDialog {
@@ -117,14 +132,23 @@ ColumnLayout {
                             opacity: choice.enabled ? 1 : .4
                         }
                         checked: page.checkedValue(card.modelData)
-                        enabled: !page.changesBusy && !page.pendingIds[card.modelData.id] && !card.modelData.error
+                        enabled: !page.changesBusy && Object.keys(page.checkedOverrides).length === 0
+                            && !page.pendingIds[card.modelData.id] && !card.modelData.error
                         onToggled: {
                             const id = card.modelData.id, requested = checked
+                            page.checkedOverrides = {[id]: requested}
                             page.setPending(id, true)
                             checked = Qt.binding(() => page.checkedValue(card.modelData))
-                            Promise.resolve().then(() => page.changeEnabled(id, requested)).then(result => {
-                                page.report(id, result === true ? "" : (typeof result === "string" ? result : page.registry.error))
-                            }).catch(error => page.report(id, String(error))).then(() => page.setPending(id, false))
+                            applyToggle.addonId = id
+                            applyToggle.requested = requested
+                            applyToggle.restart()
+                        }
+                        ProgressBar {
+                            anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
+                            height: 2
+                            visible: page.checkedOverrides[card.modelData.id] !== undefined
+                            indeterminate: visible
+                            Accessible.ignored: true
                         }
                     }
                     Label {

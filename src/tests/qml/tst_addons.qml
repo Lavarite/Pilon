@@ -85,6 +85,37 @@ TestCase {
         host.update(); verify(waitForRendering(host.contentItem))
     }
     Component {
+        id: toggleFixture
+        App.AddonsSettings {
+            id: settings
+            width: 320
+            fileWorkspace: null
+            property var finishToggle: null
+            registry: QtObject {
+                property var addons: [{id:"org.example.toggle", name:"Fixture", enabled:true, configuredEnabled:true}]
+                property var sidebarAddons: []
+                property string error: ""
+            }
+            changeEnabled: (id, enabled) => new Promise(resolve => {
+                if (id === "org.example.toggle" && !enabled) settings.finishToggle = resolve
+            })
+        }
+    }
+    function test_toggleDisplaysRequestedStateUntilPreparationFinishes() {
+        const settings=createTemporaryObject(toggleFixture,app.contentItem)
+        settings.z=100
+        const choice=findControl(settings,"addonEnabled-org.example.toggle")
+        verify(choice.checked)
+        mouseClick(choice)
+        compare(choice.checked,false)
+        verify(settings.registry.addons[0].enabled)
+        compare(choice.enabled,false)
+        tryVerify(() => !!settings.finishToggle)
+        settings.finishToggle("Fixture rejected the change.")
+        tryCompare(choice,"checked",true)
+        verify(choice.enabled)
+    }
+    Component {
         id: restoreFixture
         App.ConfiguredAddonRestore {
             id: restore
@@ -318,10 +349,12 @@ TestCase {
     }
     function test_sidebarTabsCanBeReorderedInSeparateWindow(data) {
         const screen=tabletInput.screenGeometry(), font=tabletInput.applicationFont()
+        const originalSize=Qt.size(app.width,app.height)
         const original=app.pages.map(page=>page.id), first=original[0], second=original[1]
         let settings=null, dialog=null
         try {
             tabletInput.setScreenGeometry(Qt.rect(0,0,data.width,640))
+            tabletInput.configureWindow(app,data.width,640)
             if(data.font) tabletInput.setApplicationFont(Qt.font({family:font.family,pixelSize:data.font}))
             app.touchMode=data.touch
             findControl(app,"appNavigation").expanded=false
@@ -339,17 +372,22 @@ TestCase {
             dialog.dialogWindow.update(); verify(waitForRendering(dialog.dialogWindow.contentItem))
             const preview=findControl(dialog,"sidebarOrderPreview"), navigation=findControl(app,"appNavigation")
             verify(preview,"The reorder window renders the sidebar itself")
-            compare(preview.expanded,true); compare(navigation.expanded,false)
-            compare(findControl(dialog,"sidebarPreviewBackground").width,preview.width)
-            verify(!findControl(preview,"sidebarPreviewToggle").visible,"The editor stays expanded")
+            compare(preview.horizontal,navigation.horizontal)
+            compare(preview.expanded,navigation.expanded)
+            verify(findControl(dialog,"sidebarPreviewBackground").width >= preview.width)
+            verify(!findControl(preview,"sidebarPreviewToggle").visible,"The editor keeps the live orientation and mode")
             compare(preview.currentId,navigation.currentId)
+            const previewScroll=findControl(preview,"sidebarPreviewScroll")
+            previewScroll.contentX=0
             const firstItem=findControl(preview,first+"PreviewNavigation"), secondItem=findControl(preview,second+"PreviewNavigation")
             verify(firstItem && secondItem)
-            verify(firstItem.mapToItem(preview,0,0).y < secondItem.mapToItem(preview,0,0).y)
+            const horizontal=preview.horizontal
             const start=firstItem.mapToItem(preview,firstItem.width/2,firstItem.height/2)
-            const end=secondItem.mapToItem(preview,secondItem.width/2,secondItem.height/2+4)
+            const end=secondItem.mapToItem(preview,secondItem.width/2+(horizontal?4:0),secondItem.height/2+(horizontal?0:4))
+            verify(horizontal ? start.x < end.x : start.y < end.y)
+            const threshold=Qt.styleHints.startDragDistance+2
             mousePress(preview,start.x,start.y)
-            mouseMove(preview,start.x,start.y+Qt.styleHints.startDragDistance+2,20)
+            mouseMove(preview,start.x+(horizontal?threshold:0),start.y+(horizontal?0:threshold),20)
             tryCompare(preview,"dragging",true)
             app.addonRegistryObject.refresh()
             verify(preview.dragging,"Refreshing unchanged tabs keeps the drag active")
@@ -363,12 +401,13 @@ TestCase {
             dialog.dialogWindow.requestActivate(); tryCompare(dialog.dialogWindow,"active",true)
             dialog.dialogWindow.update(); verify(waitForRendering(dialog.dialogWindow.contentItem))
             const moved=findControl(preview,first+"PreviewNavigation")
-            moved.forceActiveFocus(); keyClick(Qt.Key_Up,Qt.AltModifier)
+            moved.forceActiveFocus(); keyClick(horizontal ? Qt.Key_Left : Qt.Key_Up,Qt.AltModifier)
             compare(app.pages.map(page=>page.id).join(","),original.join(","))
             dialog.dialogWindow.update(); verify(waitForRendering(dialog.dialogWindow.contentItem))
+            previewScroll.contentX=0
             const cancelItem=findControl(preview,first+"PreviewNavigation"), cancelTarget=findControl(preview,second+"PreviewNavigation")
             const cancelStart=cancelItem.mapToItem(preview,cancelItem.width/2,cancelItem.height/2)
-            const cancelEnd=cancelTarget.mapToItem(preview,cancelTarget.width/2,cancelTarget.height/2+4)
+            const cancelEnd=cancelTarget.mapToItem(preview,cancelTarget.width/2+(horizontal?4:0),cancelTarget.height/2+(horizontal?0:4))
             mousePress(preview,cancelStart.x,cancelStart.y)
             mouseMove(preview,cancelEnd.x,cancelEnd.y,20)
             tryCompare(preview,"dragTargetIndex",1)
@@ -395,6 +434,7 @@ TestCase {
             if(dialog) dialog.close()
             if(settings) settings.close()
             app.touchMode=false; tabletInput.setApplicationFont(font); tabletInput.setScreenGeometry(screen)
+            tabletInput.configureWindow(app,originalSize.width,originalSize.height)
         }
     }
     function test_sidebarPagesCanBeHiddenWithoutDisablingAddons() {

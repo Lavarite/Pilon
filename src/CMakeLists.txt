@@ -224,6 +224,7 @@ set(PILON_UI_FILES
     ui/controls/PilonModelDownloadRow.qml
     ui/controls/PilonConfirmation.qml
     ui/controls/PilonErrorPopup.qml
+    ui/controls/PilonLoadingLayout.qml
     ui/controls/PilonPopup.qml
     ui/controls/PilonScrollBar.qml
     ui/controls/PilonScrollView.qml

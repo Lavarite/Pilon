@@ -145,6 +145,13 @@ public:
     Q_INVOKABLE QUrl settingsUrl() const { return QUrl::fromLocalFile(PilonWorkspace::settingsFile()); }
     Q_INVOKABLE QString settingsPath() const { return PilonWorkspace::settingsFile(); }
     Q_INVOKABLE QString workspacePath() const { return PilonWorkspace::configuredRoot(); }
+    Q_INVOKABLE QUrl configurationBundleFixture() const {
+        const auto path = QDir(PilonWorkspace::configuredRoot()).filePath("test-settings.piconfpack");
+        QFile file(path);
+        if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) return {};
+        if (file.write("{}") != 2) return {};
+        return QUrl::fromLocalFile(path);
+    }
     Q_INVOKABLE QVariant preference(const QString &key) const { return PilonSettings().value(key); }
     Q_INVOKABLE void repeatKey(int key) {
         auto *window = QGuiApplication::focusWindow();

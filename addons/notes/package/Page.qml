@@ -13,8 +13,8 @@ NotesPage {
     id: notesPane
     objectName: "notesPane"
     anchors.fill: parent
-    anchors.leftMargin: 16
-    anchors.rightMargin: 16
+    anchors.leftMargin: Qt.platform.os === "android" ? 0 : 16
+    anchors.rightMargin: anchors.leftMargin
     anchors.topMargin: 16
     anchors.bottomMargin: 16
     notes: addon.notesManager

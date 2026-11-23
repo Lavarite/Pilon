@@ -15,7 +15,7 @@ class AddonRegistry : public QObject {
     Q_OBJECT
     QML_ELEMENT
     Q_PROPERTY(QVariantList addons READ addons NOTIFY changed)
-    Q_PROPERTY(QVariantList sidebarAddons READ sidebarAddons NOTIFY changed)
+    Q_PROPERTY(QVariantList sidebarAddons READ sidebarAddons NOTIFY sidebarChanged)
     Q_PROPERTY(QString error READ error NOTIFY changed)
     Q_PROPERTY(QString restoringAddon READ restoringAddon NOTIFY restoreChanged)
     Q_PROPERTY(bool recovery READ recovery CONSTANT)
@@ -55,6 +55,7 @@ class AddonRegistry : public QObject {
     Q_INVOKABLE QVariant setting(const QString &id, const QString &key, const QVariant &fallback = {});
     Q_INVOKABLE bool setSetting(const QString &id, const QString &key, const QVariant &value);
   signals:
+    void sidebarChanged();
     void changed();
     void restoreChanged();
     void configuredDownloadFinished(const QString &id, bool installed, const QString &error);

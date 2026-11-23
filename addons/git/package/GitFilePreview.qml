@@ -31,11 +31,11 @@ Item {
             textFormat: Text.PlainText; font: textPreview.font; wrapMode: Text.NoWrap
             Accessible.ignored: true
         }
-        Label {
-            width: content.width; wrapMode: Text.Wrap; textFormat: Text.PlainText
+        PilonLoadingLayout {
+            width: content.width
+            padding: 0
+            layout: "document"
             visible: content.preview.kind === "loading"
-            text: qsTr("Loading…")
-            color: content.Window.window ? content.Window.window.palette.windowText : palette.windowText
         }
         Label {
             objectName: "gitFilePreviewDeleted"

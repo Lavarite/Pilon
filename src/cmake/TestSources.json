@@ -68,6 +68,7 @@
   "ui/PilonToolButton.qml": "src/ui/controls/PilonToolButton.qml",
   "ui/PilonConfirmation.qml": "src/ui/controls/PilonConfirmation.qml",
   "ui/PilonErrorPopup.qml": "src/ui/controls/PilonErrorPopup.qml",
+  "ui/PilonLoadingLayout.qml": "src/ui/controls/PilonLoadingLayout.qml",
   "ui/PilonPopup.qml": "src/ui/controls/PilonPopup.qml",
   "ui/PilonButton.qml": "src/ui/controls/PilonButton.qml",
   "ui/PilonCloseButton.qml": "src/ui/controls/PilonCloseButton.qml",

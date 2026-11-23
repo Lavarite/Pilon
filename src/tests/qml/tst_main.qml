@@ -970,17 +970,29 @@ TestCase {
             service.nextConfigurationFile = service.settingsLocation
             tap(findControl(settings, "exportConfiguration"), null, false)
             compare(service.configurationActions.join(","), "save dialog,export")
-            service.nextConfigurationFile = ""
+            const chooser = findControl(appWindow, "connectedFileSelection")
             tap(findControl(settings, "importConfiguration"), null, false)
-            compare(service.configurationActions.join(","), "save dialog,export,open dialog")
+            tryCompare(chooser, "opened", true)
+            compare(chooser.transientParent, settings)
+            compare(chooser.suffix, ".piconfpack")
+            chooser.close()
+            compare(service.configurationActions.join(","), "save dialog,export")
             verify(!review.opened)
-            service.nextConfigurationFile = service.settingsLocation
+            service.nextConfigurationFile = tabletInput.configurationBundleFixture()
             for (const decision of ["cancel", "import"]) {
                 service.configurationActions = []
                 tap(findControl(settings, "importConfiguration"), null, false)
+                tryCompare(chooser, "opened", true)
+                tryVerify(() => chooser.picker && chooser.picker.displayedEntries.some(entry => entry.name === "test-settings.piconfpack"))
+                const entries = chooser.picker.displayedEntries
+                const index = entries.findIndex(entry => entry.name === "test-settings.piconfpack")
+                chooser.picker.selectEntry(entries[index], index, Qt.NoModifier)
+                const accept = findControl(chooser, "confirmConnectedFileSelection")
+                revealControl(accept)
+                mouseClick(accept)
                 tryCompare(review, "opened", true)
                 compare(review.details, "appearance.frostiness")
-                compare(service.configurationActions.join(","), "open dialog,preview")
+                compare(service.configurationActions.join(","), "preview")
                 const action = decision === "cancel" ? review.cancelButton : review.confirmButton
                 revealControl(action)
                 verifyNativeBounds(action, action.Window.window)

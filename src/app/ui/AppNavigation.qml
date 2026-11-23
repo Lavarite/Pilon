@@ -16,9 +16,9 @@ Item {
     implicitHeight: entries.implicitHeight
     property Item draggedItem: null
     property int dragSourceIndex: -1
-    property real dragY: 0
-    property real dragPointerY: 0
-    property real dragGrabY: 0
+    property real dragPosition: 0
+    property real dragPointer: 0
+    property real dragGrab: 0
     readonly property bool dragging: !!draggedItem
     readonly property int dragTargetIndex: draggedItem ? draggedItem.DelegateModel.itemsIndex : -1
     signal activated(string pageId)
@@ -33,16 +33,22 @@ Item {
         const button = buttons.itemAt((index + delta + pages.length) % pages.length)
         if (button) button.navigationButton.forceActiveFocus()
     }
-    function updateDrag(y) {
+    function updateDrag(pointer) {
         if (!draggedItem) return
-        dragPointerY = y
-        const position = y + scroll.contentY - dragGrabY
-        dragY = Math.max(scroll.contentY, Math.min(position,
-            scroll.contentY + Math.max(0, scroll.height - draggedItem.height)))
+        dragPointer = pointer
+        const offset = horizontal ? scroll.contentX : scroll.contentY
+        const extent = horizontal ? scroll.width : scroll.height
+        const length = horizontal ? draggedItem.width : draggedItem.height
+        const position = pointer + offset - dragGrab
+        dragPosition = Math.max(offset, Math.min(position, offset + Math.max(0, extent - length)))
         let to = dragTargetIndex
-        const center = position + draggedItem.height / 2
-        while (to > 0 && center < buttons.itemAt(to - 1).y + buttons.itemAt(to - 1).height / 2) --to
-        while (to < pages.length - 1 && center > buttons.itemAt(to + 1).y + buttons.itemAt(to + 1).height / 2) ++to
+        const center = position + length / 2
+        function midpoint(index) {
+            const item = buttons.itemAt(index)
+            return horizontal ? item.x + item.width / 2 : item.y + item.height / 2
+        }
+        while (to > 0 && center < midpoint(to - 1)) --to
+        while (to < pages.length - 1 && center > midpoint(to + 1)) ++to
         if (to !== dragTargetIndex) visualPages.items.move(dragTargetIndex, to)
     }
     function finishDrag(save) {
@@ -138,13 +144,16 @@ Item {
                         property alias navigationButton: button
                         width: navigation.horizontal ? (modelData.icon ? 44
                             : Math.max(44, button.implicitContentWidth + button.leftPadding + button.rightPadding)) : entries.width
-                        height: button.height
+                        height: button.height + (navigation.horizontal && navigation.visibilityControls ? 32 : 0)
                         z: navigation.draggedItem === row ? 1 : 0
-                        transform: Translate { y: navigation.draggedItem === row ? navigation.dragY - row.y : 0 }
+                        transform: Translate {
+                            x: navigation.horizontal && navigation.draggedItem === row ? navigation.dragPosition - row.x : 0
+                            y: !navigation.horizontal && navigation.draggedItem === row ? navigation.dragPosition - row.y : 0
+                        }
                         PilonNavigationButton {
                             id: button
                             x: navigation.horizontal ? 0 : navigation.pageInset
-                            width: row.width - x * 2 - (navigation.visibilityControls ? 40 : 0)
+                            width: row.width - x * 2 - (navigation.visibilityControls && !navigation.horizontal ? 40 : 0)
                             focus: true
                             objectName: navigation.reorderEnabled ? row.modelData.id + "PreviewNavigation" : row.modelData.objectName || row.modelData.id + "Navigation"
                             readonly property bool showLabel: navigation.expanded && !navigation.horizontal
@@ -156,10 +165,14 @@ Item {
                             display: showLabel ? AbstractButton.TextBesideIcon : (row.modelData.icon ? AbstractButton.IconOnly : AbstractButton.TextOnly)
                             wrapLabel: showLabel
                             checked: navigation.currentId === row.modelData.id
-                            Accessible.description: navigation.reorderEnabled ? qsTr("Drag to reorder. Alt+Up or Alt+Down moves this tab.") : ""
+                            Accessible.description: navigation.reorderEnabled ? (navigation.horizontal
+                                ? qsTr("Drag to reorder. Alt+Left or Alt+Right moves this tab.")
+                                : qsTr("Drag to reorder. Alt+Up or Alt+Down moves this tab.")) : ""
                             onClicked: navigation.activated(row.modelData.id)
                             Keys.onLeftPressed: event => {
-                                if (navigation.horizontal) navigation.focusOffset(row.DelegateModel.itemsIndex, -1)
+                                if (navigation.horizontal && navigation.reorderEnabled && event.modifiers & Qt.AltModifier)
+                                    navigation.requestReorder(row.DelegateModel.itemsIndex, row.DelegateModel.itemsIndex - 1)
+                                else if (navigation.horizontal) navigation.focusOffset(row.DelegateModel.itemsIndex, -1)
                                 else event.accepted = false
                             }
                             Keys.onRightPressed: event => {
@@ -180,21 +193,23 @@ Item {
                                 anchors.fill: parent
                                 enabled: navigation.reorderEnabled
                                 preventStealing: true
-                                property real pressY: 0
+                                property real pressPosition: 0
                                 onPressed: mouse => {
-                                    pressY = mapToItem(scroll, mouse.x, mouse.y).y
-                                    navigation.dragGrabY = mouse.y
+                                    const point = mapToItem(scroll, mouse.x, mouse.y)
+                                    pressPosition = navigation.horizontal ? point.x : point.y
+                                    navigation.dragGrab = navigation.horizontal ? mouse.x : mouse.y
                                     button.forceActiveFocus(Qt.MouseFocusReason)
                                 }
                                 onPositionChanged: mouse => {
                                     if (!pressed) return
-                                    const y = mapToItem(scroll, mouse.x, mouse.y).y
+                                    const point = mapToItem(scroll, mouse.x, mouse.y)
+                                    const position = navigation.horizontal ? point.x : point.y
                                     if (!navigation.dragging) {
-                                        if (Math.abs(y - pressY) < Qt.styleHints.startDragDistance) return
+                                        if (Math.abs(position - pressPosition) < Qt.styleHints.startDragDistance) return
                                         navigation.dragSourceIndex = row.DelegateModel.itemsIndex
                                         navigation.draggedItem = row
                                     }
-                                    navigation.updateDrag(y)
+                                    navigation.updateDrag(position)
                                 }
                                 onReleased: {
                                     if (navigation.dragging) navigation.finishDrag(true)
@@ -207,18 +222,18 @@ Item {
                             id: pageVisibility
                             objectName: navigation.visibilityControls ? "sidebarVisible-" + row.modelData.id : ""
                             visible: navigation.visibilityControls
-                            anchors.left: button.right; anchors.leftMargin: 8
-                            anchors.verticalCenter: parent.verticalCenter
-                            width: 24; height: 40
+                            x: navigation.horizontal ? (row.width - width) / 2 : button.x + button.width + 8
+                            y: navigation.horizontal ? button.height : (row.height - height) / 2
+                            width: 24; height: navigation.horizontal ? 32 : 40
                             leftPadding: 0; rightPadding: 0
                             checked: row.modelData.sidebarVisible !== false
-                            Accessible.name: qsTr("Show %1 in sidebar").arg(row.modelData.title)
+                            Accessible.name: qsTr("Show %1 in navigation").arg(row.modelData.title)
                             ToolTip.visible: hovered
                             ToolTip.text: Accessible.name
                             onToggled: {
                                 const requested = checked
-                                checked = Qt.binding(() => row.modelData.sidebarVisible !== false)
                                 navigation.pageVisibilityRequested(row.modelData.id, requested)
+                                checked = Qt.binding(() => row.modelData.sidebarVisible !== false)
                             }
                         }
                     }
@@ -228,10 +243,12 @@ Item {
         Timer {
             interval: 40; repeat: true; running: navigation.dragging
             onTriggered: {
-                const delta = navigation.dragPointerY < 16 ? -16 : navigation.dragPointerY > scroll.height - 16 ? 16 : 0
+                const extent = navigation.horizontal ? scroll.width : scroll.height
+                const delta = navigation.dragPointer < 16 ? -16 : navigation.dragPointer > extent - 16 ? 16 : 0
                 if (!delta) return
-                scroll.contentY = Math.max(0, Math.min(scroll.contentHeight - scroll.height, scroll.contentY + delta))
-                navigation.updateDrag(navigation.dragPointerY)
+                if (navigation.horizontal) scroll.contentX = Math.max(0, Math.min(scroll.contentWidth - scroll.width, scroll.contentX + delta))
+                else scroll.contentY = Math.max(0, Math.min(scroll.contentHeight - scroll.height, scroll.contentY + delta))
+                navigation.updateDrag(navigation.dragPointer)
             }
         }
     }
