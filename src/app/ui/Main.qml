@@ -183,9 +183,11 @@ Window {
     property string addonError: ""
     property var addonNotices: ({})
     readonly property var addonRegistryObject: addonRegistry
-    readonly property var preferredPages: addonRegistry.sidebarAddons.filter(entry => entry.enabled && entry.sidebarVisible).map(entry => ({
-        id: entry.id, title: entry.name, icon: entry.icon, objectName: entry.id + "Navigation"
-    }))
+    readonly property string preferredPagesJson: JSON.stringify(addonRegistry.sidebarAddons
+        .filter(entry => entry.enabled && entry.sidebarVisible).map(entry => ({
+            id: entry.id, title: entry.name, icon: String(entry.icon), objectName: entry.id + "Navigation"
+        })))
+    readonly property var preferredPages: JSON.parse(preferredPagesJson)
     readonly property var pages: navigation.fittedPages
     readonly property var filesPane: pageInstance("files")
     readonly property var notesPane: pageInstance("notes")
