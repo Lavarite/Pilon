@@ -4,6 +4,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkReply>
+#include <QScopeGuard>
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QTemporaryDir>
@@ -66,7 +67,12 @@ private slots:
     void supportModelsAreOptionalAndDownloadedWithIntegrityChecks()
     {
         AssistantModels catalog;
-        QCOMPARE(catalog.supportModels().size(), 3);
+        QCOMPARE(catalog.supportModels().size(), 2);
+        AssistantModels handwriting(AssistantModels::Owner::Notes);
+        const auto recognition = handwriting.supportModels();
+        QCOMPARE(recognition.size(), 1);
+        QCOMPARE(recognition.first().toMap().value("id").toString(), "ppocrv5");
+        QVERIFY(handwriting.installed().isEmpty());
         for (const auto &value : catalog.supportModels()) {
             const auto model = value.toMap();
             QVERIFY(!model.value("installed").toBool());
@@ -108,6 +114,33 @@ private slots:
         auto bad = catalog.m_downloadFiles.first().toMap(); bad.insert("sha256", QString(64, '0'));
         catalog.m_downloadFiles = {bad}; catalog.downloadNext(); QTRY_VERIFY(!catalog.downloading());
         QVERIFY(catalog.error().contains("integrity")); QCOMPARE(completed.size(), 1);
+    }
+    void handwritingDownloadsUseTheNotesModelDirectory()
+    {
+        const auto original = qgetenv("PILON_NOTES_MODELS_DIR");
+        const auto restore = qScopeGuard([&] { qputenv("PILON_NOTES_MODELS_DIR", original); });
+        const QTemporaryDir directory;
+        qputenv("PILON_NOTES_MODELS_DIR", directory.path().toUtf8());
+        AssistantModels catalog(AssistantModels::Owner::Notes);
+        QTcpServer server;
+        QVERIFY(server.listen(QHostAddress::LocalHost));
+        const QByteArray model("handwriting-model-fixture");
+        const QString path = "ppocrv5/weights";
+        serve(server, {{"/model", model}});
+        catalog.m_pendingModel = {{"id", "ppocrv5"}, {"kind", "support"},
+            {"files", QVariantList{QVariantMap{{"path", path}}}}};
+        catalog.m_downloadFiles = {QVariantMap{{"path", path}, {"format", "support"},
+            {"url", localHub(server).toString() + "/model"}, {"size", model.size()},
+            {"sha256", QString::fromLatin1(QCryptographicHash::hash(model, QCryptographicHash::Sha256).toHex())}}};
+        catalog.m_total = model.size();
+        catalog.m_downloading = true;
+        QSignalSpy completed(&catalog, &AssistantModels::downloadCompleted);
+        catalog.downloadNext();
+        QTRY_COMPARE(completed.size(), 1);
+        QFile saved(directory.filePath(path));
+        QVERIFY(saved.open(QIODevice::ReadOnly));
+        QCOMPARE(saved.readAll(), model);
+        QVERIFY(!QFileInfo::exists(AssistantModels::root() + '/' + path));
     }
 
     void repositoryLinksAreValidated()

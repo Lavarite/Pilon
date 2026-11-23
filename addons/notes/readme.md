@@ -90,6 +90,8 @@ The assistant finds the configured library through `get_app_context`. Its
 
 ## Search and handwriting
 
+Download **Handwriting recognition** in **Settings → Notes**. Pilon stores the model in `addon-data/notes/models/` under the selected Pilon folder.
+
 Search covers typed and imported text and indexed handwriting. To set up
 handwriting on Linux, install `uv`, run `bash addons/notes/scripts/setup_handwriting.sh`
 and download **Handwriting recognition** in **Settings → Models**. The download

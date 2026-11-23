@@ -76,7 +76,9 @@ QStringList privateFolders(const QString &repository) {
     return containedFolders(repository,{PilonWorkspace::appDataDirectory()});
 }
 QStringList locallyExcludedFolders(const QString &repository) {
-    auto folders=containedFolders(repository,{PilonWorkspace::appDataDirectory(),PilonWorkspace::modelsDirectory()});
+    auto folders=containedFolders(repository,{PilonWorkspace::appDataDirectory(),
+        PilonWorkspace::modelsDirectory(),PilonWorkspace::addonModelsDirectory("notes"),
+        PilonWorkspace::configuredRoot()+"/Models"});
     folders.removeAll(QString{});return folders;
 }
 bool inFolders(const QString &path,const QStringList &folders) {

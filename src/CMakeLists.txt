@@ -147,7 +147,7 @@ add_library(pilon_notes STATIC
     ../addons/notes/src/notedocument.cpp ../addons/notes/src/notedocument.h ../addons/notes/src/notecanvas.cpp ../addons/notes/src/notecanvas.h
     ../addons/notes/src/notehandwriting.cpp ../addons/notes/src/notehandwriting.h)
 target_include_directories(pilon_notes PUBLIC ${PILON_INCLUDE_DIRECTORIES})
-target_link_libraries(pilon_notes PUBLIC pilon_documents Qt6::Quick)
+target_link_libraries(pilon_notes PUBLIC pilon_documents pilon_assistant_models Qt6::Quick)
 
 add_library(pilon_assistant_models STATIC ../addons/assistant/src/assistantmodels.cpp ../addons/assistant/src/assistantmodels.h)
 target_include_directories(pilon_assistant_models PUBLIC ${PILON_INCLUDE_DIRECTORIES})
@@ -221,6 +221,7 @@ set(PILON_UI_FILES
     ui/controls/PilonDialog.qml
     ui/controls/PilonMenu.qml
     ui/controls/PilonMenuItem.qml
+    ui/controls/PilonModelDownloadRow.qml
     ui/controls/PilonConfirmation.qml
     ui/controls/PilonErrorPopup.qml
     ui/controls/PilonPopup.qml

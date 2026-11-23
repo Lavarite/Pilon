@@ -157,8 +157,10 @@ bool stageSource(const Source &source, const QString &stage, const QString &dest
             }
         } else if (info.isFile()) {
             const auto suffix = info.suffix().toLower();
-            const bool immutable = (source.weights || relative.startsWith("Models/")) &&
-                                   (QStringList{"gguf", "safetensors", "onnx", "tflite"}.contains(suffix) ||
+            const bool isWorkingModel = relative.startsWith("addon-data/assistant/models/") ||
+                                        relative.startsWith("addon-data/notes/models/");
+            const bool immutable = (source.weights || isWorkingModel || relative.startsWith("Models/")) &&
+                                   (QStringList{"gguf", "safetensors", "onnx", "tflite", "litertlm"}.contains(suffix) ||
                                     (suffix == "bin" && info.fileName().startsWith("ggml-")));
             if (!copyFile(path, stage + '/' + relative, immutable, error))
                 return false;
@@ -167,6 +169,49 @@ bool stageSource(const Source &source, const QString &stage, const QString &dest
     }
     return true;
 }
+
+bool moveModelPath(const QString &source, const QString &target, QString *error) {
+    if (!safePath(source, error) || !safePath(target, error))
+        return false;
+    const QFileInfo original(source), destination(target);
+    if (!destination.exists()) {
+        if (QDir().mkpath(destination.absolutePath()) && QDir().rename(source, target))
+            return true;
+        return fail(error, QObject::tr("Cannot move the model file or folder: %1").arg(source));
+    }
+    if (original.isDir() && destination.isDir()) {
+        for (const auto &entry : QDir(source).entryInfoList(
+                 QDir::AllEntries | QDir::Hidden | QDir::System | QDir::NoDotAndDotDot, QDir::Name)) {
+            if (!moveModelPath(entry.absoluteFilePath(), target + '/' + entry.fileName(), error))
+                return false;
+        }
+        if (QDir().rmdir(source))
+            return true;
+    } else if (sameFile(source, target) && QFile::remove(source)) {
+        return true;
+    }
+    return fail(error, QObject::tr("Cannot move model data. Check the existing files at %1.").arg(target));
+}
+
+bool migrateWorkspaceModels(const QString &root, QString *error) {
+    if (!qEnvironmentVariableIsEmpty("PILON_MODELS_DIR"))
+        return true;
+    const auto legacy = root + "/Models";
+    if (!safePath(legacy, error))
+        return false;
+    if (!QFileInfo(legacy).isDir())
+        return true;
+    for (const auto &entry : QDir(legacy).entryInfoList(
+             QDir::AllEntries | QDir::Hidden | QDir::System | QDir::NoDotAndDotDot, QDir::Name)) {
+        const QString owner = entry.fileName() == "ppocrv5" ? "notes" : "assistant";
+        const auto target = PilonWorkspace::addonModelsDirectory(owner) + '/' + entry.fileName();
+        if (!moveModelPath(entry.absoluteFilePath(), target, error))
+            return false;
+    }
+    return QDir().rmdir(legacy) ||
+           fail(error, QObject::tr("Cannot remove the emptied model folder: %1").arg(legacy));
+}
+
 QString remap(const QString &path, const QString &before, const QString &after) {
     return contained(path, before) ? after + path.mid(before.size()) : path;
 }
@@ -446,7 +491,11 @@ QString PilonWorkspace::appDataDirectory() {
     return root.isEmpty() ? legacyData() : root + "/.pilon";
 }
 QString PilonWorkspace::modelsDirectory() {
-    return configuredRoot() + "/Models";
+    return addonModelsDirectory("assistant");
+}
+QString PilonWorkspace::addonModelsDirectory(const QString &id) {
+    const auto directory = addonDataDirectory(id);
+    return directory.isEmpty() ? directory : directory + "/models";
 }
 QString PilonWorkspace::runtimeDirectory() {
 #ifdef Q_OS_ANDROID
@@ -541,7 +590,7 @@ bool PilonWorkspace::initializeStorage(QString *error) {
             return fail(
                 error, QObject::tr("The Pilon settings folder is unavailable. Restore it before starting: %1")
                            .arg(root + "/.pilon"));
-        return validateRoot(root, error) && purgeLegacyLinks(error);
+        return validateRoot(root, error) && migrateWorkspaceModels(root, error) && purgeLegacyLinks(error);
     }
     const auto root = configuredRoot(), data = legacyData();
     QList<Source> sources{
@@ -571,11 +620,15 @@ bool PilonWorkspace::initializeStorage(QString *error) {
     if (calendar.isEmpty() || calendar == QDir::homePath() + "/Pilon/Calendar")
         sources.append({QDir::homePath() + "/Pilon/Calendar", "Calendar", {}, false, true});
     const auto installed = QCoreApplication::applicationDirPath();
-    if (qEnvironmentVariableIsEmpty("PILON_MODELS_DIR"))
-        sources.append({QDir(installed).absoluteFilePath("../models"), "Models", {}, true});
+    if (qEnvironmentVariableIsEmpty("PILON_MODELS_DIR") && !QFileInfo::exists(root + "/Models")) {
+        const auto modelSource = QDir(installed).absoluteFilePath("../models");
+        sources.append({modelSource, "addon-data/assistant/models", {"ppocrv5"}, true});
+        sources.append({modelSource + "/ppocrv5", "addon-data/notes/models/ppocrv5", {}, true});
+    }
     if (qEnvironmentVariableIsEmpty("PILON_ARTIFACT_DIR") && qEnvironmentVariableIsEmpty("PILON_AGENT_DIR"))
         sources.append({QDir(installed).absoluteFilePath("../AgentFiles/artifacts"), "Artifacts", {}});
-    return migrate(root, sources, platformStoragePath(QSettings().fileName()), {}, error) && purgeLegacyLinks(error);
+    return migrate(root, sources, platformStoragePath(QSettings().fileName()), {}, error) &&
+           migrateWorkspaceModels(root, error) && purgeLegacyLinks(error);
 }
 bool PilonWorkspace::relocateStorage(const QString &destination, QString *error) {
     if (error)

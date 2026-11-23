@@ -11,9 +11,13 @@ import Pilon as Backend
 PilonScrollView {
     required property var addon
     id: notesSettings
+    readonly property var catalog: addon.notesManager.handwritingModels
     anchors.fill: parent
-    contentWidth: availableWidth; clip: true
+    contentWidth: availableWidth
+    contentHeight: contents.implicitHeight
+    clip: true
     Column {
+        id: contents
         width: notesSettings.availableWidth
         spacing: 12
         component NotesCheckBox: RoundedCheckBox {
@@ -65,11 +69,36 @@ PilonScrollView {
                 defaultPaperDialog.show(addon.notesManager.defaultPaper)
             }
         }
+        PilonSectionHeader { width: parent.width; text: qsTr("Handwriting") }
+        Repeater {
+            model: notesSettings.catalog?.supportModels || []
+            delegate: PilonModelDownloadRow {
+                required property var modelData
+                width: notesSettings.availableWidth
+                model: modelData
+                catalog: notesSettings.catalog
+            }
+        }
+        Column {
+            width: parent.width
+            spacing: 8
+            visible: notesSettings.catalog?.downloading || false
+            ProgressBar { width: parent.width; value: notesSettings.catalog?.progress || 0 }
+            PilonWrapButton {
+                objectName: "cancelHandwritingDownload"
+                text: qsTr("Cancel download")
+                onClicked: notesSettings.catalog.cancelDownload()
+            }
+        }
     }
     PilonErrorPopup {
         owner: notesSettings
-        message: notesSettings.visible && !defaultPaperDialog.opened && notesSettings.Window.window?.active ? addon.notesManager.errorMessage : ""
-        onDismissed: addon.notesManager.clearError()
+        message: notesSettings.visible && !defaultPaperDialog.opened && notesSettings.Window.window?.active
+            ? notesSettings.catalog?.error || addon.notesManager.errorMessage : ""
+        onDismissed: {
+            if (notesSettings.catalog?.error) notesSettings.catalog.dismissError()
+            else addon.notesManager.clearError()
+        }
     }
     NotePaperDialog {
         id: defaultPaperDialog

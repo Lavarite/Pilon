@@ -11,6 +11,7 @@ QString publicDirectory(const QString &name);
 QString bootstrapFile();
 QString settingsFile();
 QString modelsDirectory();
+QString addonModelsDirectory(const QString &id);
 QString runtimeDirectory();
 #ifdef Q_OS_ANDROID
 QString packagedExecutable(const QString &name);

@@ -96,6 +96,48 @@ class WorkspaceTests : public QObject {
         QCOMPARE(moved.values().value("appearance").toMap().value("accent").toString(), "#f4aa66");
         QCOMPARE(moved.values(addon.mid(1)).value("settings").toMap().value("tint").toString(), "#f4aa66");
     }
+    void existingModelsMoveToTheirAddOnWithoutReplacingOtherFiles() {
+        const auto modelOverride = qgetenv("PILON_MODELS_DIR");
+        const auto restoreOverride = qScopeGuard([&] { qputenv("PILON_MODELS_DIR", modelOverride); });
+        const auto root = choose("Existing models");
+        QString error;
+        QVERIFY2(PilonWorkspace::initializeStorage(&error), qPrintable(error));
+        write(root + "/Models/installed.json", "model registry");
+        write(root + "/Models/hf/model.gguf", "weights");
+        write(root + "/Models/whisper-large-v3-turbo/checkpoint", "speech");
+        write(root + "/Models/ppocrv5/weights.onnx.part", "partial handwriting");
+        const auto assistant = root + "/addon-data/assistant/models";
+        const auto notes = root + "/addon-data/notes/models";
+        write(notes + "/ppocrv5/existing.onnx", "existing");
+        qunsetenv("PILON_MODELS_DIR");
+        QVERIFY2(PilonWorkspace::initializeStorage(&error), qPrintable(error));
+        QCOMPARE(read(assistant + "/installed.json"), QByteArray("model registry"));
+        QCOMPARE(read(assistant + "/hf/model.gguf"), QByteArray("weights"));
+        QCOMPARE(read(assistant + "/whisper-large-v3-turbo/checkpoint"), QByteArray("speech"));
+        QCOMPARE(read(notes + "/ppocrv5/weights.onnx.part"), QByteArray("partial handwriting"));
+        QCOMPARE(read(notes + "/ppocrv5/existing.onnx"), QByteArray("existing"));
+        QVERIFY(!QFileInfo::exists(root + "/Models"));
+        QVERIFY2(PilonWorkspace::initializeStorage(&error), qPrintable(error));
+    }
+    void conflictingLegacyModelLeavesBothFilesIntact() {
+        const auto modelOverride = qgetenv("PILON_MODELS_DIR");
+        const auto restoreOverride = qScopeGuard([&] { qputenv("PILON_MODELS_DIR", modelOverride); });
+        const auto root = choose("Conflicting models");
+        QString error;
+        QVERIFY2(PilonWorkspace::initializeStorage(&error), qPrintable(error));
+        const auto source = root + "/Models/installed.json";
+        const auto target = root + "/addon-data/assistant/models/installed.json";
+        write(source, "legacy");
+        write(target, "existing");
+        qunsetenv("PILON_MODELS_DIR");
+        QVERIFY(!PilonWorkspace::initializeStorage(&error));
+        QVERIFY(error.contains(target));
+        QCOMPARE(read(source), QByteArray("legacy"));
+        QCOMPARE(read(target), QByteArray("existing"));
+        QVERIFY(QFile::remove(target));
+        QVERIFY2(PilonWorkspace::initializeStorage(&error), qPrintable(error));
+        QCOMPARE(read(target), QByteArray("legacy"));
+    }
     void unsafePathsPreserveThePreviousChoice() {
         const auto before = PilonWorkspace::configuredRoot();
         QString error;
@@ -282,9 +324,9 @@ class WorkspaceTests : public QObject {
         write(QDir::homePath() + "/Pilon/Calendar/one.pical", "calendar");
         QString error;
         QVERIFY2(PilonWorkspace::initializeStorage(&error), qPrintable(error));
-        QCOMPARE(read(root + "/Models/model.gguf"), QByteArray("weights"));
+        QCOMPARE(read(root + "/addon-data/assistant/models/model.gguf"), QByteArray("weights"));
         QCOMPARE(read(install + "/models/model.gguf"), QByteArray("weights"));
-        write(root + "/Models/installed.json", "changed manifest");
+        write(root + "/addon-data/assistant/models/installed.json", "changed manifest");
         QCOMPARE(read(install + "/models/installed.json"), QByteArray("manifest"));
         QCOMPARE(read(root + "/Artifacts/result.txt"), QByteArray("artifact"));
         QCOMPARE(read(root + "/Notes/one.pin"), QByteArray("note"));

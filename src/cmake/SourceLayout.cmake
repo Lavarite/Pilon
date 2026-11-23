@@ -208,6 +208,7 @@ set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/ui/controls/PilonFormRo
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/ui/controls/PilonHoldButton.qml" PROPERTIES QT_RESOURCE_ALIAS "ui/PilonHoldButton.qml")
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/ui/controls/PilonMenu.qml" PROPERTIES QT_RESOURCE_ALIAS "ui/PilonMenu.qml")
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/ui/controls/PilonMenuItem.qml" PROPERTIES QT_RESOURCE_ALIAS "ui/PilonMenuItem.qml")
+set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/ui/controls/PilonModelDownloadRow.qml" PROPERTIES QT_RESOURCE_ALIAS "ui/PilonModelDownloadRow.qml")
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/ui/controls/PilonNavigationButton.qml" PROPERTIES QT_RESOURCE_ALIAS "ui/PilonNavigationButton.qml")
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/ui/controls/PilonPanelButton.qml" PROPERTIES QT_RESOURCE_ALIAS "ui/PilonPanelButton.qml")
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/ui/controls/PilonConfirmation.qml" PROPERTIES QT_RESOURCE_ALIAS "ui/PilonConfirmation.qml")

@@ -81,7 +81,11 @@ QVariantMap capabilities(const QJsonObject &metadata)
 }
 }
 
-AssistantModels::AssistantModels(QObject *parent) : QObject(parent) { refresh(); }
+AssistantModels::AssistantModels(QObject *parent) : AssistantModels(Owner::Assistant, parent) {}
+AssistantModels::AssistantModels(Owner owner, QObject *parent) : QObject(parent), m_owner(owner)
+{
+    if (m_owner == Owner::Assistant) refresh();
+}
 AssistantModels::~AssistantModels()
 {
     if (m_inspectReply) { m_inspectReply->disconnect(this); m_inspectReply->abort(); }
@@ -92,6 +96,20 @@ QString AssistantModels::root()
 {
     const auto override = qEnvironmentVariable("PILON_MODELS_DIR");
     return override.isEmpty() ? PilonWorkspace::modelsDirectory() : override;
+}
+
+QString AssistantModels::handwritingRoot()
+{
+    const auto override = qEnvironmentVariable("PILON_NOTES_MODELS_DIR");
+    if (!override.isEmpty()) return override;
+    const auto legacyTestRoot = qEnvironmentVariable("PILON_NOTES_OCR_ROOT");
+    if (!legacyTestRoot.isEmpty()) return QDir(legacyTestRoot).filePath("models");
+    return PilonWorkspace::addonModelsDirectory("notes");
+}
+
+QString AssistantModels::modelDirectory() const
+{
+    return m_owner == Owner::Notes ? handwritingRoot() : root();
 }
 
 QString AssistantModels::prefixCacheDirectory(const QString &id)
@@ -108,6 +126,7 @@ void AssistantModels::preparationFailed(const QString &message)
 
 void AssistantModels::refresh()
 {
+    if (m_owner == Owner::Notes) return;
     QVariantList installed;
     const auto add = [&](QVariantMap model) {
         const QString weights = model.value("weights").toString();
@@ -145,10 +164,13 @@ QVariantList AssistantModels::supportModels() const
 #else
     const QString platform = "desktop";
 #endif
+    const QList<QPair<QString, QString>> supported = m_owner == Owner::Notes
+        ? QList<QPair<QString, QString>>{{"ppocrv5", tr("Handwriting recognition")}}
+        : QList<QPair<QString, QString>>{{"whisper-large-v3-turbo", tr("Speech recognition")},
+                                       {"breeze-tts-2", tr("Speech output")}};
+    const auto directory = modelDirectory();
     QVariantList models;
-    for (const auto &pair : {qMakePair(QString("ppocrv5"), tr("Handwriting recognition")),
-                            qMakePair(QString("whisper-large-v3-turbo"), tr("Speech recognition")),
-                            qMakePair(QString("breeze-tts-2"), tr("Speech output"))}) {
+    for (const auto &pair : supported) {
         QVariantList selected; qint64 bytes = 0; bool installed = true;
         for (const auto &value : files) {
             const auto file = value.toObject().toVariantMap();
@@ -156,7 +178,7 @@ QVariantList AssistantModels::supportModels() const
             if (!path.startsWith(pair.first + '/')) continue;
             if (file.contains("platform") && file.value("platform").toString() != platform) continue;
             selected.append(file); bytes += file.value("bytes").toLongLong();
-            const QFileInfo info(root() + '/' + path);
+            const QFileInfo info(directory + '/' + path);
             installed = installed && info.isFile() && info.size() == file.value("bytes").toLongLong();
         }
         models.append(QVariantMap{{"id", pair.first}, {"name", pair.second}, {"bytes", bytes},
@@ -170,7 +192,7 @@ void AssistantModels::downloadSupport(const QString &id)
     if (m_downloading || m_inspecting) return;
     for (const auto &value : supportModels()) {
         const auto model = value.toMap();
-        if (model.value("id") != id) continue;
+        if (model.value("id") != id || model.value("installed").toBool()) continue;
         m_downloadFiles.clear(); QVariantList targets;
         for (const auto &item : model.value("files").toList()) {
             auto file = item.toMap();
@@ -546,10 +568,11 @@ void AssistantModels::downloadNext()
     }
     const auto file = m_downloadFiles[m_fileIndex].toMap();
     const auto target = m_pendingModel.value("files").toList()[m_fileIndex].toMap().value("path").toString();
-    if (!safePath(target) || !QDir().mkpath(QFileInfo(root() + '/' + target).absolutePath())) {
+    const auto path = modelDirectory() + '/' + target;
+    if (!safePath(target) || !QDir().mkpath(QFileInfo(path).absolutePath())) {
         failDownload(tr("Unable to create the model folder.")); return;
     }
-    m_file = std::make_unique<QSaveFile>(root() + '/' + target);
+    m_file = std::make_unique<QSaveFile>(path);
     if (!m_file->open(QIODevice::WriteOnly)) { failDownload(m_file->errorString()); return; }
     m_received = 0; m_hash.reset(); m_magic.clear();
     QUrl url = m_hub;

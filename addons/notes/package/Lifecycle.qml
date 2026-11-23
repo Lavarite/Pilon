@@ -12,7 +12,7 @@ QtObject {
     function ownedPaths() {
         const folder=addon.workspaceRelative(addon.notesManager.storageDirectory)
         const folders=[...new Set(["Notes"].concat(folder ? [folder] : []))]
-        return {personal:folders.concat([".pilon/notes-backups"]), downloads:[],
+        return {personal:folders.concat([".pilon/notes-backups"]), downloads:["addon-data/notes/models"],
             addonData:folders.reduce((paths,path)=>paths.concat([path+"/.settings.json",path+"/.library.json"]),[])}
     }
 }

@@ -23,9 +23,12 @@ class AssistantModels : public QObject
     Q_PROPERTY(QString status READ status NOTIFY stateChanged)
     Q_PROPERTY(QString error READ error NOTIFY stateChanged)
 public:
+    enum class Owner { Assistant, Notes };
     explicit AssistantModels(QObject *parent = nullptr);
+    AssistantModels(Owner owner, QObject *parent = nullptr);
     ~AssistantModels() override;
     static QString root();
+    static QString handwritingRoot();
     static QString prefixCacheDirectory(const QString &id);
     static bool isLiteRt(const QVariantMap &model) { return model.value("weights").toString().endsWith(".litertlm", Qt::CaseInsensitive); }
     QVariantList supportModels() const;
@@ -64,6 +67,7 @@ private:
     void downloadNext();
     void readDownload();
     void failDownload(const QString &message);
+    QString modelDirectory() const;
     QString hardwareWarning(qint64 bytes) const;
     QVariantList selectedFiles(int variant, int projector) const;
     QVariantList m_installed;
@@ -85,4 +89,5 @@ private:
     qint64 m_total = 0;
     QString m_status;
     QString m_error;
+    Owner m_owner = Owner::Assistant;
 };

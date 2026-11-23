@@ -203,6 +203,11 @@ NotesManager::NotesManager(const QString &directory, QObject *parent, bool async
         QTimer::singleShot(0, this, [this] { if (m_active) loadLibrary(); });
     } else loadLibrary(false);
 }
+AssistantModels *NotesManager::handwritingModels() {
+    if (!m_handwritingModels)
+        m_handwritingModels = new AssistantModels(AssistantModels::Owner::Notes, this);
+    return m_handwritingModels;
+}
 QVariantList NotesManager::defaultPens() {
     return {QVariantMap{{"colour", "#202020"}, {"width", 3}},
             QVariantMap{{"colour", "#2563eb"}, {"width", 3}},
@@ -240,7 +245,9 @@ bool NotesManager::resetPreferences(bool apply) {
 bool NotesManager::prepareDisable() {
     const auto reason = disableBlockedReason();
     if (!reason.isEmpty()) { error(reason); return false; }
-    return save();
+    if (!save()) return false;
+    if (m_handwritingModels) m_handwritingModels->cancelDownload();
+    return true;
 }
 QString NotesManager::disableBlockedReason() const {
     if (m_gitUpdating) return tr("Finish or abort the Git update before disabling Notes.");
