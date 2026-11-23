@@ -341,6 +341,9 @@ TestCase {
         const editor = findChild(sharedFiles, "fileAppearanceEditor")
         tryCompare(editor, "opened", true)
         verify(editor.dialogWindow !== sharedFiles.ownerWindow)
+        compare(editor.dialogWindow.color.a, 0)
+        verify(!findChild(editor.dialogWindow.contentItem, "windowBoundary").visible)
+        verify(editor.background.visible && editor.background.radius > 0)
         const identity = findChild(editor, "fileAppearanceRuleIdentity")
         compare(identity.text, entry.path)
         verify(identity.readOnly)
@@ -1285,6 +1288,67 @@ TestCase {
         mouseWheel(view, view.width / 2, view.height / 2, 0, -360)
         tryVerify(() => view.contentY > 0)
         popup.close()
+    }
+    Window {
+        id: phonePlacesOwner
+        readonly property bool mobilePlatform: true
+    }
+    function test_mobilePlacesUseTheFullPaneAndScrollBothLists() {
+        const owner = sharedFiles.ownerWindow
+        const sidebarWidth = workspace.sidebarWidth
+        test.width = 360; test.height = 680
+        workspace.sidebarWidth = 0
+        sharedFiles.ownerWindow = phonePlacesOwner
+        const tile = workspace.tiles[0]
+        const toggle = findChild(tile, "filePlacesToggle")
+        const popup = findChild(tile, "filePlacesPopup")
+        const places = findChild(tile, "filePlacesPane")
+        const toolbar = findChild(tile, "fileLocationToolbar")
+        try {
+            tailscale.includedDevices = Array.from({length: 30}, (_, index) =>
+                ({id: "host-" + index, name: "Host " + index, ip: "192.0.2." + index, online: true}))
+            files.bookmarks = Array.from({length: 60}, (_, index) =>
+                ({name: "Folder " + index, path: "/fixture/" + index, deviceId: "local", directory: true}))
+            tryCompare(toggle, "visible", true)
+            verify(waitForRendering(toggle))
+            const toggleTouch = touchEvent(toggle)
+            function tapToggle() {
+                const x = toggle.width / 2, y = toggle.height / 2
+                toggleTouch.press(0, toggle, x, y).commit().release(0, toggle, x, y).commit()
+            }
+            tapToggle()
+            tryCompare(popup, "opened", true)
+            verify(waitForRendering(places))
+            tapToggle()
+            tryCompare(popup, "opened", false)
+            tapToggle()
+            tryCompare(popup, "opened", true)
+            compare(Math.round(places.width), Math.round(tile.width))
+            const position = places.mapToItem(tile, 0, 0)
+            compare(Math.round(position.x), 0)
+            compare(Math.round(position.y), Math.round(toolbar.height + 12))
+            verify(places.height > 360)
+            const devices = findChild(tile, "filePlacesDevicesList")
+            const bookmarks = findChild(tile, "fileBookmarks")
+            tryVerify(() => devices.contentHeight > devices.height && devices.height >= 40)
+            tryVerify(() => bookmarks.contentHeight > bookmarks.height && bookmarks.height >= 100)
+            mouseWheel(devices, devices.width / 2, devices.height / 2, 0, -360)
+            tryVerify(() => devices.contentY > 0)
+            mouseWheel(bookmarks, bookmarks.width / 2, bookmarks.height / 2, 0, -360)
+            tryVerify(() => bookmarks.contentY > 0)
+            bookmarks.positionViewAtEnd()
+            tryCompare(bookmarks, "atYEnd", true)
+            const last = bookmarks.itemAtIndex(bookmarks.count - 1)
+            verify(last)
+            const touch = touchEvent(last)
+            touch.press(0, last).commit().release(0, last).commit()
+            compare(files.lastBrowse.path, "/fixture/59")
+            tryCompare(popup, "opened", false)
+        } finally {
+            popup.close()
+            sharedFiles.ownerWindow = owner
+            workspace.sidebarWidth = sidebarWidth
+        }
     }
     function test_searchAboveLocations_data() {
         return [{tag: "wide", width: 1200}, {tag: "medium", width: 760}, {tag: "narrow", width: 480}]

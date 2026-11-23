@@ -683,9 +683,13 @@ Item {
         id: filePlacesPopup
         objectName: "filePlacesPopup"
         readonly property var ownerWindow: filePlacesToggle.Window.window
-        readonly property real preferredHeight: 20 + (filesPage.sshEnabled ? 34 + filesPage.devices.length * 40 : 0)
+        readonly property bool fullPane: !filesPage.pickerSelectionMode
+            && (filesPage.fileWorkspace.ownerWindow?.mobilePlatform ?? (Qt.platform.os === "android"))
+        readonly property real preferredHeight: fullPane
+            ? Math.max(0, filesPage.height - fileLocationToolbar.height - 12 - filesPage.placesBottomInset)
+            : 20 + (filesPage.sshEnabled ? 34 + filesPage.devices.length * 40 : 0)
             + (bookmarksHeading.included ? 28 + (filePlacesPane.bookmarkCount ? 6 + filePlacesPane.bookmarkCount * 50 : 0) : 0)
-        readonly property real preferredWidth: Math.min(320, filesPage.width)
+        readonly property real preferredWidth: fullPane ? filesPage.width : Math.min(320, filesPage.width)
 
         function place() {
             const window = ownerWindow
@@ -695,13 +699,17 @@ Item {
             const unit = filePlacesToggle.mapToItem(window.contentItem, 1, 1)
             const sx = Math.max(.01, unit.x - origin.x), sy = Math.max(.01, unit.y - origin.y)
             const safeBottom = Math.min(area.y + area.height, window.errorPopupBottom ?? area.y + area.height)
-            const below = (safeBottom - 8 - origin.y) / sy - filePlacesToggle.height - 8
-            const above = (origin.y - area.y - 8) / sy - 8
+            const paneStart = filePlacesToggle.mapFromItem(filesPage, 0, fileLocationToolbar.height + 12)
+            const left = fullPane ? paneStart.x : 0
+            const safeTop = (area.y + 8 - origin.y) / sy
+            const above = -safeTop - 8
+            const belowTop = fullPane ? Math.max(paneStart.y, safeTop) : filePlacesToggle.height + 8
+            const below = (safeBottom - (fullPane ? 0 : 8) - origin.y) / sy - belowTop
             const openBelow = below >= preferredHeight || below >= above
             width = Math.max(0, Math.min(preferredWidth, (area.width - 16) / sx))
+            x = Math.max((area.x + 8 - origin.x) / sx, Math.min(left, (area.x + area.width - 8 - origin.x) / sx - width))
             height = Math.max(0, Math.min(preferredHeight, openBelow ? below : above))
-            x = Math.max((area.x + 8 - origin.x) / sx, Math.min(0, (area.x + area.width - 8 - origin.x) / sx - width))
-            y = openBelow ? filePlacesToggle.height + 8 : -height - 8
+            y = openBelow ? belowTop : -height - 8
         }
 
         parent: filePlacesToggle
@@ -756,15 +764,22 @@ Item {
             }
 
             ListView {
+                id: deviceList
                 objectName: "filePlacesDevicesList"
                 visible: filesPage.sshEnabled
                 width: parent.width
-                height: Math.max(0, Math.min(filesPage.devices.length * 40, filesPage.compactPlaces
-                    ? parent.height - 34 - (filePlacesPane.bookmarkCount ? Math.min(90, parent.height / 2) : 0)
-                    : Math.max(44, (parent.height - 74) * .44)))
+                height: {
+                    const naturalHeight = filesPage.devices.length * 40
+                    if (!filesPage.compactPlaces) return Math.min(naturalHeight, Math.max(44, (parent.height - 74) * .44))
+                    let available = parent.height - 34
+                    if (filePlacesPane.bookmarkCount)
+                        available = filePlacesPopup.fullPane ? (available - 34) * .42 : available - Math.min(90, parent.height / 2)
+                    return Math.max(0, Math.min(naturalHeight, available))
+                }
                 clip: true
                 model: filesPage.devices
                 ScrollBar.vertical: PilonScrollBar {}
+                PilonScrollMotion { view: deviceList }
 
                 delegate: ItemDelegate {
                     id: fileDeviceDelegate
@@ -824,6 +839,7 @@ Item {
                 clip: true
                 interactive: !bookmarkPointer.dragging
                 model: ListModel { id: bookmarkModel; dynamicRoles: true }
+                PilonScrollMotion { view: bookmarkList }
                 TapHandler {
                     parent: bookmarkPointer
                     acceptedDevices: PointerDevice.TouchScreen
