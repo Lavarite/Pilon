@@ -35,9 +35,19 @@ Window {
                        Math.max(0, height - margins.top - margins.bottom))
     }
     readonly property rect workspaceGeometry: appService.foldOccluding === true ? usableGeometry : safeGeometry
-    readonly property bool bottomNavigation: workspaceGeometry.width / uiScale < 600
-    readonly property real errorPopupBottom: workspaceGeometry.y + workspaceGeometry.height
-        - (bottomNavigation && sidebar ? sidebar.height * uiScale : 0)
+    readonly property rect navigationGeometry: {
+        const area = workspaceGeometry
+        if (appService.foldSeparating !== true || appService.foldOccluding === true || usableGeometry === safeGeometry)
+            return area
+        if (appService.foldVertical === true) return usableGeometry
+        const foldBottom = appService.foldBounds.y + appService.foldBounds.height
+        const lowerHeight = Math.max(0, area.y + area.height - foldBottom)
+        return lowerHeight < 60 * uiScale ? usableGeometry : Qt.rect(area.x, foldBottom, area.width, lowerHeight)
+    }
+    readonly property bool bottomNavigation: navigationGeometry.width / uiScale < 600
+    readonly property bool navigationOnRight: !bottomNavigation && navigationGeometry.x > workspaceGeometry.x
+    readonly property real errorPopupBottom: bottomNavigation && sidebar
+        ? workspaceGeometry.y + sidebar.y * uiScale : workspaceGeometry.y + workspaceGeometry.height
     readonly property rect usableGeometry: {
         const area = safeGeometry
         const fold = appService.foldBounds
@@ -173,9 +183,10 @@ Window {
     property string addonError: ""
     property var addonNotices: ({})
     readonly property var addonRegistryObject: addonRegistry
-    readonly property var pages: addonRegistry.sidebarAddons.filter(entry => entry.enabled && entry.sidebarVisible).map(entry => ({
+    readonly property var preferredPages: addonRegistry.sidebarAddons.filter(entry => entry.enabled && entry.sidebarVisible).map(entry => ({
         id: entry.id, title: entry.name, icon: entry.icon, objectName: entry.id + "Navigation"
     }))
+    readonly property var pages: navigation.fittedPages
     readonly property var filesPane: pageInstance("files")
     readonly property var notesPane: pageInstance("notes")
     readonly property var calendarPane: pageInstance("calendar")
@@ -754,8 +765,9 @@ Window {
         objectName: "addonArea"
         visible: window.workspaceActive
         anchors.fill: parent
-        anchors.leftMargin: window.bottomNavigation ? 0 : sidebar.width
-        anchors.bottomMargin: window.bottomNavigation ? sidebar.height : 0
+        anchors.leftMargin: window.bottomNavigation || window.navigationOnRight ? 0 : sidebar.width
+        anchors.rightMargin: window.navigationOnRight ? sidebar.width : 0
+        anchors.bottomMargin: window.bottomNavigation ? Math.max(0, uiContent.height - sidebar.y) : 0
         clip: true
         ColumnLayout {
             objectName: "emptyAddonsPage"
@@ -1119,9 +1131,15 @@ Window {
         objectName: "navigationArea"
         visible: window.workspaceActive
 
-        y: window.bottomNavigation ? parent.height - height : 0
-        width: window.bottomNavigation ? parent.width : navigation.expanded ? 150 : 64
-        height: window.bottomNavigation ? Math.max(44, navigation.implicitHeight) + 16 : parent.height
+        x: window.bottomNavigation ? (window.navigationGeometry.x - window.workspaceGeometry.x) / window.uiScale
+            : window.navigationOnRight ? parent.width - width : 0
+        y: window.bottomNavigation
+            ? (window.navigationGeometry.y + window.navigationGeometry.height - window.workspaceGeometry.y) / window.uiScale - height
+            : 0
+        width: window.bottomNavigation ? window.navigationGeometry.width / window.uiScale : navigation.expanded ? 150 : 64
+        height: window.bottomNavigation
+            ? Math.min(window.navigationGeometry.height / window.uiScale, navigation.tabHeight + 16)
+            : parent.height
         color: window.bottomNavigation && window.mobilePlatform ? window.selectedSecondaryColour
             : window.withOpacity(window.selectedSecondaryColour, 0.48)
 
@@ -1129,7 +1147,7 @@ Window {
             objectName: "navigationInset"
             anchors.top: parent.bottom
             width: parent.width
-            height: window.bottomNavigation && !window.appService.foldOccluding
+            height: window.bottomNavigation && !window.appService.foldOccluding && sidebar.y + sidebar.height >= uiContent.height
                 ? window.SafeArea.margins.bottom / window.uiScale : 0
             color: sidebar.color
         }
@@ -1138,11 +1156,13 @@ Window {
             id: navigation
             objectName: "appNavigation"
             horizontal: window.bottomNavigation
+            fitViewport: true
             x: horizontal ? 8 : 0
-            y: horizontal ? (parent.height - height) / 2 : 16
+            y: horizontal ? 8 : 16 + (window.navigationGeometry.y - window.workspaceGeometry.y) / window.uiScale
             width: horizontal ? Math.max(0, (offlineIndicator.visible ? offlineIndicator.x : settingsButton.x) - x - 8) : parent.width
-            height: horizontal ? parent.height - 16 : Math.max(0, settingsButton.y - y - (offlineIndicator.visible ? 36 : 12))
-            pages: window.pages
+            height: horizontal ? Math.max(0, parent.height - 16)
+                : Math.max(0, settingsButton.y - y - (offlineIndicator.visible ? 36 : 12))
+            pages: window.preferredPages
             currentId: window.selectedPage
             onActivated: id => window.selectPage(id, true)
         }
@@ -1156,6 +1176,7 @@ Window {
             source: "icons/wifi-off.svg"
             color: window.selectedMutedTextColour
             visible: window.appService && window.appService.offline === true
+                && (!window.bottomNavigation || parent.width >= navigation.tabWidth + 96)
             Accessible.name: qsTr("Offline")
         }
 
@@ -1163,9 +1184,9 @@ Window {
             id: settingsButton
             objectName: "settingsNavigation"
 
-            x: window.bottomNavigation ? parent.width - width - 8 : (parent.width - width) / 2
+            x: window.bottomNavigation ? Math.max(0, parent.width - width - 8) : (parent.width - width) / 2
             y: window.bottomNavigation ? (parent.height - height) / 2 : parent.height - height - 10
-            width: navigation.expanded && !window.bottomNavigation ? sidebar.width - 20 : 44
+            width: window.bottomNavigation ? Math.min(44, parent.width) : navigation.expanded ? sidebar.width - 20 : 44
             height: 44
             text: qsTr("Settings")
             display: navigation.expanded && !window.bottomNavigation ? AbstractButton.TextBesideIcon

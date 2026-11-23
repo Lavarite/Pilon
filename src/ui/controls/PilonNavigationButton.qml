@@ -6,6 +6,7 @@ import QtQuick.Layouts
 PilonButton {
     id: control
     property bool wrapLabel: false
+    property bool elideWrappedLabel: false
     checkable: true
     autoExclusive: true
     flat: true
@@ -28,7 +29,9 @@ PilonButton {
             Label {
                 Layout.fillWidth: true; Layout.minimumWidth: 0
                 text: control.text; font: control.font; color: control.palette.windowText
-                wrapMode: Text.Wrap; verticalAlignment: Text.AlignVCenter
+                wrapMode: control.elideWrappedLabel ? Text.NoWrap : Text.Wrap
+                elide: control.elideWrappedLabel ? Text.ElideRight : Text.ElideNone
+                verticalAlignment: Text.AlignVCenter
                 horizontalAlignment: control.mirrored ? Text.AlignRight : Text.AlignLeft
             }
         }

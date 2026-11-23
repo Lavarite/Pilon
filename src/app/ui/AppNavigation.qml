@@ -12,6 +12,22 @@ Item {
     property bool horizontal: false
     property bool reorderEnabled: false
     property bool visibilityControls: false
+    property bool fitViewport: false
+    readonly property real tabWidth: Math.max(44, Math.ceil(tabFont.averageCharacterWidth * 2 + 20))
+    readonly property real tabHeight: Math.max(44, Math.ceil(tabFont.height + 14))
+    readonly property int capacity: {
+        if (horizontal && height < tabHeight) return 0
+        const available = horizontal ? width : height - expandButton.height - entries.spacing
+        const extent = horizontal ? tabWidth : tabHeight
+        return Math.max(0, Math.floor((available + entries.spacing) / (extent + entries.spacing)))
+    }
+    readonly property var fittedPages: {
+        if (!fitViewport || pages.length <= capacity) return pages
+        const result = pages.slice(0, capacity)
+        const current = pages.find(entry => entry.id === currentId)
+        if (capacity > 0 && current && !result.includes(current)) result[capacity - 1] = current
+        return result
+    }
     readonly property real pageInset: visibilityControls && width < 190 ? 0 : 10
     implicitHeight: entries.implicitHeight
     property Item draggedItem: null
@@ -29,8 +45,14 @@ Item {
     onHeightChanged: finishDrag(false)
     onPagesChanged: draggedItem = null
     onHorizontalChanged: Qt.callLater(scroll.revealCurrent)
+    FontMetrics { id: tabFont; font: expandButton.font }
     function focusOffset(index, delta) {
-        const button = buttons.itemAt((index + delta + pages.length) % pages.length)
+        if (index < 0 || index >= pages.length) return
+        const visiblePages = fittedPages
+        const current = visiblePages.findIndex(page => page.id === pages[index].id)
+        if (current < 0) return
+        const adjacent = visiblePages[(current + delta + visiblePages.length) % visiblePages.length]
+        const button = buttons.itemAt(pages.indexOf(adjacent))
         if (button) button.navigationButton.forceActiveFocus()
     }
     function updateDrag(pointer) {
@@ -76,7 +98,8 @@ Item {
         contentHeight: navigation.horizontal ? height : entries.implicitHeight
         flickableDirection: navigation.horizontal ? Flickable.HorizontalFlick : Flickable.VerticalFlick
         clip: true
-        interactive: !navigation.dragging && (navigation.horizontal ? contentWidth > width : contentHeight > height)
+        interactive: !navigation.fitViewport && !navigation.dragging
+            && (navigation.horizontal ? contentWidth > width : contentHeight > height)
         boundsBehavior: Flickable.StopAtBounds
         onActiveFocusChanged: if (activeFocus) revealFocus()
         function revealFocus() {
@@ -120,8 +143,10 @@ Item {
             spacing: 8
             onPositioningComplete: if (navigation.horizontal) scroll.revealCurrent()
             PilonToolButton {
+                id: expandButton
                 objectName: navigation.reorderEnabled ? "sidebarPreviewToggle" : "sidebarToggle"
                 visible: !navigation.reorderEnabled && !navigation.horizontal
+                    && (!navigation.fitViewport || navigation.height >= height)
                 width: parent.width - 20; height: 44
                 transform: Translate { x: 10 }
                 text: navigation.expanded ? qsTr("Collapse navigation") : qsTr("Expand navigation")
@@ -142,7 +167,8 @@ Item {
                         required property var modelData
                         required property int index
                         property alias navigationButton: button
-                        width: navigation.horizontal ? (modelData.icon ? 44
+                        visible: !navigation.fitViewport || navigation.fittedPages.some(entry => entry.id === modelData.id)
+                        width: navigation.horizontal ? (navigation.fitViewport ? navigation.tabWidth : modelData.icon ? 44
                             : Math.max(44, button.implicitContentWidth + button.leftPadding + button.rightPadding)) : entries.width
                         height: button.height + (navigation.horizontal && navigation.visibilityControls ? 32 : 0)
                         z: navigation.draggedItem === row ? 1 : 0
@@ -154,17 +180,20 @@ Item {
                             id: button
                             x: navigation.horizontal ? 0 : navigation.pageInset
                             width: row.width - x * 2 - (navigation.visibilityControls && !navigation.horizontal ? 40 : 0)
+                            height: navigation.fitViewport ? navigation.tabHeight : implicitHeight
                             focus: true
                             objectName: navigation.reorderEnabled ? row.modelData.id + "PreviewNavigation" : row.modelData.objectName || row.modelData.id + "Navigation"
                             readonly property bool showLabel: navigation.expanded && !navigation.horizontal
                             text: showLabel || row.modelData.icon ? row.modelData.title : Array.from(row.modelData.title).slice(0, 2).join("")
                             Accessible.name: row.modelData.title
-                            ToolTip.visible: hovered && !showLabel
+                            ToolTip.visible: hovered && (!showLabel || navigation.fitViewport)
                             ToolTip.text: row.modelData.title
                             icon.source: row.modelData.icon ? Qt.resolvedUrl(row.modelData.icon) : ""
                             display: showLabel ? AbstractButton.TextBesideIcon : (row.modelData.icon ? AbstractButton.IconOnly : AbstractButton.TextOnly)
-                            wrapLabel: showLabel
+                            wrapLabel: showLabel || navigation.fitViewport && !row.modelData.icon
+                            elideWrappedLabel: navigation.fitViewport
                             checked: navigation.currentId === row.modelData.id
+                            opacity: row.modelData.shownInNavigation === false ? .55 : 1
                             Accessible.description: navigation.reorderEnabled ? (navigation.horizontal
                                 ? qsTr("Drag to reorder. Alt+Left or Alt+Right moves this tab.")
                                 : qsTr("Drag to reorder. Alt+Up or Alt+Down moves this tab.")) : ""
