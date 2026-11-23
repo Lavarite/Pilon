@@ -126,6 +126,18 @@ bool PiconfTransaction::recover(const QString &root, QString &error)
     return lockWorkspace(root, lock, error) && rollback(root, error);
 }
 
+bool PiconfTransaction::setStartupPending(const QString &root, bool pending, QString &error)
+{
+    QLockFile lock(root + "/.pilon/piconf.lock");
+    if (!lockWorkspace(root, lock, error)) return false;
+    if (pending) return write(root, StartupPending, "1\n", error);
+    if (!safe(root, StartupPending, error)) return false;
+    const QString path = root + '/' + StartupPending;
+    if (!QFile::exists(path) || QFile::remove(path)) return true;
+    error = prefix(StartupPending) + QObject::tr("unable to clear the startup recovery record.");
+    return false;
+}
+
 bool PiconfTransaction::snapshotEditable(const QString &root, const QStringList &paths, Files &files, QString &error)
 {
     Files snapshot;

@@ -464,6 +464,8 @@ QString ApplicationService::unitContents(const QString &executable) {
 bool ApplicationService::configureStartup(bool enabled) {
     const auto folder = QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + "/systemd/user";
     const auto path = folder + "/pilon.service";
+    if (!enabled && !QFileInfo::exists(path)
+        && !QFileInfo(folder + "/default.target.wants/pilon.service").isSymLink()) return true;
     const auto systemctl = QStandardPaths::findExecutable("systemctl");
     if (systemctl.isEmpty()) { m_error = tr("systemctl is required to manage background startup."); return false; }
     QFile old(path); const bool existed = old.exists();

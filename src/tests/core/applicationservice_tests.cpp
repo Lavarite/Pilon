@@ -37,7 +37,9 @@ private slots:
     void initTestCase() {
         originalPath = qgetenv("PATH");
         QFile script(commands.filePath("systemctl")); QVERIFY(script.open(QIODevice::WriteOnly));
-        script.write("#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$PILON_SERVICE_TEST_LOG\"\n[ \"$PILON_SERVICE_TEST_FAIL\" != 1 ]\n"); script.close();
+        script.write("#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$PILON_SERVICE_TEST_LOG\"\n"
+                     "[ -z \"$PILON_SERVICE_TEST_MARKER\" ] || [ -f \"$PILON_SERVICE_TEST_MARKER\" ] || exit 1\n"
+                     "[ \"$PILON_SERVICE_TEST_FAIL\" != 1 ]\n"); script.close();
         QVERIFY(script.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
         qputenv("PATH", commands.path().toUtf8() + ':' + originalPath);
         qputenv("PILON_SERVICE_TEST_LOG", commands.filePath("calls").toUtf8());
@@ -85,11 +87,16 @@ private slots:
         QString error;
         QVERIFY2(prefs.start(root, error), qPrintable(error));
         ApplicationService service(false);
+        const auto marker = workspace.filePath(".pilon/piconf-startup-pending");
+        const auto unit = QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + "/systemd/user/pilon.service";
+        qputenv("PILON_SERVICE_TEST_MARKER", marker.toUtf8());
+        const auto cleanupUnit = qScopeGuard([&] { qunsetenv("PILON_SERVICE_TEST_MARKER"); service.configureStartup(false); });
         const auto file = QUrl::fromLocalFile(transfer.filePath("settings.piconfpack"));
         QVERIFY2(service.exportConfiguration(file), qPrintable(service.error()));
         PiconfDocument imported;
         QVERIFY(PiconfBundle::open(file, imported, error));
         QVERIFY(imported.setValue(PiconfDocument::MainPath, {"appearance","frostiness"}, 41, error));
+        QVERIFY(imported.setValue(PiconfDocument::MainPath, {"application","backgroundEnabled"}, true, error));
         QVERIFY(imported.setValue(imported.addonFile("notes"), {"preferences","directory"}, "/mnt/other-device/notes", error));
         QVERIFY(imported.setValue(PiconfDocument::MainPath, {"addons","ssh","enabled"}, false, error));
         QVERIFY(PiconfBundle::save(file, imported, error));
@@ -116,8 +123,12 @@ private slots:
         live.setValue("Pilon/glassFrostiness", 66); live.sync();
         QVERIFY(!service.finishConfigurationImport(error));
         QCOMPARE(PilonSettings().value("Pilon/glassFrostiness").toInt(), 66);
+        QVERIFY(!QFileInfo::exists(marker));
+        QVERIFY(!QFileInfo::exists(unit));
         QVERIFY2(!service.previewConfiguration(file, {}).isEmpty(), qPrintable(service.error()));
         QVERIFY2(service.finishConfigurationImport(error), qPrintable(error));
+        QVERIFY(!QFileInfo::exists(marker));
+        QVERIFY(QFileInfo::exists(unit));
         prefs.stop();
         QVERIFY2(prefs.start(root,error), qPrintable(error));
         QCOMPARE(PilonSettings().value("Pilon/glassFrostiness").toInt(), 41);
@@ -149,6 +160,42 @@ private slots:
         QVERIFY(!error.isEmpty());
         settings.sync();
         QCOMPARE(settings.value("app/backgroundEnabled").toBool(), false);
+    }
+    void interruptedImportRestoresStartupRegistration_data() {
+        QTest::addColumn<bool>("enabled");
+        QTest::newRow("enable was interrupted") << false;
+        QTest::newRow("disable was interrupted") << true;
+    }
+    void interruptedImportRestoresStartupRegistration() {
+        QFETCH(bool, enabled);
+        ApplicationService service(false);
+        const QString marker = service.workspaceRoot() + "/.pilon/piconf-startup-pending";
+        const QString calls = commands.filePath("calls");
+        const auto cleanup = qScopeGuard([&] {
+            qunsetenv("PILON_SERVICE_TEST_FAIL");
+            QFile::remove(marker);
+            service.configureStartup(false);
+        });
+        // The external action finished, but the import died before committing its settings.
+        QVERIFY(service.configureStartup(!enabled));
+        PilonSettings settings;
+        settings.setValue("app/backgroundEnabled", enabled);
+        settings.sync();
+        QVERIFY(writeFile(marker, "1\n"));
+        qputenv("PILON_SERVICE_TEST_FAIL", "1");
+        QString error;
+        QVERIFY(!service.reconcileConfiguredStartup(enabled, error));
+        QVERIFY(!error.isEmpty());
+        QVERIFY(QFileInfo::exists(marker));
+        QCOMPARE(PilonSettings().value("app/backgroundEnabled").toBool(), enabled);
+        qunsetenv("PILON_SERVICE_TEST_FAIL");
+        QVERIFY(writeFile(calls, ""));
+        QVERIFY2(service.reconcileConfiguredStartup(enabled, error), qPrintable(error));
+        QVERIFY(!QFileInfo::exists(marker));
+        const auto recoveryCalls = contents(calls);
+        QVERIFY(recoveryCalls.contains(enabled ? "--user enable pilon.service" : "--user disable pilon.service"));
+        QVERIFY(service.reconcileConfiguredStartup(enabled, error));
+        QCOMPARE(contents(calls), recoveryCalls);
     }
     void setupIsOptionalAndCompletionPersists() {
         ApplicationService first(false);
