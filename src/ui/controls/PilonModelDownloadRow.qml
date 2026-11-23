@@ -17,6 +17,7 @@ GridLayout {
         Layout.minimumWidth: 0
         verticalAlignment: Text.AlignVCenter
         text: qsTr("%1, %2 GiB").arg(row.model.name).arg((row.model.bytes / 1073741824).toFixed(2))
+        color: row.Window.window ? row.Window.window.palette.windowText : palette.windowText
         wrapMode: Text.Wrap
     }
     PilonWrapButton {

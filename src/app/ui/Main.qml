@@ -28,6 +28,8 @@ Window {
     property alias touchMode: persistentSettings.touchMode
     readonly property real uiScale: touchMode ? 1.4 : 1
     readonly property bool mobilePlatform: Qt.platform.os === "android"
+    readonly property bool showShortcutHints: persistentSettings.keyboardShortcutHints
+        && (appService.hardwareKeyboardAvailable ?? !mobilePlatform)
     readonly property bool hasDisplayFold: appService.foldSeparating === true || appService.foldOccluding === true
     readonly property rect safeGeometry: {
         const margins = window.SafeArea.margins
@@ -944,6 +946,7 @@ Window {
         property int glassFrostiness: 78
         property bool showHiddenFiles: true
         property bool touchMode: false
+        property bool keyboardShortcutHints: true
         property string lastSelectedPage: "files"
         property color customBackgroundColour: Qt.rgba(0.07, 0.07, 0.07, 1)
         property color customSidebarColour: Qt.rgba(0.02, 0.02, 0.02, 1)
@@ -1267,6 +1270,7 @@ Window {
     SettingsWindow {
         id: settingsMenu
         transientParent: window.setupActive ? firstRunSetup : window
+        readonly property bool showShortcutHints: window.showShortcutHints
         palette: window.palette
         color: window.color
         onVisibleChanged: if (visible) {
@@ -1501,6 +1505,14 @@ Window {
                         checked: persistentSettings.touchMode
                         palette.windowText: window.selectedTextColour
                         onToggled: persistentSettings.touchMode = checked
+                    }
+                    RoundedCheckBox {
+                        objectName: "keyboardShortcutHintsSetting"
+                        width: parent.width
+                        text: qsTr("Show keyboard shortcut hints")
+                        checked: persistentSettings.keyboardShortcutHints
+                        palette.windowText: window.selectedTextColour
+                        onToggled: persistentSettings.keyboardShortcutHints = checked
                     }
                 }
             }

@@ -27,11 +27,32 @@
 #ifdef Q_OS_ANDROID
 #include <QJniEnvironment>
 #include <QJniObject>
+#else
+#include <QFileSystemWatcher>
+#include <QInputDevice>
 #endif
 
 namespace {
 #ifdef Q_OS_ANDROID
 QPointer<ApplicationService> androidService;
+#else
+bool desktopKeyboardAvailable() {
+    // X11 can expose a virtual master keyboard even on a touch-only machine.
+    const QDir inputDevices(QStringLiteral("/run/udev/data"));
+    if (inputDevices.exists()) {
+        for (const auto &entry : inputDevices.entryList({QStringLiteral("c13:*")}, QDir::Files)) {
+            QFile device(inputDevices.filePath(entry));
+            if (device.open(QIODevice::ReadOnly)
+                && device.readAll().split('\n').contains("E:ID_INPUT_KEYBOARD=1")) return true;
+        }
+        return false;
+    }
+    for (const auto *device : QInputDevice::devices()) {
+        if (device->type() == QInputDevice::DeviceType::Keyboard
+            && !device->name().contains(QStringLiteral("core keyboard"), Qt::CaseInsensitive)) return true;
+    }
+    return false;
+}
 #endif
 QString systemdQuoted(QString value) {
     value.replace('\\', "\\\\"); value.replace('"', "\\\"");
@@ -133,6 +154,14 @@ ApplicationService::ApplicationService(bool startHidden, QObject *parent)
     connect(qApp, &QGuiApplication::applicationStateChanged, this, [this](Qt::ApplicationState state) {
         if (state == Qt::ApplicationInactive || state == Qt::ApplicationSuspended) emit suspendRequested();
     });
+#else
+    const auto refreshKeyboard = [this] { setHardwareKeyboardAvailable(desktopKeyboardAvailable()); };
+    refreshKeyboard();
+    auto *keyboardWatcher = new QFileSystemWatcher({QStringLiteral("/run/udev/data")}, this);
+    connect(keyboardWatcher, &QFileSystemWatcher::directoryChanged, this, refreshKeyboard);
+    connect(qApp, &QGuiApplication::applicationStateChanged, this, [refreshKeyboard](Qt::ApplicationState state) {
+        if (state == Qt::ApplicationActive) refreshKeyboard();
+    });
 #endif
 }
 
@@ -156,6 +185,12 @@ QRectF ApplicationService::foldBounds() const {
 
 QString ApplicationService::foldPosture() const {
     return m_foldPosture == 1 ? QStringLiteral("flat") : m_foldPosture == 2 ? QStringLiteral("half-opened") : QString{};
+}
+
+void ApplicationService::setHardwareKeyboardAvailable(bool available) {
+    if (m_hardwareKeyboardAvailable == available) return;
+    m_hardwareKeyboardAvailable = available;
+    emit hardwareKeyboardAvailabilityChanged();
 }
 
 void ApplicationService::updateFoldState(const QRect &bounds, bool vertical, bool separating, bool occluding, int posture) {
@@ -222,6 +257,11 @@ void ApplicationService::attachAndroidFoldObserver() {
                 // Android callbacks arrive on its UI thread; all service state stays on the Qt thread.
                 QMetaObject::invokeMethod(qApp, [=] {
                     if (androidService) androidService->updateFoldState({left, top, width, height}, vertical, separating, occluding, posture);
+                }, Qt::QueuedConnection);
+            })}, {"nativeKeyboardAvailabilityChanged", "(Z)V",
+            reinterpret_cast<void *>(+[](JNIEnv *, jclass, jboolean available) {
+                QMetaObject::invokeMethod(qApp, [=] {
+                    if (androidService) androidService->setHardwareKeyboardAvailable(available);
                 }, Qt::QueuedConnection);
             })}, {"nativeWidgetRequested", "(Ljava/lang/String;)V",
             reinterpret_cast<void *>(+[](JNIEnv *, jclass, jstring uri) {

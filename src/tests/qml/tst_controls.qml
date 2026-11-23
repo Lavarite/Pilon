@@ -14,6 +14,7 @@ TestCase {
         id: owner
         property real uiScale: 1
         property bool hasDisplayFold: false
+        property bool showShortcutHints: true
         property rect usableGeometry: Qt.rect(0,0,width,height)
         property rect workspaceGeometry: usableGeometry
         width: 800; height: 600
@@ -69,12 +70,20 @@ TestCase {
         id: menuComponent
         UI.PilonMenu {
             parent: surface
-            UI.PilonMenuItem { objectName: "visibleAction"; text: "Visible" }
+            UI.PilonMenuItem { objectName: "visibleAction"; text: "Visible"; shortcutText: "Ctrl+V" }
             UI.PilonMenuItem { objectName: "hiddenAction"; text: "Hidden"; shown: false }
             UI.PilonMenuItem { objectName: "secondAction"; text: "Second" }
         }
     }
     Component { id: colourComponent; UI.PilonColourDialog { parentWindow: owner } }
+    Component {
+        id: modelRowComponent
+        UI.PilonModelDownloadRow {
+            width: 180
+            model: ({id:"handwriting", name:"Handwriting recognition", bytes:99000000, installed:true})
+            catalog: ({downloading:false, inspecting:false})
+        }
+    }
     Component { id: formRowComponent; UI.PilonFormRow {
         parent: surface; width: 320; label: "Glass frostiness"
         Item { implicitWidth: 100; implicitHeight: 36 }
@@ -109,6 +118,43 @@ TestCase {
         wait(30)
     }
     function cleanupTestCase() { owner.close(); tabletInput.setScreenGeometry(originalScreenGeometry) }
+    function test_contextMenuShortcutHintsFollowWindowPreference() {
+        const menu = createTemporaryObject(menuComponent, surface)
+        menu.popup(20, 20)
+        tryCompare(menu, "opened", true)
+        const action = findChild(menu, "visibleAction")
+        const hint = findChild(action, "menuItemShortcut")
+        tryCompare(hint, "visible", true)
+        try {
+            owner.showShortcutHints = false
+            compare(hint.visible, false)
+            verify(action.visible && action.enabled)
+        } finally {
+            owner.showShortcutHints = true
+            menu.close()
+        }
+    }
+    function test_modelRowUsesWindowForegroundAndFitsLongText_data() {
+        return [{tag:"dark", surface:"#24201c", foreground:"#decbbb"},
+                {tag:"light", surface:"#eee8db", foreground:"#29201b"}]
+    }
+    function test_modelRowUsesWindowForegroundAndFitsLongText(data) {
+        const windowColour = owner.palette.window, foreground = owner.palette.windowText
+        try {
+            owner.palette.window = data.surface; owner.palette.windowText = data.foreground
+            const row = createTemporaryObject(modelRowComponent, surface)
+            const label = findChild(row, "supportModelName_handwriting")
+            const action = findChild(row, "downloadSupport_handwriting")
+            label.font.pixelSize = 20
+            label.palette.windowText = data.surface
+            tryCompare(label, "color", owner.palette.windowText)
+            tryVerify(() => label.lineCount > 1 && action.y >= label.y + label.height)
+            tryVerify(() => label.contentWidth <= label.width + 1 && label.contentHeight <= label.height + 1)
+            compare(label.truncated, false)
+        } finally {
+            owner.palette.window = windowColour; owner.palette.windowText = foreground
+        }
+    }
     function test_formLabelUsesWindowForegroundWhenNativeStyleDiffers() {
         const original = owner.palette.windowText
         try {

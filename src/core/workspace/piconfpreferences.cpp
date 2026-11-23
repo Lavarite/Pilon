@@ -337,6 +337,7 @@ QList<Field> fields(const PiconfDocument &doc, Stores &stores, QString &error) {
     host("Pilon/customTextColour", "appearance", "text", "#fff5f5f5", Codec::Colour);
     host("Pilon/customWarningColour", "appearance", "warning", "#fff0a43c", Codec::Colour);
     host("Pilon/touchMode", "application", "touchMode", false);
+    host("Pilon/keyboardShortcutHints", "application", "keyboardShortcutHints", true);
     host("app/backgroundEnabled", "application", "backgroundEnabled", false);
     host("app/trayEnabled", "application", "trayEnabled", true);
     host("keybindings/overrides", "shortcuts", "overrides", QVariantMap{});
