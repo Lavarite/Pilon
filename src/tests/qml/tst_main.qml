@@ -551,6 +551,114 @@ TestCase {
             tabletInput.setScreenGeometry(screen)
         }
     }
+    function test_navigationCapsWholeTabsWithoutChangingSavedVisibility() {
+        const screen = tabletInput.screenGeometry()
+        try {
+            tabletInput.setScreenGeometry(Qt.rect(0, 0, 1300, 900))
+            tabletInput.configureWindow(appWindow, 1120, 760)
+            const registry = appWindow.addonRegistryObject
+            const intended = registry.sidebarAddons.filter(entry => entry.enabled && entry.sidebarVisible)
+                .map(entry => entry.id)
+            verify(intended.length >= 4)
+            compare(appWindow.pages.map(entry => entry.id), intended)
+            const current = intended[intended.length - 1]
+            verify(appWindow.selectPage(current))
+            const openPage = appWindow.pageInstance(current)
+            const rail = findControl(appWindow, "appNavigation")
+            const viewport = findControl(rail, "sidebarScroll")
+
+            tabletInput.configureWindow(appWindow, 800, 760)
+            appWindow.touchMode = true
+            service.offline = true
+            service.foldBounds = Qt.rect(380, 0, 40, 760)
+            service.foldVertical = true
+            service.foldSeparating = true
+            tryCompare(rail, "horizontal", true)
+            tryVerify(() => appWindow.pages.length > 0 && appWindow.pages.length < intended.length)
+            renderWindow(appWindow)
+            compare(appWindow.selectedPage, current)
+            compare(appWindow.pageInstance(current), openPage)
+            verify(appWindow.pages.some(entry => entry.id === current))
+            verify(viewport.contentWidth <= viewport.width + 1)
+            verify(!viewport.interactive)
+
+            appWindow.touchMode = false
+            service.foldSeparating = false
+            service.offline = false
+            tabletInput.configureWindow(appWindow, 860, 250)
+            tryCompare(rail, "horizontal", false)
+            tryVerify(() => appWindow.pages.length > 0 && appWindow.pages.length < intended.length)
+            renderWindow(appWindow)
+            verify(viewport.contentHeight <= viewport.height + 1)
+            verify(!viewport.interactive)
+            compare(appWindow.pageInstance(current), openPage)
+
+            tabletInput.configureWindow(appWindow, 1120, 760)
+            service.foldBounds = Qt.rect(0, 565, 1120, 0)
+            service.foldVertical = false
+            service.foldSeparating = true
+            tryVerify(() => appWindow.pages.length > 0 && appWindow.pages.length < intended.length)
+            verify(rail.mapToItem(appWindow.contentItem, 0, 0).y >= 565)
+            compare(appWindow.workspaceGeometry.height, 760)
+
+            service.foldSeparating = false
+            tabletInput.configureWindow(appWindow, 1120, 760)
+            tryCompare(appWindow, "selectedPage", current)
+            compare(appWindow.pages.map(entry => entry.id), intended)
+            compare(registry.sidebarAddons.filter(entry => entry.enabled && entry.sidebarVisible).map(entry => entry.id), intended)
+        } finally {
+            service.foldSeparating = false
+            service.offline = false
+            tabletInput.setScreenGeometry(screen)
+        }
+    }
+    function test_tabOrderDoesNotEnableAnotherTabWhenFull() {
+        const screen = tabletInput.screenGeometry()
+        const registry = appWindow.addonRegistryObject
+        const intended = registry.sidebarAddons.filter(entry => entry.enabled && entry.sidebarVisible).map(entry => entry.id)
+        let dialog
+        try {
+            tabletInput.setScreenGeometry(Qt.rect(0, 0, 820, 880))
+            tabletInput.configureWindow(appWindow, 800, 760)
+            appWindow.touchMode = true
+            service.offline = true
+            service.foldVertical = true
+            service.foldBounds = Qt.rect(380, 0, 40, 760)
+            service.foldOccluding = true
+            const rail = findControl(appWindow, "appNavigation")
+            const hidden = intended[intended.length - 1]
+            verify(registry.setPageVisible(hidden, false))
+            verify(intended.length > rail.capacity && rail.capacity > 0)
+            verify(appWindow.openSettings("addons"))
+            const settings = findControl(appWindow, "settingsMenu")
+            dialog = findControl(settings, "sidebarTabOrder")
+            dialog.open()
+            tryCompare(dialog.dialogWindow, "visible", true)
+            dialog.dialogWindow.requestActivate()
+            tryCompare(dialog.dialogWindow, "active", true)
+            let choice = findControl(dialog, "sidebarVisible-" + hidden)
+            choice.forceActiveFocus(Qt.TabFocusReason)
+            tryCompare(choice, "activeFocus", true)
+            keyClick(Qt.Key_Space)
+            tryCompare(dialog, "error", "Hide another tab to make room.")
+            compare(choice.checked, false)
+            compare(registry.sidebarAddons.find(entry => entry.id === hidden).sidebarVisible, false)
+            intended.slice(0, intended.length - rail.capacity).forEach(id => verify(registry.setPageVisible(id, false)))
+            choice = findControl(dialog, "sidebarVisible-" + hidden)
+            choice.forceActiveFocus(Qt.TabFocusReason)
+            tryCompare(choice, "activeFocus", true)
+            keyClick(Qt.Key_Space)
+            tryCompare(dialog, "error", "")
+            verify(registry.sidebarAddons.find(entry => entry.id === hidden).sidebarVisible)
+            tryVerify(() => appWindow.pages.some(entry => entry.id === hidden))
+        } finally {
+            if (dialog) dialog.close()
+            intended.forEach(id => verify(registry.setPageVisible(id, true)))
+            service.foldOccluding = false
+            service.offline = false
+            tabletInput.setScreenGeometry(screen)
+        }
+    }
     function test_compactSettingsPageHeaderSharesCloseRow_data() {
         return [{tag: "desktop", width: 560, height: 480, touch: false},
                 {tag: "touch", width: 760, height: 520, touch: true},
@@ -1007,7 +1115,7 @@ TestCase {
     function test_workspaceErrorPreservesPageAndEmptyStateGeometry(data) {
         appWindow.touchMode=data.touch;tabletInput.configureWindow(appWindow,data.width,data.height)
         const area=findControl(appWindow,"addonArea"),host=appWindow.addonHosts.files
-        const visibleIds=appWindow.pages.map(entry=>entry.id),selection=appWindow.selectedPage
+        const visibleIds=appWindow.preferredPages.map(entry=>entry.id),selection=appWindow.selectedPage
         try {
             renderWindow(appWindow)
             const initial = Qt.rect(host.x, host.y, host.width, host.height)
@@ -1027,7 +1135,7 @@ TestCase {
             popup.dismiss()
             tryCompare(popup, "opened", false)
             compare(Qt.rect(host.x, host.y, host.width, host.height), initial)
-            for (const entry of appWindow.pages) verify(appWindow.addonRegistryObject.setPageVisible(entry.id, false))
+            for (const entry of appWindow.preferredPages) verify(appWindow.addonRegistryObject.setPageVisible(entry.id, false))
             renderWindow(appWindow)
             const empty = findControl(appWindow, "emptyAddonsPage")
             verify(empty.visible)

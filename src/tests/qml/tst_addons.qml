@@ -379,7 +379,7 @@ TestCase {
     function test_sidebarTabsCanBeReorderedInSeparateWindow(data) {
         const screen=tabletInput.screenGeometry(), font=tabletInput.applicationFont()
         const originalSize=Qt.size(app.width,app.height)
-        const original=app.pages.map(page=>page.id), first=original[0], second=original[1]
+        const original=app.preferredPages.map(page=>page.id), first=original[0], second=original[1]
         let settings=null, dialog=null
         try {
             tabletInput.setScreenGeometry(Qt.rect(0,0,data.width,640))
@@ -422,7 +422,7 @@ TestCase {
             verify(preview.dragging,"Refreshing unchanged tabs keeps the drag active")
             mouseMove(preview,end.x,end.y,20)
             tryCompare(preview,"dragTargetIndex",1)
-            compare(app.pages.map(page=>page.id).join(","),original.join(","),"Dragging previews the order before saving")
+            compare(app.preferredPages.map(page=>page.id).join(","),original.join(","),"Dragging previews the order before saving")
             mouseRelease(preview,end.x,end.y)
             compare(app.pages[0].id,second); compare(app.pages[1].id,first)
             dialog.close(); mouseClick(button); tryCompare(dialog,"visible",true)
@@ -431,7 +431,7 @@ TestCase {
             dialog.dialogWindow.update(); verify(waitForRendering(dialog.dialogWindow.contentItem))
             const moved=findControl(preview,first+"PreviewNavigation")
             moved.forceActiveFocus(); keyClick(horizontal ? Qt.Key_Left : Qt.Key_Up,Qt.AltModifier)
-            compare(app.pages.map(page=>page.id).join(","),original.join(","))
+            compare(app.preferredPages.map(page=>page.id).join(","),original.join(","))
             dialog.dialogWindow.update(); verify(waitForRendering(dialog.dialogWindow.contentItem))
             previewScroll.contentX=0
             const cancelItem=findControl(preview,first+"PreviewNavigation"), cancelTarget=findControl(preview,second+"PreviewNavigation")
@@ -442,7 +442,7 @@ TestCase {
             tryCompare(preview,"dragTargetIndex",1)
             dialog.close(); mouseRelease(settings.contentItem,16,16)
             tryCompare(preview,"dragging",false)
-            compare(app.pages.map(page=>page.id).join(","),original.join(","),"Closing cancels an unfinished drag")
+            compare(app.preferredPages.map(page=>page.id).join(","),original.join(","),"Closing cancels an unfinished drag")
             mouseClick(button); tryCompare(dialog,"visible",true)
             dialog.dialogWindow.update(); verify(waitForRendering(dialog.dialogWindow.contentItem))
             const footerLabel=findControl(dialog,"sidebarPreviewSettingsLabel")

@@ -14,13 +14,18 @@ PilonDialog {
     property var sidebarNavigation: null
     readonly property bool horizontal: sidebarNavigation?.horizontal === true
     readonly property var tabs: registry.sidebarAddons.filter(entry => entry.enabled)
+    readonly property int capacity: sidebarNavigation?.capacity ?? tabs.length
+    readonly property var visibleIds: sidebarNavigation?.fittedPages.map(entry => entry.id)
+        ?? tabs.filter(entry => entry.sidebarVisible).map(entry => entry.id)
     // An unchanged registry refresh must leave the preview delegates and their drag intact.
     readonly property string previewPagesJson: JSON.stringify(tabs.map(entry => ({
-        id: entry.id, title: entry.name, icon: String(entry.icon), sidebarVisible: entry.sidebarVisible
+        id: entry.id, title: entry.name, icon: String(entry.icon), sidebarVisible: entry.sidebarVisible,
+        shownInNavigation: visibleIds.includes(entry.id)
     })))
     property string error: ""
     width: horizontal ? Math.min(maximumContentWidth, (sidebarNavigation?.parent.width || 240) + padding * 2) : 190 + padding * 2
     height: Math.min(600, topPadding + bottomPadding + preview.implicitHeight
+        + (limit.visible ? limit.implicitHeight + 12 : 0)
         + (horizontal ? 16 : 12 + settingsButton.height + 10))
     topPadding: 16 + 42 + 8
     rightPadding: padding
@@ -37,10 +42,24 @@ PilonDialog {
         error = ""
     }
     function setPageVisible(id, visible) {
+        if (visible && tabs.filter(entry => entry.sidebarVisible && entry.id !== id).length >= capacity) {
+            error = qsTr("Hide another tab to make room.")
+            return
+        }
         error = registry.setPageVisible(id, visible) ? "" : registry.error
     }
     contentItem: ColumnLayout {
         spacing: 12
+        Label {
+            id: limit
+            Layout.fillWidth: true
+            visible: dialog.tabs.length > dialog.capacity
+            text: dialog.capacity === 0 ? qsTr("No tabs fit in this window.")
+                : (dialog.capacity === 1 ? qsTr("Only one tab fits. Move a tab earlier to show it.")
+                    : qsTr("%1 tabs fit. Move a tab earlier to show it.").arg(dialog.capacity))
+            wrapMode: Text.Wrap
+            color: dialog.palette.windowText
+        }
         Item {
             Layout.preferredWidth: dialog.horizontal ? dialog.width - dialog.leftPadding - dialog.rightPadding : 190
             Layout.maximumWidth: Layout.preferredWidth
