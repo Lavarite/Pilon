@@ -14,11 +14,12 @@ Basic.Dialog {
     dim: false
     property bool contentSizedWindow: Qt.platform.os === "android"
     property bool contentHasCloseButton: false
+    property bool usePopupSurface: false
     closePolicy: Basic.Popup.CloseOnEscape
     readonly property var dialogWindow: windowFrame.window
     readonly property real maximumContentWidth: windowFrame.maximumContentWidth
     readonly property real maximumContentHeight: windowFrame.maximumContentHeight
-    PilonWindowFrame { id: windowFrame; popup: control }
+    PilonWindowFrame { id: windowFrame; popup: control; usePopupSurface: control.usePopupSurface }
     padding: 16
     topPadding: padding
     rightPadding: contentHasCloseButton ? padding : Math.max(padding, 16 + 42 + 8)
