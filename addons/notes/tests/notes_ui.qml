@@ -112,6 +112,49 @@ TestCase {
         mousePress(canvas(), 60, y); mouseMove(canvas(), 140, y + 1); mouseRelease(canvas(), 240, y)
         compare(notes.strokes.length, 1)
     }
+    function test_inkUsesFullWidthWhileNotesControlsKeepTheirInsets_data() {
+        return [{tag: "cover", width: 320}, {tag: "inside", width: 676}]
+    }
+    function test_inkUsesFullWidthWhileNotesControlsKeepTheirInsets(data) {
+        const oldWidth = test.width
+        try {
+            test.width = data.width
+            page.anchors.leftMargin = 0
+            page.anchors.rightMargin = 0
+            page.chromeInset = 16
+            page.showLibrary()
+            const search = child("noteSearch")
+            const library = child("notesMainPane")
+            tryVerify(() => search.visible && search.width === page.width - 32)
+            compare(search.mapToItem(page, 0, 0).x, 16)
+            compare(library.width, page.width - 32)
+            page.openNote(notes.currentId)
+            const viewport = child("noteViewport")
+            tryVerify(() => viewport.visible && viewport.width === page.width)
+            compare(viewport.mapToItem(page, 0, 0).x, 0)
+            compare(child("noteHeaderScroller").width, page.width - 32)
+            compare(child("noteToolOverlay").width, page.width - 32)
+        } finally {
+            page.chromeInset = 0
+            page.anchors.leftMargin = 16
+            page.anchors.rightMargin = 16
+            test.width = oldWidth
+        }
+    }
+    function test_searchIsAvailableWhileTheLibraryBodyPrepares() {
+        notes.title = "Index this note"
+        const fresh = createTemporaryObject(recreatedNotePage, test, {
+            notes, width: 320, height: 640, chromeInset: 16
+        })
+        const search = findChild(fresh, "noteSearch")
+        const pending = findChild(fresh, "noteLibraryLoading")
+        verify(search.visible && search.enabled && pending.visible)
+        compare(fresh.visibleItems.length, 0)
+        search.text = "Index this"
+        tryVerify(() => fresh.visibleItems.some(entry => entry.id === notes.currentId))
+        tryVerify(() => !pending.visible)
+        compare(search.text,"Index this")
+    }
     function test_handwritingDownloadStartsAndCancelsInNotesSettings_data() {
         return [{tag: "compact", width: 320, height: 400}, {tag: "desktop", width: 1000, height: 760}]
     }

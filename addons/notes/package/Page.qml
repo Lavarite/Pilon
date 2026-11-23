@@ -15,6 +15,7 @@ NotesPage {
     anchors.fill: parent
     anchors.leftMargin: Qt.platform.os === "android" ? 0 : 16
     anchors.rightMargin: anchors.leftMargin
+    chromeInset: Qt.platform.os === "android" ? 16 : 0
     anchors.topMargin: 16
     anchors.bottomMargin: 16
     notes: addon.notesManager

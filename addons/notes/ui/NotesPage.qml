@@ -23,6 +23,8 @@ Control {
     required property color accentTextColour
     required property color warningColour
     property var fileWorkspace: null
+    property real chromeInset: 0
+    readonly property real controlMargin: Math.min(chromeInset, width / 10)
     readonly property bool touchAvailable: ink.touchAvailable
     function refreshTouchSupport() { ink.refreshTouchSupport() }
     readonly property bool editing: hasNote && !libraryVisible
@@ -246,12 +248,14 @@ Control {
         const c = page.paperBackground
         return c.r * .2126 + c.g * .7152 + c.b * .0722 > .5 ? "#202020" : "#f5f5f5"
     }
+    property bool libraryReady: false
     readonly property var visibleItems: {
+        if (!libraryReady) return []
         const previews = notes.previewRevision
-        const all = notes.items
         const revision = notes.searchRevision
-        let entries = noteSearch.text.trim().length ? notes.search(noteSearch.text.trim())
-            : all.filter(entry => libraryScope === "recents" ? !entry.directory : entry.folder === browseFolder)
+        const query = noteSearch.text.trim()
+        let entries = query ? notes.search(query)
+            : notes.items.filter(entry => libraryScope === "recents" ? !entry.directory : entry.folder === browseFolder)
         entries = entries.map(entry => Object.assign({}, entry, {depth: 0}))
         entries.sort((a, b) => {
             const rank = entry => entry.directory ? 0 : 1
@@ -264,6 +268,11 @@ Control {
     }
 
     ListModel { id: libraryRows }
+    Timer {
+        interval: 0
+        running: page.visible && page.libraryVisible && !page.libraryReady
+        onTriggered: page.libraryReady = true
+    }
     function syncLibrary() {
         const rows = visibleItems
         for (let i = 0; i < rows.length; ++i) {
@@ -487,6 +496,7 @@ Control {
         id: library
         objectName: "notesLibraryPage"
         anchors.fill: parent
+        anchors.leftMargin: page.controlMargin; anchors.rightMargin: page.controlMargin
         visible: page.libraryVisible
 
         Item {
@@ -594,8 +604,13 @@ Control {
             color: page.withOpacity(page.secondaryColour, .42)
             border.color: page.withOpacity(page.textColour, .18)
             LocalComponents.PilonLoadingLayout {
-                anchors.fill: parent
-                visible: page.notes.loading && noteList.count === 0
+                anchors.fill: noteList
+                objectName: "noteLibraryLoading"
+                padding: 0
+                layout: "note-cards"
+                noteCellWidth: 190 + page.libraryZoomLevel * 18
+                noteCellHeight: noteList.cellHeight
+                visible: (!page.libraryReady || page.notes.loading) && noteList.count === 0
             }
             DropArea {
                 anchors.fill: noteList
@@ -857,6 +872,7 @@ Control {
             id: editorHeader
             objectName: "noteHeaderScroller"
             anchors.left: parent.left; anchors.right: parent.right
+            anchors.leftMargin: page.controlMargin; anchors.rightMargin: page.controlMargin
             height: Math.min(headerActions.implicitHeight, Math.max(36, notePane.height / 4))
             contentWidth: width; contentHeight: headerActions.implicitHeight
             clip: true; interactive: contentHeight > height
@@ -917,6 +933,7 @@ Control {
             objectName: "noteToolOverlay"
             anchors.top: editorHeader.bottom; anchors.topMargin: editorHeader.height > 0 ? 12 : 0
             anchors.left: parent.left; anchors.right: parent.right
+            anchors.leftMargin: page.controlMargin; anchors.rightMargin: page.controlMargin
             height: Math.min(canvasTools.implicitHeight + 16, Math.max(52, notePane.height / 2))
             z: 10; visible: page.hasNote && viewport.visible
             color: page.mainColour
@@ -1320,6 +1337,7 @@ Control {
         Label {
             id: status
             anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
+            anchors.leftMargin: page.controlMargin; anchors.rightMargin: page.controlMargin
             visible: text.length > 0
             text: page.notice
             color: page.mutedTextColour
