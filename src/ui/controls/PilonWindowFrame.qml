@@ -6,6 +6,7 @@ import "PilonStyle.js" as PilonStyle
 QtObject {
     id: frame
     required property var popup
+    property bool usePopupSurface: false
     property var popupItem: null
     property QtObject sourceHitMask: QtObject {
         function contains(point: point): bool { return false }
@@ -83,7 +84,7 @@ QtObject {
         Overlay.overlay.height: height / uiScale
         modality: Qt.NonModal
         palette: frame.popup.palette
-        color: palette.window
+        color: frame.usePopupSurface ? "transparent" : palette.window
         title: frame.popup.title || ""
         width: Math.ceil(Math.min(frame.popup.width, frame.maximumContentWidth) * uiScale + SafeArea.margins.left + SafeArea.margins.right)
         height: Math.ceil(Math.min(frame.popup.height, frame.maximumContentHeight) * uiScale + SafeArea.margins.top + SafeArea.margins.bottom)
@@ -112,6 +113,7 @@ QtObject {
             window: host
             placementBounds: frame.placementBounds
             fillsBounds: frame.fillsBounds
+            showBoundary: !frame.usePopupSurface
         }
         PilonWindowControls {
             id: windowControls
