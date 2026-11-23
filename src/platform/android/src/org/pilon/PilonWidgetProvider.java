@@ -15,8 +15,8 @@ public final class PilonWidgetProvider extends AppWidgetProvider {
     }
     @Override public void onDeleted(Context context, int[] ids) { PilonWidgets.deleted(context, ids); }
     @Override public void onRestored(Context context, int[] oldIds, int[] newIds) {
-        // Derived caches and workspace bindings are deliberately not restored from backup.
-        PilonWidgets.deleted(context, oldIds); PilonWidgets.deleted(context, newIds); PilonWidgets.refresh(context);
+        // Keep an existing local choice when Android remaps the widget ID.
+        PilonWidgets.restoreBindings(context, oldIds, newIds);
     }
     @Override public void onReceive(Context context, Intent intent) {
         if (intent == null) return; String action = intent.getAction();
