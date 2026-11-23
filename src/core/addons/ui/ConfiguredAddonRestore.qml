@@ -9,19 +9,33 @@ ColumnLayout {
     required property var registry
     required property var fileWorkspace
     required property var declarations
+    required property var prepareInstalled
     required property var changeEnabled
     property string failure: ""
+    property var retryPreparation: null
     property bool enableAfterDownload: false
     readonly property var missing: Object.keys(declarations).filter(id =>
         !registry.addons.some(row => row.id === id && !row.error)).sort()
     spacing: 8
     visible: missing.length > 0
 
+    function report(message, retry = null) {
+        retryPreparation = retry
+        failure = String(message)
+    }
     function finish(id, enable) {
+        let result
+        try { result = prepareInstalled(id) }
+        catch (problem) { result = String(problem) }
+        if (result !== true) {
+            report(result || qsTr("Could not apply the add-on settings."), {id, enable})
+            return
+        }
+        report("")
         if (enable)
             Promise.resolve(changeEnabled(id, true)).then(result => {
-                if (result !== true) view.failure = String(result || view.registry.error)
-            }).catch(problem => view.failure = String(problem))
+                if (result !== true) view.report(result || view.registry.error)
+            }).catch(problem => view.report(problem))
     }
     function review(id, file) {
         const entry = declarations[id]
@@ -54,7 +68,7 @@ ColumnLayout {
                 onClicked: {
                     const repository = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/?$/.test(row.source)
                     const link = repository ? row.source.replace(/\/$/, "") + "/releases" : row.source
-                    if (!Qt.openUrlExternally(link)) view.failure = qsTr("Could not open the add-on source.")
+                    if (!Qt.openUrlExternally(link)) view.report(qsTr("Could not open the add-on source."))
                 }
             }
             PilonWrapButton {
@@ -66,14 +80,14 @@ ColumnLayout {
                     : row.source === "builtin" ? qsTr("Restore built-in add-on")
                     : row.asset ? qsTr("Download package") : qsTr("Choose package…")
                 onClicked: {
-                    view.failure = ""
+                    view.report("")
                     if (view.registry.restoringAddon === row.modelData) view.registry.cancelConfiguredDownload()
                     else if (row.asset || row.source === "builtin") view.review(row.modelData, "")
                     else {
                         const id = row.modelData
                         view.fileWorkspace.selectFiles(qsTr("Choose add-on package"), urls => {
                             if (urls.length === 1) view.review(id, String(urls[0]))
-                            else if (urls.length > 1) view.failure = qsTr("Choose one package for this add-on.")
+                            else if (urls.length > 1) view.report(qsTr("Choose one package for this add-on."))
                         }, "", ".piext", view.Window.window)
                     }
                 }
@@ -98,20 +112,30 @@ ColumnLayout {
             else if (r.source === "builtin") ok = view.registry.installConfiguredBuiltin(r.id, r.version, r.digest)
             else {
                 view.enableAfterDownload = r.enable
-                if (!view.registry.downloadConfigured(r.source, r.id, r.version, r.digest)) view.failure = view.registry.error
+                if (!view.registry.downloadConfigured(r.source, r.id, r.version, r.digest)) view.report(view.registry.error)
                 return
             }
             if (ok) view.finish(r.id, r.enable)
-            else view.failure = view.registry.error
+            else view.report(view.registry.error)
         }
     }
     Connections {
         target: view.registry
         function onConfiguredDownloadFinished(id, installed, error) {
             if (installed) view.finish(id, view.enableAfterDownload)
-            else if (error) view.failure = error
+            else if (error) view.report(error)
             view.enableAfterDownload = false
         }
     }
-    PilonErrorPopup { owner: view.parent; message: view.failure; onDismissed: view.failure = "" }
+    PilonErrorPopup {
+        objectName: "configuredRestoreError"
+        owner: view.parent
+        message: view.failure
+        actionText: view.retryPreparation ? qsTr("Retry") : ""
+        onActionRequested: {
+            const retry = view.retryPreparation
+            if (retry) view.finish(retry.id, retry.enable)
+        }
+        onDismissed: view.report("")
+    }
 }

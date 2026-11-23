@@ -91,8 +91,16 @@ TestCase {
             width: 320
             declarations: ({"org.example.clock": {source: "https://example.test/clock.piext", enabled: true,
                 version: "1.0.1", sha256: "e".repeat(64)}})
-            property var enabledIds: []
-            changeEnabled: (id, enabled) => { enabledIds = enabled ? [id] : []; return true }
+            property var steps: []
+            property string preparationError: ""
+            prepareInstalled: id => {
+                steps = steps.concat("prepare " + id)
+                return preparationError || true
+            }
+            changeEnabled: (id, enabled) => {
+                steps = steps.concat((enabled ? "enable " : "disable ") + id)
+                return true
+            }
             fileWorkspace: null
             registry: QtObject {
                 property var addons: []
@@ -128,16 +136,40 @@ TestCase {
         tryCompare(consent, "opened", true)
         consent.accept()
         compare(page.registry.requests.join("|"), ["https://example.test/clock.piext", id, "1.0.1", "e".repeat(64)].join("|"))
-        compare(page.enabledIds.length, 0)
+        compare(page.steps.length, 0)
         action.clicked()
         compare(page.registry.restoringAddon, "")
-        compare(page.enabledIds.length, 0)
+        compare(page.steps.length, 0)
         action.clicked()
         tryCompare(consent, "opened", true)
         consent.accept()
         page.registry.restoringAddon = ""
         page.registry.configuredDownloadFinished(id, true, "")
-        compare(page.enabledIds.join(","), id)
+        compare(page.steps, ["prepare " + id, "enable " + id])
+    }
+    function test_configuredRestoreKeepsFailedPreparationDisabledUntilRetry() {
+        const id = "org.example.clock"
+        const page = createTemporaryObject(restoreFixture, app.contentItem)
+        verify(page)
+        page.preparationError = "Could not read the add-on settings."
+        page.registry.addons = [{ id }]
+        page.finish(id, true)
+        compare(page.steps, ["prepare " + id])
+        const popup = findChild(page, "configuredRestoreError")
+        tryCompare(popup, "opened", true)
+        compare(popup.message, page.preparationError)
+        compare(popup.actionText, qsTr("Retry"))
+        page.preparationError = ""
+        popup.actionRequested()
+        compare(page.steps, ["prepare " + id, "prepare " + id, "enable " + id])
+        tryCompare(popup, "opened", false)
+    }
+    function test_configuredRestoreAppliesSettingsForDisabledPackage() {
+        const id = "org.example.clock"
+        const page = createTemporaryObject(restoreFixture, app.contentItem)
+        verify(page)
+        page.finish(id, false)
+        compare(page.steps, ["prepare " + id])
     }
     function test_activationAndImportMessagesFollowTheWindowForeground() {
         verify(app.openSettings("addons"))
