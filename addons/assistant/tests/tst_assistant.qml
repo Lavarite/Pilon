@@ -1201,7 +1201,10 @@ TestCase {
         verify(!findChild(page, "chatWorking_fixture").running)
     }
 
-    function test_savesReadingPositionAfterScrollingStops() {
+    function test_savesReadingPositionAfterScrollingStops_data() {
+        return [{tag: "flick", thumb: false}, {tag: "scrollbar", thumb: true}]
+    }
+    function test_savesReadingPositionAfterScrollingStops(data) {
         const messages = []
         for (let i = 0; i < 90; ++i)
             messages.push({role: i % 2 ? "user" : "assistant", messageId: "scroll-" + i,
@@ -1214,13 +1217,29 @@ TestCase {
         tryVerify(() => backend.readingPosition.messageId === "scroll-65")
         readingUpdates.clear()
 
-        view.flick(0, -1300)
-        tryCompare(view, "moving", true)
         const start = view.contentY
-        tryVerify(() => view.contentY > start + 80)
-        verify(view.moving)
-        compare(readingUpdates.count, 0, "Scrolling should not save every frame")
-        tryCompare(view, "moving", false)
+        if (data.thumb) {
+            const bar = view.ScrollBar.vertical
+            const x = Math.round(bar.width / 2)
+            const y = Math.round(bar.contentItem.y + bar.contentItem.height / 2)
+            mousePress(bar, x, y)
+            try {
+                verify(bar.pressed)
+                mouseMove(bar, x, y - 18)
+                tryVerify(() => view.contentY < start - 80)
+                wait(25)
+                compare(readingUpdates.count, 0, "Dragging should not save every frame")
+            } finally {
+                mouseRelease(bar, x, y - 18)
+            }
+        } else {
+            view.flick(0, -1300)
+            tryCompare(view, "moving", true)
+            tryVerify(() => view.contentY > start + 80)
+            verify(view.moving)
+            compare(readingUpdates.count, 0, "Scrolling should not save every frame")
+            tryCompare(view, "moving", false)
+        }
         tryVerify(() => readingUpdates.count > 0)
         compare(readingUpdates.count, 1)
         const index = view.indexAt(1, view.contentY + 1) >= 0

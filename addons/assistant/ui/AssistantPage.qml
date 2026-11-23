@@ -896,11 +896,12 @@ Control {
             spacing: 12
             model: chatMessages
             PilonScrollMotion { view: conversation }
+            readonly property bool scrolling: moving || conversationBar.pressed
             property bool followTail: true
             property bool restoringPosition: false
             property int restoreRevision: 0
             function rememberPosition(force) {
-                if (restoringPosition || ((moving || !page.visible) && !force) || height <= 0 || !page.assistant
+                if (restoringPosition || ((scrolling || !page.visible) && !force) || height <= 0 || !page.assistant
                     || !page.Window.window || !page.Window.window.visible
                     || page.displayedChatId !== page.assistant.currentChatId
                     || page.assistant.readingPosition === undefined) return
@@ -934,10 +935,10 @@ Control {
                     })
                 })
             }
-            onContentYChanged: if (!moving) Qt.callLater(rememberPosition)
-            onFollowTailChanged: if (!moving) Qt.callLater(rememberPosition)
+            onContentYChanged: if (!scrolling) Qt.callLater(rememberPosition)
+            onFollowTailChanged: if (!scrolling) Qt.callLater(rememberPosition)
             function settleTail() {
-                if (!page.visible || !followTail || moving) return
+                if (!page.visible || !followTail || scrolling) return
                 forceLayout()
                 positionViewAtEnd()
                 // Positioning instantiates the last virtual delegate. Its
@@ -945,15 +946,17 @@ Control {
                 Qt.callLater(finishTail)
             }
             function finishTail() {
-                if (!page.visible || !followTail || moving) return
+                if (!page.visible || !followTail || scrolling) return
                 forceLayout()
                 positionViewAtEnd()
             }
             function scheduleTail() {
                 if (page.visible && followTail) Qt.callLater(settleTail)
             }
-            onMovementStarted: followTail = false
-            onMovementEnded: { followTail = atYEnd; Qt.callLater(rememberPosition) }
+            onScrollingChanged: {
+                followTail = !scrolling && atYEnd
+                if (!scrolling) Qt.callLater(rememberPosition)
+            }
             // contentHeight is estimated from virtual delegates. Scrolling on
             // every estimate change feeds layout back into scrolling forever.
             onHeightChanged: scheduleTail()
@@ -1105,7 +1108,7 @@ Control {
                     }
                 }
             }
-            ScrollBar.vertical: PilonScrollBar { }
+            ScrollBar.vertical: PilonScrollBar { id: conversationBar }
         }
     }
 
