@@ -87,10 +87,13 @@ set(PILON_GOOGLE_CLIENT_ID "$ENV{PILON_GOOGLE_CLIENT_ID}" CACHE STRING "Google d
 set(PILON_MICROSOFT_CLIENT_ID "$ENV{PILON_MICROSOFT_CLIENT_ID}" CACHE STRING "Microsoft public desktop application ID")
 set(PILON_MICROSOFT_ANDROID_CLIENT_ID "$ENV{PILON_MICROSOFT_ANDROID_CLIENT_ID}" CACHE STRING "Registered Microsoft Android application ID")
 set(PILON_CALENDAR_SOURCES ../addons/calendar/src/calendarmanager.cpp ../addons/calendar/src/calendarmanager.h ../addons/calendar/src/calendarstorage.cpp ../addons/calendar/src/calendarnetwork.cpp ../addons/calendar/src/calendarsharing.cpp ../addons/calendar/src/calendarformat.cpp ../addons/calendar/src/calendarformat.h ../addons/calendar/src/calendarfiles.h ../addons/calendar/src/calendarwidget.cpp)
-add_library(pilon_workspace STATIC core/workspace/pilonworkspace.cpp core/workspace/pilonworkspace.h)
+add_library(pilon_workspace STATIC
+    core/workspace/pilonworkspace.cpp core/workspace/pilonworkspace.h
+    core/workspace/piconfdocument.cpp core/workspace/piconfpreferences.cpp
+    core/workspace/piconftransaction.cpp core/workspace/piconfbundle.cpp)
 set_target_properties(pilon_workspace PROPERTIES POSITION_INDEPENDENT_CODE ON AUTOMOC ON)
 target_include_directories(pilon_workspace PUBLIC ${PILON_INCLUDE_DIRECTORIES})
-target_link_libraries(pilon_workspace PUBLIC Qt6::Core)
+target_link_libraries(pilon_workspace PUBLIC Qt6::Core Qt6::Gui PRIVATE Qt6::Sql)
 add_library(pilon_calendar STATIC ${PILON_CALENDAR_SOURCES})
 set_target_properties(pilon_calendar PROPERTIES POSITION_INDEPENDENT_CODE ON AUTOMOC ON)
 target_link_libraries(pilon_calendar PUBLIC Qt6::Gui Qt6::Qml Qt6::Network Qt6::Sql Qt6::Concurrent
@@ -169,9 +172,10 @@ if(ANDROID)
     target_link_libraries(pilon_git PUBLIC Qt6::Network)
 endif()
 
-add_library(pilon_addons STATIC core/addons/addonregistry.cpp core/addons/addonregistry.h)
+add_library(pilon_addons STATIC core/addons/addonregistry.cpp core/addons/addonregistry.h
+    core/addons/configuredaddonrestore.cpp)
 target_include_directories(pilon_addons PUBLIC ${PILON_INCLUDE_DIRECTORIES})
-target_link_libraries(pilon_addons PUBLIC Qt6::Qml)
+target_link_libraries(pilon_addons PUBLIC Qt6::Qml PRIVATE Qt6::Network)
 
 add_library(pilon_widgets STATIC core/widgets/widgetstore.cpp core/widgets/widgetstore.h core/widgets/widgetplatform.cpp core/widgets/widgetplatform.h)
 target_include_directories(pilon_widgets PUBLIC ${PILON_INCLUDE_DIRECTORIES})
@@ -190,6 +194,7 @@ endforeach()
 qt_add_executable(pilon
     app/main.cpp
     app/applicationservice.cpp
+    app/applicationconfiguration.cpp
     app/applicationservice.h
     app/applicationreset.cpp
     app/applicationreset.h
@@ -270,6 +275,7 @@ qt_add_qml_module(pilon
         core/addons/ui/AddonLifecycle.qml
         core/addons/ui/AddonSettingsContent.qml
         core/addons/ui/AddonsSettings.qml
+        core/addons/ui/ConfiguredAddonRestore.qml
         core/addons/ui/SidebarTabOrderDialog.qml
         app/ui/SettingsWindow.qml
         app/ui/AccountResetDialog.qml
@@ -642,6 +648,12 @@ if(PILON_BUILD_TESTS)
     qt_add_executable(pilon_workspace_tests tests/core/workspace_tests.cpp)
     target_link_libraries(pilon_workspace_tests PRIVATE pilon_workspace Qt6::Test)
     add_test(NAME workspace COMMAND pilon_workspace_tests)
+    foreach(suite IN ITEMS piconfdocument piconfpreferences piconfbundle)
+        qt_add_executable(pilon_${suite}_tests tests/core/${suite}_tests.cpp)
+        target_link_libraries(pilon_${suite}_tests PRIVATE pilon_workspace Qt6::Test)
+        add_test(NAME ${suite} COMMAND pilon_${suite}_tests)
+    endforeach()
+    target_link_libraries(pilon_piconfpreferences_tests PRIVATE Qt6::Sql)
     qt_add_executable(pilon_addon_tests tests/core/addon_tests.cpp)
     target_link_libraries(pilon_addon_tests PRIVATE pilon_addons Qt6::Test)
     add_test(NAME addons COMMAND pilon_addon_tests)
@@ -690,7 +702,7 @@ if(PILON_BUILD_TESTS)
     add_test(NAME devices COMMAND pilon_device_tests)
 
     qt_add_executable(pilon_service_tests tests/core/applicationservice_tests.cpp
-        app/applicationservice.cpp app/applicationservice.h app/applicationreset.cpp app/applicationreset.h)
+        app/applicationservice.cpp app/applicationconfiguration.cpp app/applicationservice.h app/applicationreset.cpp app/applicationreset.h)
     target_include_directories(pilon_service_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     qt_add_resources(pilon_service_tests app_icon PREFIX "/qt/qml/Pilon" FILES assets/icons/pilon.svg)
     target_link_libraries(pilon_service_tests PRIVATE pilon_workspace Qt6::Test Qt6::Widgets Qt6::Network Qt6::Sql)

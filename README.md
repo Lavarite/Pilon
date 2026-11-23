@@ -35,6 +35,7 @@ Notes and Calendar are two of the [built-in add-ons](docs/index.md#add-ons).
 ## Documentation
 
 - [Installation and first run](docs/install.md)
+- [Edit, export and import workspace configuration](docs/configuration.md)
 - [Feature guides and add-ons](docs/index.md#add-ons)
 - [Build from source and contribute](docs/CONTRIBUTING.md)
 - [Report an issue](https://github.com/Lavarite/Pilon/issues)

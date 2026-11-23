@@ -188,6 +188,7 @@ set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/core/addons/ui/AddonLif
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/core/addons/ui/AddonSettingsContent.qml" PROPERTIES QT_RESOURCE_ALIAS "AddonSettingsContent.qml")
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/core/addons/ui/AddonWidgets.qml" PROPERTIES QT_RESOURCE_ALIAS "AddonWidgets.qml")
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/core/addons/ui/AddonsSettings.qml" PROPERTIES QT_RESOURCE_ALIAS "AddonsSettings.qml")
+set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/core/addons/ui/ConfiguredAddonRestore.qml" PROPERTIES QT_RESOURCE_ALIAS "ConfiguredAddonRestore.qml")
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/core/addons/ui/SidebarTabOrderDialog.qml" PROPERTIES QT_RESOURCE_ALIAS "SidebarTabOrderDialog.qml")
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/core/documents/config/document-requirements.lock" PROPERTIES QT_RESOURCE_ALIAS "document-requirements.lock")
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/core/documents/ui/DocumentView.qml" PROPERTIES QT_RESOURCE_ALIAS "DocumentView.qml")

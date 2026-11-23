@@ -1,5 +1,7 @@
 #include "applicationservice.h"
 #include "applicationreset.h"
+#include "piconfbundle.h"
+#include "piconfpreferences.h"
 #include "pilonsettings.h"
 #include "pilonworkspace.h"
 #include <QApplication>
@@ -68,6 +70,85 @@ private slots:
         for (int i = 0; i < 8; ++i) QVERIFY(service.receiveWidgetUrl(QUrl(base + "&action=item" + QString::number(i) + "&generation=1")));
         QVERIFY(!service.receiveWidgetUrl(QUrl(base + "&action=ninth&generation=1")));
         QCOMPARE(service.m_pendingFiles.size(), 8);
+    }
+    void configurationReviewCancelVetoApplyAndConflict() {
+        QTemporaryDir transfer, workspace;
+        const QString root = workspace.path();
+        QSettings bootstrap(PilonWorkspace::bootstrapFile(), QSettings::IniFormat);
+        const auto original = bootstrap.value("workspace/root");
+        bootstrap.setValue("workspace/root", root); bootstrap.sync();
+        auto &prefs = PiconfPreferences::instance();
+        const auto cleanup = qScopeGuard([&] {
+            prefs.stop();
+            bootstrap.setValue("workspace/root", original); bootstrap.sync();
+        });
+        QString error;
+        QVERIFY2(prefs.start(root, error), qPrintable(error));
+        ApplicationService service(false);
+        const auto file = QUrl::fromLocalFile(transfer.filePath("settings.piconfpack"));
+        QVERIFY2(service.exportConfiguration(file), qPrintable(service.error()));
+        PiconfDocument imported;
+        QVERIFY(PiconfBundle::open(file, imported, error));
+        QVERIFY(imported.setValue(PiconfDocument::MainPath, {"appearance","frostiness"}, 41, error));
+        QVERIFY(imported.setValue(imported.addonFile("notes"), {"preferences","directory"}, "/mnt/other-device/notes", error));
+        QVERIFY(imported.setValue(PiconfDocument::MainPath, {"addons","ssh","enabled"}, false, error));
+        QVERIFY(PiconfBundle::save(file, imported, error));
+        const QVariantList incompatible{
+            QVariantMap{{"id","ssh"}, {"configuredEnabled",true}},
+            QVariantMap{{"id","org.example.terminal"}, {"configuredEnabled",true},
+                        {"dependencies",QVariantList{QVariantMap{{"id","ssh"}}}}}
+        };
+        QVERIFY(service.previewConfiguration(file, incompatible).isEmpty());
+        QVERIFY(service.error().contains("requires ssh"));
+        const auto review = service.previewConfiguration(file, {});
+        QVERIFY2(review.value("different").toBool(), qPrintable(service.error()));
+        QVERIFY(review.value("details").toString().contains("appearance.frostiness"));
+        QVERIFY(review.value("details").toString().contains("/mnt/other-device/notes"));
+        QVERIFY(review.value("details").toString().contains("Missing add-ons"));
+        service.cancelConfigurationImport();
+        QVERIFY(!service.finishConfigurationImport(error));
+        QVERIFY(!service.previewConfiguration(file, {}).isEmpty());
+        const auto veto = connect(&service, &ApplicationService::quitRequested, &service, &ApplicationService::cancelQuit);
+        QVERIFY(!service.confirmConfigurationImport({}));
+        service.cancelConfigurationImport(); disconnect(veto);
+        QVERIFY(!service.previewConfiguration(file, {}).isEmpty());
+        PilonSettings live;
+        live.setValue("Pilon/glassFrostiness", 66); live.sync();
+        QVERIFY(!service.finishConfigurationImport(error));
+        QCOMPARE(PilonSettings().value("Pilon/glassFrostiness").toInt(), 66);
+        QVERIFY2(!service.previewConfiguration(file, {}).isEmpty(), qPrintable(service.error()));
+        QVERIFY2(service.finishConfigurationImport(error), qPrintable(error));
+        prefs.stop();
+        QVERIFY2(prefs.start(root,error), qPrintable(error));
+        QCOMPARE(PilonSettings().value("Pilon/glassFrostiness").toInt(), 41);
+        QVERIFY(!service.previewConfiguration(file, {}).value("different").toBool());
+        // An unreadable editable file can be restored from the saved bundle.
+        prefs.stop();
+        QFile broken(workspace.filePath(PiconfDocument::MainPath));
+        QVERIFY(broken.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        broken.write("invalid graph\n"); broken.close();
+        QVERIFY(!prefs.start(root, error));
+        const auto restore = service.previewConfiguration(file, {});
+        QVERIFY2(restore.value("summary").toString().contains("Restore"), qPrintable(service.error()));
+        QVERIFY(restore.value("details").toString().contains(PiconfDocument::MainPath));
+        QVERIFY(broken.open(QIODevice::Append)); broken.write("# external edit\n"); broken.close();
+        QVERIFY(!service.finishConfigurationImport(error));
+        QVERIFY2(!service.previewConfiguration(file, {}).isEmpty(), qPrintable(service.error()));
+        QVERIFY2(service.finishConfigurationImport(error), qPrintable(error));
+        QVERIFY2(prefs.start(root, error), qPrintable(error));
+        QCOMPARE(PilonSettings().value("Pilon/glassFrostiness").toInt(), 41);
+    }
+    void handEditedStartupSettingRollsBackIfServiceRegistrationFails() {
+        ApplicationService service(false);
+        PilonSettings settings;
+        settings.setValue("app/backgroundEnabled", true);
+        settings.sync();
+        qputenv("PILON_SERVICE_TEST_FAIL", "1");
+        QString error;
+        QVERIFY(!service.reconcileConfiguredStartup(false, error));
+        QVERIFY(!error.isEmpty());
+        settings.sync();
+        QCOMPARE(settings.value("app/backgroundEnabled").toBool(), false);
     }
     void setupIsOptionalAndCompletionPersists() {
         ApplicationService first(false);

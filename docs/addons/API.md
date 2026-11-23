@@ -25,6 +25,8 @@ in [Main.qml](../../src/app/ui/Main.qml). Integration and storage-owner protocol
 | --- | --- |
 | `id` | Stable lowercase namespaced ID, at most 128 characters. Dot-separated segments start with a letter and contain letters, digits or hyphens. Reserved shipped IDs: `files`, `ssh`, `assistant`, `notes`, `calendar`, `git`, `devices`. |
 | `name` | Nonblank plain text, at most 128 characters, without control characters. |
+| `source` | Optional HTTPS acquisition URL included in portable configurations. |
+| `portableSettings` | Optional array of scoped preference keys to include in the add-on configuration. Declare preferences such as a display option or increment step. Keep user-created records and secrets outside this list. |
 | `description` | Optional nonblank plain text, at most 200 characters. Include it in new packages; older API 1 packages may omit it. |
 | `version` | Nonblank release string, at most 64 characters. Use stable numeric `X.Y.Z` for new releases; only that form can satisfy versioned dependencies/integrations. |
 | `apiVersion` | Integer `1`. |

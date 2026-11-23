@@ -1,5 +1,6 @@
 #pragma once
 #include <QObject>
+#include "../core/workspace/piconfdocument.h"
 #include <QLocalServer>
 #include <QLockFile>
 #include <QPointer>
@@ -61,6 +62,16 @@ public:
     void setSetupResumeStep(int step) { m_setupResumeStep = step; }
     Q_INVOKABLE bool changeWorkspace(const QString &destination, int resumeStep = -1);
     static constexpr int WorkspaceExitCode = 77;
+    static constexpr int ConfigurationExitCode = 78;
+    Q_INVOKABLE QVariantMap configuredAddons() const;
+    Q_INVOKABLE QVariant prepareConfiguredAddon(const QString &id);
+    Q_INVOKABLE QUrl chooseConfigurationBundle(QWindow *owner, bool exporting, const QString &title, const QString &filter);
+    Q_INVOKABLE bool exportConfiguration(const QUrl &destination);
+    Q_INVOKABLE QVariantMap previewConfiguration(const QUrl &source, const QVariantList &installed);
+    Q_INVOKABLE bool confirmConfigurationImport(const QVariantList &installed);
+    Q_INVOKABLE void cancelConfigurationImport();
+    bool finishConfigurationImport(QString &error);
+    bool reconcileConfiguredStartup(bool previous, QString &error);
     QString workspaceDestination() const { return m_workspaceDestination; }
 
     Q_INVOKABLE bool beginSetup();
@@ -112,6 +123,14 @@ private:
     bool m_setupRequired = false;
     QString m_error;
     QString m_workspaceDestination;
+    struct PendingConfiguration {
+        QString root;
+        PiconfDocument incoming;
+        PiconfDocument::Files expected;
+        bool repairing = false;
+        QVariantList installed;
+    };
+    std::unique_ptr<PendingConfiguration> m_configuration;
     int m_setupResumeStep = -1;
     QString m_preparedResetWorkspaceRoot, m_resetWorkspaceRoot;
     QVariantMap m_resetChoices, m_pendingResetChoices, m_resetOwnedPaths, m_pendingResetOwnedPaths;

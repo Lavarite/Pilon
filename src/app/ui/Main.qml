@@ -1261,6 +1261,61 @@ Window {
             message: addonCleanup.error || window.appService.error || window.addonError || window.guardError
             onDismissed: if (message === window.addonError) window.addonError = ""
         }
+        FileDialog {
+            id: configurationPicker
+            objectName: "configurationPicker"
+            property bool exporting: false
+            parentWindow: settingsMenu
+            title: exporting ? qsTr("Export configuration") : qsTr("Import configuration")
+            fileMode: exporting ? FileDialog.SaveFile : FileDialog.OpenFile
+            defaultSuffix: exporting ? "piconfpack" : ""
+            nameFilters: [qsTr("Pilon configuration bundles (*.piconfpack)")]
+            function choose(forExport) {
+                exporting = forExport
+                if (window.mobilePlatform) open()
+                else useSelection(window.appService.chooseConfigurationBundle(settingsMenu, exporting, title, nameFilters[0]))
+            }
+            function useSelection(file) {
+                if (!file.toString()) return
+                if (exporting) {
+                    persistentSettings.sync()
+                    window.appService.exportConfiguration(file)
+                } else configurationReview.inspect(file)
+            }
+            onAccepted: useSelection(selectedFile)
+        }
+        PilonConfirmation {
+            id: configurationReview
+            objectName: "configurationImportReview"
+            parent: settingsMenu.pageArea
+            property var review: ({})
+            message: review.summary || ""
+            details: review.details || ""
+            confirmText: review.different ? qsTr("Import") : qsTr("Done")
+            cancelButton.visible: review.different === true
+            function inspect(file) {
+                persistentSettings.sync()
+                review = window.appService.previewConfiguration(file, addonRegistry.addons)
+                if (review.summary) open()
+            }
+            onOpened: if (!review.different) confirmButton.forceActiveFocus(Qt.PopupFocusReason)
+            onRejected: window.appService.cancelConfigurationImport()
+            onAccepted: {
+                if (!review.different) { window.appService.cancelConfigurationImport(); return }
+                if (addonCleanup.busy || addonRegistry.restoringAddon || window.resetBlocked || Object.keys(window.changingAddons).length) {
+                    window.addonError = qsTr("Finish the current operation before importing.")
+                    window.appService.cancelConfigurationImport()
+                    return
+                }
+                window.prepareWorkspace(() => window.appService.confirmConfigurationImport(addonRegistry.addons)
+                    || window.appService.error || qsTr("Unable to import the configuration.")).then(result => {
+                    if (result !== true) {
+                        window.addonError = String(result)
+                        window.appService.cancelConfigurationImport()
+                    }
+                })
+            }
+        }
         onCategoriesChanged: if (!categories.some(section => section.id === currentId)) currentId = "addons"
         PilonScrollView {
             id: addonSettingsScroll
@@ -1325,6 +1380,39 @@ Window {
                         onClicked: sharedFiles.selectFolder(qsTr("Pilon folder"), path => {
                             window.changeWorkspace(path, -1).then(result => { if (result !== true) window.addonError = String(result) })
                         }, settingsMenu)
+                    }
+                    PilonSectionHeader { width: parent.width; text: qsTr("Configuration") }
+                    Flow {
+                        width: parent.width; spacing: 8
+                        PilonWrapButton {
+                            objectName: "exportConfiguration"
+                            text: qsTr("Export configuration…")
+                            onClicked: configurationPicker.choose(true)
+                        }
+                        PilonWrapButton {
+                            objectName: "importConfiguration"
+                            text: qsTr("Import configuration…")
+                            enabled: !window.preparingWorkspace && !addonCleanup.busy && !addonRegistry.restoringAddon && !window.resetBlocked
+                            onClicked: configurationPicker.choose(false)
+                        }
+                    }
+                    ConfiguredAddonRestore {
+                        id: restoreConfiguredAddons
+                        declarations: ({})
+                        width: parent.width
+                        registry: addonRegistry
+                        fileWorkspace: sharedFiles
+                        prepareInstalled: id => window.appService.prepareConfiguredAddon(id)
+                        changeEnabled: window.setAddonEnabled
+                        function refresh() {
+                            if (settingsMenu.visible && settingsMenu.currentId === "application" && typeof window.appService.configuredAddons === "function")
+                                declarations = window.appService.configuredAddons()
+                        }
+                        Connections {
+                            target: settingsMenu
+                            function onVisibleChanged() { restoreConfiguredAddons.refresh() }
+                            function onCurrentIdChanged() { restoreConfiguredAddons.refresh() }
+                        }
                     }
                     PilonSectionHeader { objectName: "applicationSetupSection"; width: parent.width; text: qsTr("Setup") }
                     PilonButton {

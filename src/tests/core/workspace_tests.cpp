@@ -1,5 +1,6 @@
 #include "pilonsettings.h"
 #include "pilonworkspace.h"
+#include "piconfpreferences.h"
 #include <QDir>
 #include <QFile>
 #include <QProcess>
@@ -69,6 +70,31 @@ class WorkspaceTests : public QObject {
         }
         QVERIFY(PilonWorkspace::publicDirectory("addons").isEmpty());
         QVERIFY(PilonWorkspace::publicDirectory(".pilon").isEmpty());
+    }
+    void movingWorkspacePreservesEditableConfiguration() {
+        const auto source = choose("Portable source");
+        const auto target = profile.filePath("Portable destination");
+        QString error;
+        QVERIFY2(PilonWorkspace::initializeStorage(&error), qPrintable(error));
+        write(source + "/config/theme.piconf", "[vars]\ntint = \"#f4aa66\" # user comment\n");
+        write(source + "/config/pilon.piconf",
+              "format = 1\ninclude = [\"theme.piconf\"]\n[appearance]\naccent = \"${vars.tint}\"\n"
+              "[addons.\"org.example.timer\"]\nenabled = false\nsource = \"local\"\n"
+              "config = \"../addon-data/org.example.timer/config.piconf\"\n");
+        const auto addon = QStringLiteral("/addon-data/org.example.timer/config.piconf");
+        write(source + addon, "[settings]\ntint = \"${vars.tint}\"\n");
+        auto &preferences = PiconfPreferences::instance();
+        const auto cleanup = qScopeGuard([&] { preferences.stop(); });
+        QVERIFY2(preferences.start(source, error), qPrintable(error));
+        preferences.stop();
+        QVERIFY2(PilonWorkspace::relocateStorage(target, &error), qPrintable(error));
+        QVERIFY2(preferences.start(target, error), qPrintable(error));
+        QCOMPARE(read(target + "/config/theme.piconf"), read(source + "/config/theme.piconf"));
+        QCOMPARE(read(target + addon), read(source + addon));
+        PiconfDocument moved;
+        QVERIFY2(moved.load(target, error), qPrintable(error));
+        QCOMPARE(moved.values().value("appearance").toMap().value("accent").toString(), "#f4aa66");
+        QCOMPARE(moved.values(addon.mid(1)).value("settings").toMap().value("tint").toString(), "#f4aa66");
     }
     void unsafePathsPreserveThePreviousChoice() {
         const auto before = PilonWorkspace::configuredRoot();

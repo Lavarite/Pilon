@@ -170,6 +170,7 @@
   "AssistantModelButton.qml": "addons/assistant/ui/AssistantModelButton.qml",
   "CalendarEventEditor.qml": "addons/calendar/ui/CalendarEventEditor.qml",
   "AddonsSettings.qml": "src/core/addons/ui/AddonsSettings.qml",
+  "ConfiguredAddonRestore.qml": "src/core/addons/ui/ConfiguredAddonRestore.qml",
   "AppNavigation.qml": "src/app/ui/AppNavigation.qml",
   "ViewerSurface.qml": "src/core/documents/ui/ViewerSurface.qml",
   "ModelSettings.qml": "addons/assistant/ui/ModelSettings.qml",
