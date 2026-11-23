@@ -31,7 +31,7 @@ PilonDialog {
         cancel.forceActiveFocus(Qt.PopupFocusReason)
     }
     footer: Item {
-        implicitHeight: actions.implicitHeight
+        implicitHeight: actions.implicitHeight + dialog.bottomPadding
         Flow {
             id: actions
             x: dialog.leftPadding
