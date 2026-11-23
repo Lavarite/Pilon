@@ -13,7 +13,7 @@ TestCase {
     visible: true
     when: windowShown
 
-    AssistantManager { id: messageFormatter }
+    AssistantManager { id: messageFormatter; active: false }
     QtObject {
         id: backend
         property var messages: []
@@ -295,6 +295,7 @@ TestCase {
                 verify(bubble.border.width > 0 && contrast(bubble.border.color, host.color) >= 1.75,
                     role + " border separates from the window")
             }
+            host.update()
             verify(waitForRendering(host.contentItem))
             const reply = findChild(subject, "chatBubble_assistant")
             const body = findChild(reply, "messageText_assistant")
