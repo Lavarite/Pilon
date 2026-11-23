@@ -95,6 +95,7 @@ Control {
             Layout.minimumHeight: 32; Layout.preferredHeight: Math.min(contentHeight, 144)
             model: prompt.proposal.changes
             clip: true; spacing: 8
+            PilonScrollMotion { view: changes }
             ScrollBar.vertical: PilonScrollBar {}
             delegate: PilonButton {
                 id: change

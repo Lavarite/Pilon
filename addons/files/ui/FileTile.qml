@@ -1098,6 +1098,7 @@ Item {
         GridView {
             id: fileEntryList
             objectName: "fileEntriesView"
+            PilonScrollMotion { view: fileEntryList }
 
             anchors.left: parent.left
             anchors.right: parent.right

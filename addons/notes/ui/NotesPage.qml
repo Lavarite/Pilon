@@ -627,6 +627,7 @@ Control {
                 cellWidth: width / Math.max(1, Math.floor(width / (190 + page.libraryZoomLevel * 18)))
                 cellHeight: 236 + page.libraryZoomLevel * 16
                 model: libraryRows
+                PilonScrollMotion { view: noteList }
                 ScrollBar.vertical: PilonScrollBar { id: libraryScrollBar; objectName: "noteLibraryScrollBar" }
                 MouseArea {
                     id: librarySelection
@@ -876,6 +877,7 @@ Control {
             height: Math.min(headerActions.implicitHeight, Math.max(36, notePane.height / 4))
             contentWidth: width; contentHeight: headerActions.implicitHeight
             clip: true; interactive: contentHeight > height
+            PilonScrollMotion { view: editorHeader }
             ScrollBar.vertical: PilonScrollBar { id: headerScrollBar }
             Flow {
                 id: headerActions
@@ -959,7 +961,7 @@ Control {
                 contentWidth: canvasTools.implicitWidth; contentHeight: canvasTools.implicitHeight
                 clip: true; interactive: contentWidth > width
                 flickableDirection: Flickable.HorizontalFlick
-                boundsBehavior: Flickable.StopAtBounds
+                PilonScrollMotion { view: toolScroller }
                 onWidthChanged: contentX = Math.max(0, Math.min(contentX, contentWidth - width))
                 onContentWidthChanged: {
                     contentX = Math.max(0, Math.min(contentX, contentWidth - width))

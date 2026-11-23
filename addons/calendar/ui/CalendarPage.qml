@@ -369,7 +369,8 @@ Control {
                 Layout.fillWidth: true; Layout.minimumWidth: 0; Layout.maximumWidth: implicitWidth; Layout.alignment: Qt.AlignRight
                 implicitWidth: actionControls.implicitWidth; implicitHeight: headerControls.controlHeight
                 contentWidth: actionControls.implicitWidth; contentHeight: height
-                clip: true; flickableDirection: Flickable.HorizontalFlick; boundsBehavior: Flickable.StopAtBounds
+                clip: true; flickableDirection: Flickable.HorizontalFlick
+                PilonScrollMotion { view: actionViewport }
                 RowLayout {
                     id: actionControls
                     width: implicitWidth; height: parent.height; spacing: 8
@@ -427,7 +428,8 @@ Control {
                 Layout.fillWidth: true; Layout.fillHeight: true; Layout.minimumHeight: 0
                 contentWidth: Math.max(width, 7 * page.minimumEventWidth + 6); contentHeight: monthGrid.height; clip: true
                 bottomMargin: monthHorizontal.visible ? monthHorizontal.height : 0
-                flickableDirection: Flickable.HorizontalAndVerticalFlick; boundsBehavior: Flickable.StopAtBounds
+                flickableDirection: Flickable.HorizontalAndVerticalFlick
+                PilonScrollMotion { view: month }
                 activeFocusOnTab: true
                 onContentWidthChanged: contentX = Math.min(contentX, Math.max(0, contentWidth - width))
                 Keys.onUpPressed: contentY = Math.max(0, contentY - monthGrid.height / 6)
@@ -516,7 +518,8 @@ Control {
                 Keys.onUpPressed: contentY = Math.max(0, contentY - 60)
                 Keys.onDownPressed: contentY = Math.min(Math.max(0, contentHeight - height), contentY + 60)
                 interactive: !page.gesture
-                boundsBehavior: Flickable.StopAtBounds; ScrollBar.vertical: PilonScrollBar {}
+                PilonScrollMotion { view: timeline }
+                ScrollBar.vertical: PilonScrollBar {}
                 ScrollBar.horizontal: PilonScrollBar { id: timelineHorizontal; visible: timeline.contentWidth > timeline.width + .5; z: 3 }
                 Component.onCompleted: contentY=8*60
                 Item {
@@ -828,6 +831,8 @@ Control {
             ListView {
                 id: conflictList
                 Layout.fillWidth:true;Layout.fillHeight:true;clip:true;spacing:16;model:page.calendar.conflicts
+                PilonScrollMotion { view: conflictList }
+                ScrollBar.vertical: PilonScrollBar {}
                 delegate: Column {
                     id: conflict
                     required property var modelData

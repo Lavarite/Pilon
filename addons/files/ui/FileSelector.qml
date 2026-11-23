@@ -52,7 +52,8 @@ FilePickerWindow {
                 : Math.max(height, 240 + sidebar.implicitHeight + actions.implicitHeight + 18)
             interactive: contentHeight > height
             acceptedButtons: Qt.NoButton
-            clip: true; boundsBehavior: Flickable.StopAtBounds
+            clip: true
+            PilonScrollMotion { view: browserViewport }
             function revealFocusedControl() {
                 const focused = selector.activeFocusItem
                 let ancestor = focused
