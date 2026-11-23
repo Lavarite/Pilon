@@ -10,6 +10,7 @@ PilonDialog {
     objectName: "sidebarTabOrder"
     title: qsTr("Tab order")
     contentSizedWindow: true
+    usePopupSurface: true
     required property var registry
     property var sidebarNavigation: null
     readonly property bool horizontal: sidebarNavigation?.horizontal === true
@@ -26,7 +27,7 @@ PilonDialog {
     width: horizontal ? Math.min(maximumContentWidth, (sidebarNavigation?.parent.width || 240) + padding * 2) : 190 + padding * 2
     height: Math.min(600, topPadding + bottomPadding + preview.implicitHeight
         + (limit.visible ? limit.implicitHeight + 12 : 0)
-        + (horizontal ? 16 : 12 + settingsButton.height + 10))
+        + (horizontal ? 24 : 12 + settingsButton.height + 10))
     topPadding: 16 + 42 + 8
     rightPadding: padding
     modal: true
@@ -66,12 +67,6 @@ PilonDialog {
             Layout.fillWidth: true
             Layout.fillHeight: true
             Layout.alignment: Qt.AlignHCenter
-            Rectangle {
-                id: sidebarBackground
-                objectName: "sidebarPreviewBackground"
-                anchors.fill: parent
-                color: dialog.sidebarNavigation ? dialog.sidebarNavigation.parent.color : dialog.palette.window
-            }
             AppNavigation {
                 id: preview
                 objectName: "sidebarOrderPreview"

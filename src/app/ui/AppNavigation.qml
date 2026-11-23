@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQml.Models
 import "ui"
+import "ui/PilonStyle.js" as PilonStyle
 
 Item {
     id: navigation
@@ -36,6 +37,7 @@ Item {
     property real dragPointer: 0
     property real dragGrab: 0
     readonly property bool dragging: !!draggedItem
+    readonly property bool showShortcutHints: PilonStyle.showShortcutHints(navigation.Window.window)
     readonly property int dragTargetIndex: draggedItem ? draggedItem.DelegateModel.itemsIndex : -1
     signal activated(string pageId)
     signal reorderRequested(int from, int to)
@@ -97,10 +99,14 @@ Item {
         contentWidth: navigation.horizontal ? Math.max(width, entries.implicitWidth) : width
         contentHeight: navigation.horizontal ? height : entries.implicitHeight
         flickableDirection: navigation.horizontal ? Flickable.HorizontalFlick : Flickable.VerticalFlick
+        acceptedButtons: navigation.reorderEnabled ? Qt.NoButton : Qt.LeftButton
         clip: true
         interactive: !navigation.fitViewport && !navigation.dragging
             && (navigation.horizontal ? contentWidth > width : contentHeight > height)
-        boundsBehavior: Flickable.StopAtBounds
+        PilonScrollMotion { view: scroll }
+        ScrollBar.horizontal: PilonScrollBar {
+            policy: navigation.reorderEnabled && navigation.horizontal ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
+        }
         onActiveFocusChanged: if (activeFocus) revealFocus()
         function revealFocus() {
             const item = navigation.Window.window ? navigation.Window.window.activeFocusItem : null
@@ -141,7 +147,8 @@ Item {
             width: scroll.contentWidth
             columns: navigation.horizontal ? Math.max(1, navigation.pages.length) : 1
             spacing: 8
-            onPositioningComplete: if (navigation.horizontal) scroll.revealCurrent()
+            onPositioningComplete: if (navigation.horizontal && !navigation.dragging && !scroll.moving)
+                scroll.revealCurrent()
             PilonToolButton {
                 id: expandButton
                 objectName: navigation.reorderEnabled ? "sidebarPreviewToggle" : "sidebarToggle"
@@ -194,9 +201,11 @@ Item {
                             elideWrappedLabel: navigation.fitViewport
                             checked: navigation.currentId === row.modelData.id
                             opacity: row.modelData.shownInNavigation === false ? .55 : 1
-                            Accessible.description: navigation.reorderEnabled ? (navigation.horizontal
-                                ? qsTr("Drag to reorder. Alt+Left or Alt+Right moves this tab.")
-                                : qsTr("Drag to reorder. Alt+Up or Alt+Down moves this tab.")) : ""
+                            Accessible.description: !navigation.reorderEnabled ? ""
+                                : !navigation.showShortcutHints ? qsTr("Touch and hold a tab to reorder it.")
+                                : navigation.horizontal
+                                    ? qsTr("Drag to reorder. Alt+Left or Alt+Right moves this tab.")
+                                    : qsTr("Drag to reorder. Alt+Up or Alt+Down moves this tab.")
                             onClicked: navigation.activated(row.modelData.id)
                             Keys.onLeftPressed: event => {
                                 if (navigation.horizontal && navigation.reorderEnabled && event.modifiers & Qt.AltModifier)
@@ -205,7 +214,9 @@ Item {
                                 else event.accepted = false
                             }
                             Keys.onRightPressed: event => {
-                                if (navigation.horizontal) navigation.focusOffset(row.DelegateModel.itemsIndex, 1)
+                                if (navigation.horizontal && navigation.reorderEnabled && event.modifiers & Qt.AltModifier)
+                                    navigation.requestReorder(row.DelegateModel.itemsIndex, row.DelegateModel.itemsIndex + 1)
+                                else if (navigation.horizontal) navigation.focusOffset(row.DelegateModel.itemsIndex, 1)
                                 else event.accepted = false
                             }
                             Keys.onUpPressed: event => {
@@ -219,24 +230,34 @@ Item {
                                 else navigation.focusOffset(row.DelegateModel.itemsIndex, 1)
                             }
                             MouseArea {
+                                property bool touchPress: false
+                                property real pressPosition: 0
                                 anchors.fill: parent
                                 enabled: navigation.reorderEnabled
-                                preventStealing: true
-                                property real pressPosition: 0
+                                preventStealing: navigation.draggedItem === row
+                                function beginDrag() {
+                                    navigation.dragSourceIndex = row.DelegateModel.itemsIndex
+                                    navigation.draggedItem = row
+                                }
                                 onPressed: mouse => {
+                                    touchPress = mouse.source !== Qt.MouseEventNotSynthesized
                                     const point = mapToItem(scroll, mouse.x, mouse.y)
                                     pressPosition = navigation.horizontal ? point.x : point.y
                                     navigation.dragGrab = navigation.horizontal ? mouse.x : mouse.y
-                                    button.forceActiveFocus(Qt.MouseFocusReason)
+                                    if (!touchPress) button.forceActiveFocus(Qt.MouseFocusReason)
+                                }
+                                onPressAndHold: {
+                                    if (!touchPress) return
+                                    beginDrag()
+                                    navigation.updateDrag(pressPosition)
                                 }
                                 onPositionChanged: mouse => {
                                     if (!pressed) return
                                     const point = mapToItem(scroll, mouse.x, mouse.y)
                                     const position = navigation.horizontal ? point.x : point.y
                                     if (!navigation.dragging) {
-                                        if (Math.abs(position - pressPosition) < Qt.styleHints.startDragDistance) return
-                                        navigation.dragSourceIndex = row.DelegateModel.itemsIndex
-                                        navigation.draggedItem = row
+                                        if (touchPress || Math.abs(position - pressPosition) < Qt.styleHints.startDragDistance) return
+                                        beginDrag()
                                     }
                                     navigation.updateDrag(position)
                                 }
@@ -273,7 +294,8 @@ Item {
             interval: 40; repeat: true; running: navigation.dragging
             onTriggered: {
                 const extent = navigation.horizontal ? scroll.width : scroll.height
-                const delta = navigation.dragPointer < 16 ? -16 : navigation.dragPointer > extent - 16 ? 16 : 0
+                const edge = Math.min(32, extent / 4)
+                const delta = navigation.dragPointer < edge ? -16 : navigation.dragPointer > extent - edge ? 16 : 0
                 if (!delta) return
                 if (navigation.horizontal) scroll.contentX = Math.max(0, Math.min(scroll.contentWidth - scroll.width, scroll.contentX + delta))
                 else scroll.contentY = Math.max(0, Math.min(scroll.contentHeight - scroll.height, scroll.contentY + delta))

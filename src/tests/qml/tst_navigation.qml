@@ -100,6 +100,32 @@ TestCase {
         mouseDrag(bar,next.x,next.y,0,110)
         compare(bar.pages.map(page=>page.id),["second","third","first"])
     }
+    function test_swipeAndHeldReorderShareTheHorizontalPreview() {
+        const bar = createTemporaryObject(reorderComponent, test, {width:180, height:90, horizontal:true})
+        const pages = Array.from({length:9}, (_, i) => ({id:"page"+i, title:"Page "+i}))
+        bar.pages = pages; bar.currentId = pages[0].id
+        const scroll = findChild(bar, "sidebarPreviewScroll")
+        tryVerify(() => scroll.contentWidth > scroll.width)
+        verify(waitForRendering(bar))
+        const swipe = touchEvent(bar)
+        swipe.press(0, bar, 145, 22).commit()
+        swipe.move(0, bar, 100, 22).commit()
+        swipe.move(0, bar, 30, 22).commit()
+        swipe.release(0, bar, 30, 22).commit()
+        tryVerify(() => scroll.contentX > 10)
+        compare(bar.pages, pages, "A swipe scrolls without reordering")
+        compare(bar.dragging, false)
+        scroll.cancelFlick(); scroll.contentX = 0
+        const drag = touchEvent(bar)
+        drag.press(0, bar, 22, 22).commit()
+        tryVerify(() => bar.dragging, Qt.styleHints.mousePressAndHoldInterval + 600)
+        drag.move(0, bar, bar.width - 8, 22).commit()
+        tryVerify(() => scroll.contentX > 50)
+        tryVerify(() => bar.dragTargetIndex > 3)
+        drag.release(0, bar, bar.width - 8, 22).commit()
+        verify(bar.pages.findIndex(page => page.id === "page0") > 3)
+        verify(!bar.dragging)
+    }
     function test_sixthPageNeedsOnlyADescriptor() {
         const bar = createTemporaryObject(navigationComponent, test)
         verify(bar)
