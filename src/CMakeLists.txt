@@ -625,6 +625,8 @@ install(FILES ${PILON_PACKAGES} DESTINATION addons)
 install(FILES ../src/platform/linux/desktop/pilon-mime.xml DESTINATION share/mime/packages)
 install(FILES ../addons/notes/assets/icons/application-x-pilon-note.svg ../addons/calendar/assets/icons/application-x-pilon-calendar.svg
     assets/icons/application-x-pilon-extension.svg DESTINATION share/icons/hicolor/scalable/mimetypes)
+install(FILES assets/icons/cog-6-tooth.svg DESTINATION share/icons/hicolor/scalable/mimetypes
+    RENAME application-x-pilon-config.svg)
 
 install(TARGETS pilon
     RUNTIME DESTINATION .

@@ -35,6 +35,7 @@ Item {
             "application-x-pilon-note": "pin",
             "application-x-pilon-calendar": "pical",
             "application-x-pilon-extension": "piext",
+            "cog-6-tooth": "piconf",
             "photo": "png jpg jpeg gif bmp webp svg tif tiff",
             "film": "mp4 mkv mov avi webm mpeg mpg",
             "musical-note": "mp3 flac wav ogg m4a aac opus",

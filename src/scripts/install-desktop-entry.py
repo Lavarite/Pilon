@@ -49,6 +49,8 @@ def install(executable):
         name = f"application-x-pilon-{kind}.svg"
         directory = {"note": "addons/notes/assets/icons", "calendar": "addons/calendar/assets/icons", "extension": "src/assets/icons"}[kind]
         assets[Path("icons/hicolor/scalable/mimetypes") / name] = (source / directory / name).read_bytes()
+    assets[Path("icons/hicolor/scalable/mimetypes/application-x-pilon-config.svg")] = (
+        source / "src/assets/icons/cog-6-tooth.svg").read_bytes()
     mime_types = ''.join(f"application/x-pilon-{kind};" for kind in FILE_TYPES)
     text = ('[Desktop Entry]\nType=Application\nName=Pilon\n'
             f'Exec="{quoted}" %F\nIcon=pilon\nTerminal=false\n'

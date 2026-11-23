@@ -15,4 +15,10 @@
     <glob pattern="*.piext"/>
     <icon name="application-x-pilon-extension"/>
   </mime-type>
+  <mime-type type="application/x-pilon-config">
+    <comment>Pilon configuration</comment>
+    <sub-class-of type="text/plain"/>
+    <glob pattern="*.piconf"/>
+    <icon name="application-x-pilon-config"/>
+  </mime-type>
 </mime-info>
