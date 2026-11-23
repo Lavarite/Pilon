@@ -138,10 +138,10 @@ TestCase {
         signal promptChanged()
         property url draggedIcon: ""
         property color draggedIconColour: "transparent"
-        property var draggedGrabOffset: null
-        function startDrag(entries, icon, iconColour, textColour, grabOffset) {
+        property var draggedScenePosition: null
+        function startDrag(entries, icon, iconColour, textColour, scenePosition) {
             dragged = entries.slice(); draggedIcon = icon; draggedIconColour = iconColour
-            draggedGrabOffset = grabOffset
+            draggedScenePosition = scenePosition
         }
         function addBookmarks(entries, username) {
             bookmarks = bookmarks.concat(entries.map(function(entry) { return Object.assign({}, entry, {username: entry.username || username}) }))
@@ -1643,18 +1643,16 @@ TestCase {
         files.entries = [Object.assign({}, files.entries[0], {name: "photo.png"}), files.entries[7]]
         wait(60)
         const pointer = area()
-        const row = findChild(page, "fileEntriesView").itemAtIndex(0)
-        const iconOrigin = row.mapToItem(null, page.largeIconView ? (row.width - 76) / 2 : 4, 10)
-        const press = pointer.mapToItem(null, 30, 20)
+        const dragStart = pointer.mapToItem(null, 70, 60)
         mousePress(pointer, 30, 20, Qt.LeftButton)
         mouseMove(pointer, 70, 60)
         mouseRelease(pointer, 70, 60, Qt.LeftButton)
         compare(files.dragged[0].name, "photo.png")
         verify(files.draggedIcon.toString().endsWith("/icons/photo.svg"))
         compare(files.draggedIconColour, page.textColour)
-        verify(files.draggedGrabOffset, "The native preview uses the original grab point")
-        fuzzyCompare(files.draggedGrabOffset.x, press.x - iconOrigin.x, 1)
-        fuzzyCompare(files.draggedGrabOffset.y, press.y - iconOrigin.y, 1)
+        verify(files.draggedScenePosition)
+        fuzzyCompare(files.draggedScenePosition.x, dragStart.x, 1)
+        fuzzyCompare(files.draggedScenePosition.y, dragStart.y, 1)
     }
 
     function test_bookmark_action_toggles_and_sidebar_can_remove() {

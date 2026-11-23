@@ -2363,14 +2363,14 @@ bool containsRemoteEntries(const QVariantList &entries)
 class FileDragPreview final : public QQuickPaintedItem
 {
 public:
-    FileDragPreview(QQuickWindow *window, const QPixmap &pixmap, QPointF hotSpot)
+    FileDragPreview(QQuickWindow *window, const QPixmap &pixmap, QPointF hotSpot, QPointF scenePosition)
         : QQuickPaintedItem(window->contentItem()), m_pixmap(pixmap), m_hotSpot(hotSpot)
     {
         setObjectName(QStringLiteral("filesDragPreview"));
         setAcceptedMouseButtons(Qt::NoButton);
         setSize(pixmap.deviceIndependentSize());
         setZ(1000);
-        setVisible(false);
+        setPosition(parentItem()->mapFromScene(scenePosition) - m_hotSpot);
         window->installEventFilter(this);
     }
 
@@ -2381,12 +2381,18 @@ private:
     {
         switch (event->type()) {
         case QEvent::DragEnter:
+            // Qt sends the initial enter and its matching move before the first
+            // compositor motion. Keep the pointer position from the mouse event.
+            if (m_starting) return false;
+            [[fallthrough]];
         case QEvent::DragMove:
+            if (std::exchange(m_starting, false)) return false;
             setPosition(parentItem()->mapFromScene(static_cast<QDropEvent *>(event)->position()) - m_hotSpot);
             setVisible(true);
             break;
         case QEvent::DragLeave:
         case QEvent::Drop:
+            m_starting = false;
             setVisible(false);
             break;
         default:
@@ -2397,6 +2403,7 @@ private:
 
     QPixmap m_pixmap;
     QPointF m_hotSpot;
+    bool m_starting = true;
 };
 }
 
@@ -2906,7 +2913,7 @@ void RemoteFileManager::reloadBookmarks()
 }
 
 void RemoteFileManager::startDrag(const QVariantList &entries, const QUrl &iconSource,
-                                   const QColor &iconColour, const QColor &textColour, const QPointF &grabOffset)
+                                   const QColor &iconColour, const QColor &textColour, const QPointF &scenePosition)
 {
     if (entries.isEmpty() || m_busy || m_searching || (!m_remoteEnabled && containsRemoteEntries(entries)))
         return;
@@ -2953,7 +2960,7 @@ void RemoteFileManager::startDrag(const QVariantList &entries, const QUrl &iconS
             }
         }
     }
-    const QPointF hotSpot = iconBounds.topLeft() + grabOffset;
+    const QPointF hotSpot = iconBounds.center();
     QPointer<FileDragPreview> preview;
     auto *window = qobject_cast<QQuickWindow *>(QGuiApplication::focusWindow());
     // Hyprland places its Wayland drag surface at the bottom-right of the pointer.
@@ -2961,7 +2968,7 @@ void RemoteFileManager::startDrag(const QVariantList &entries, const QUrl &iconS
     const bool needsPreview = window && QGuiApplication::platformName().startsWith("wayland")
         && qEnvironmentVariable("XDG_CURRENT_DESKTOP").split(':').contains("Hyprland", Qt::CaseInsensitive);
     if (needsPreview) {
-        preview = new FileDragPreview(window, dragPixmap, hotSpot);
+        preview = new FileDragPreview(window, dragPixmap, hotSpot, scenePosition);
         QPixmap blank(1, 1);
         blank.fill(Qt::transparent);
         drag->setPixmap(blank);
