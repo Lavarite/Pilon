@@ -30,7 +30,8 @@ class RuntimeBuildTests(unittest.TestCase):
         tools.mkdir()
         for name in ("dirname", "cat", "cmp", "chmod", "python3", "bash"):
             (tools / name).symlink_to(shutil.which(name))
-        self.env = {**os.environ, "PATH": str(tools), "PILON_REBUILD_RUNTIME": "0", "PILON_RELEASE_ENV": "", "PILON_ENV_LOADED": "0"}
+        self.env = {**os.environ, "PATH": str(tools), "PILON_REBUILD_RUNTIME": "0", "PILON_RELEASE_ENV": "",
+                    "PILON_ENV_LOADED": "0", "PILON_RUNTIME_DIR": str(self.root / "runtime")}
 
     def run_script(self, backend):
         return subprocess.run(["/bin/bash", str(self.root / "addons/assistant/scripts/build_assistant_runtime.sh")],

@@ -8,6 +8,7 @@
 namespace CalendarFormat {
 using EventRecords = QMap<QString, QVariantMap>;
 QDateTime dateTime(const QVariantMap &event, const QString &field);
+bool overlaps(const QVariantMap &event, const QDateTime &from, const QDateTime &to);
 QString validate(const QVariantMap &event);
 QVariantList occurrences(const QVariantMap &event, const QDateTime &from, const QDateTime &to);
 QVariantList expandedEvents(const EventRecords &records, const EventRecords &calendars,

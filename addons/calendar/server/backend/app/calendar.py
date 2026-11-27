@@ -45,7 +45,11 @@ def project(payload):
         item = {key: event[key] for key in EVENT_KEYS | set(fields) if key in event}
         zone = ZoneInfo(item.get("timeZone") or preferences["timeZone"])
         start, end = moment(item["start"], zone), moment(item["end"], zone)
-        if end <= start or len(item.get("recurrence", "")) > 1024:
+        if item.get("allDay", False):
+            valid_range = end.date() > start.date()
+        else:
+            valid_range = end.astimezone(timezone.utc) > start.astimezone(timezone.utc)
+        if not valid_range or len(item.get("recurrence", "")) > 1024:
             raise ValueError("Invalid event dates")
         # Validate recurrence before accepting the publication.
         if item.get("recurrence"):
@@ -97,31 +101,47 @@ def occurrences(payload, begin, end):
     events = []
     for event in payload["events"]:
         cache = event.get("instances")
-        # Match CalendarManager::events: the provider's expanded instances take
-        # precedence only when its cache covers the requested view completely.
-        if cache and cache["from"] <= begin and cache["to"] >= end:
-            events.extend(cache["events"])
-        else:
-            events.append(event)
-    for event in events:
+        events.append((event, cache))
+        if cache:
+            events.extend((instance, None) for instance in cache["events"])
+    for event, cache in events:
         zone = ZoneInfo(event.get("timeZone") or display_zone.key)
         start, finish = moment(event["start"], zone), moment(event["end"], zone)
         all_day = event.get("allDay", False)
-        duration = (finish - start) if all_day else finish.astimezone(timezone.utc) - start.astimezone(timezone.utc)
-        excluded = {moment(value, zone).astimezone(timezone.utc) for value in event.get("exdates", [])}
+        # Date-only events follow calendar dates even when their source zone differs.
+        def coordinate(at):
+            return at.date() if all_day else at.astimezone(timezone.utc)
+        duration = coordinate(finish) - coordinate(start)
+        floor, ceiling, allowed_first, allowed_last = (
+            coordinate(value) for value in (lower, upper, permitted_start, permitted_end))
+        if cache:
+            cache_first, cache_last = (coordinate(datetime.combine(date.fromisoformat(cache[key]), time(), timezone.utc))
+                                       for key in ("from", "to"))
+        if all_day:
+            iterator_start = datetime.combine(floor - duration, time(), zone)
+        else:
+            iterator_start = (floor - duration).astimezone(zone)
+        excluded = {coordinate(moment(value, zone)) for value in event.get("exdates", [])}
         emitted = set()
         if event.get("recurrence"):
-            iterator = recurrence(event["recurrence"], start).xafter((lower - duration).astimezone(zone), inc=True)
+            iterator = recurrence(event["recurrence"], start).xafter(iterator_start, inc=True)
         else:
             iterator = iter([start])
         def add(at):
-            at_utc = at.astimezone(timezone.utc)
-            stop = at + duration if all_day else (at_utc + duration).astimezone(zone)
-            if stop <= lower or at >= upper or at_utc in excluded or at_utc in emitted:
+            key = coordinate(at)
+            stop = key + duration
+            if stop <= floor or key >= ceiling or key in excluded or key in emitted:
                 return
-            emitted.add(at_utc)
-            first = max(at if all_day else at.astimezone(display_zone), permitted_start)
-            last = min(stop if all_day else stop.astimezone(display_zone), permitted_end)
+            if cache and key < cache_last and stop > cache_first:
+                return
+            emitted.add(key)
+            first = max(key, allowed_first)
+            last = min(stop, allowed_last)
+            if all_day:
+                first = datetime.combine(first, time(), display_zone)
+                last = datetime.combine(last, time(), display_zone)
+            else:
+                first, last = first.astimezone(display_zone), last.astimezone(display_zone)
             item = {key: event[key] for key in DETAILS | {"id", "colour"} if key in event}
             item.update(allDay=all_day,
                         start=first.isoformat(), end=last.isoformat(), timeZone=display_zone.key,
@@ -133,7 +153,7 @@ def occurrences(payload, begin, end):
             if len(result) > 10000:
                 raise ValueError("Too many occurrences in this range")
         for at in iterator:
-            if at >= upper:
+            if coordinate(at) >= ceiling:
                 break
             add(at)
         for value in event.get("rdates", []):

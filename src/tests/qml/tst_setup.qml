@@ -557,6 +557,22 @@ TestCase {
         compare(service.setupResumeStep,4)
         compare(mockNotes.storageDirectory,"/notes"); compare(mockCalendar.storageDirectory,"/calendar")
     }
+    function test_longWorkspacePathHasAnUnfocusedSummary() {
+        openAt(320, 540, 22, false)
+        setup.step = 2
+        setup.draftWorkspace = "/home/user/" + "workspace/".repeat(15) + "Pilon"
+        render()
+        const field = control("setupStoragePath")
+        control("setupChooseFolder").forceActiveFocus()
+        tryCompare(field, "showingSummary", true)
+        const summary = findChild(field, "elidedFieldText")
+        verify(summary && summary.visible)
+        compare(summary.text, setup.draftWorkspace)
+        verify(summary.width > 0 && summary.width < field.width)
+        field.forceActiveFocus()
+        tryCompare(field, "showingSummary", false)
+        compare(field.text, setup.draftWorkspace)
+    }
     function test_invalidStorageKeepsStepAndInput() {
         setup.step=2; setup.draftWorkspace="relative"; click("setupNext")
         tryCompare(setup,"awaitingWorkspaceSave",false)

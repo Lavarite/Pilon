@@ -11,14 +11,20 @@ import shlex
 import shutil
 import struct
 import subprocess
+import sys
 import tempfile
 import time
+import tomllib
 import urllib.error
 import urllib.request
 import uuid
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(ROOT / "src/scripts"))
+from environment import development_root
+
+DEV = development_root()
 HELPERS = ("libpilon_codex.so", "libpilon_dns.so", "libpilon_llama.so")
 MODEL_REVISION = "499bc8821c6b12b4e53c5bffcb21ec206f212d81"
 MODEL_NAME = "stories15M-q4_0.gguf"
@@ -195,6 +201,8 @@ def self_test():
 
 
 def device_smoke(args):
+    release = ROOT / "addons/assistant/scripts/android/codex-release.toml"
+    expected_version = tomllib.loads(release.read_text())["version"]
     runtime = args.runtime.resolve()
     check_elf(runtime)
     adb = [args.adb, "-d"]
@@ -207,10 +215,10 @@ def device_smoke(args):
         raise RuntimeError("One authorized USB Android device is required.")
     if command("shell", "getprop ro.product.cpu.abi") != "arm64-v8a":
         raise RuntimeError("The USB device is not ARM64.")
-    model = args.model or verified_model(ROOT / "build/android/runtime" / "models" / MODEL_NAME)
+    model = args.model or verified_model(DEV / "dev-deps/android/runtime" / "models" / MODEL_NAME)
     run_id = uuid.uuid4().hex
     remote = f"/data/local/tmp/pilon-runtime-probe/run-{run_id}"
-    artifacts = ROOT / "build/android/runtime" / "proof" / run_id
+    artifacts = DEV / "dev-deps/android/runtime" / "proof" / run_id
     artifacts.mkdir(parents=True)
     processes = []
     forwarded = None
@@ -234,7 +242,7 @@ def device_smoke(args):
         environment = {"HOME": remote, "CODEX_HOME": f"{remote}/codex", "TMPDIR": f"{remote}/tmp"}
         version = command("shell", shlex.join(["env"] + [f"{k}={v}" for k, v in environment.items()]
                                               + [f"{remote}/libpilon_codex.so", "--version"]))
-        if "0.167.0" not in version:
+        if not version.endswith(" " + expected_version):
             raise RuntimeError(f"Unexpected Codex version: {version}")
         with (artifacts / "codex.log").open("wb") as log:
             codex = launch("libpilon_codex.so", ["app-server", "--listen", "stdio://"], environment, log)
@@ -302,7 +310,7 @@ def device_smoke(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--runtime", type=Path, default=ROOT / "builds/android/runtime/arm64-v8a")
+    parser.add_argument("--runtime", type=Path, default=DEV / "builds/android/runtime/arm64-v8a")
     parser.add_argument("--adb", default=shutil.which("adb") or str(Path.home() / "Android/Sdk/platform-tools/adb"))
     parser.add_argument("--model", type=Path, help="An existing GGUF; otherwise download the pinned public smoke model.")
     parser.add_argument("--check-elf", action="store_true")

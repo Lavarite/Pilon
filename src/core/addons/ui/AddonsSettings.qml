@@ -15,7 +15,7 @@ ColumnLayout {
     property var removeAddon: id => registry.finalizeRemoval(id)
     property var notices: ({})
     property var operationErrors: ({})
-    Component.onCompleted: if (registry?.error) report("", registry.error)
+    Component.onCompleted: if (registry?.error && !operationErrors[""]) report("", registry.error)
     property var pendingIds: ({})
     property var checkedOverrides: ({})
     property bool deferEnableChange: true
@@ -63,7 +63,7 @@ ColumnLayout {
         const result = createWidget(owner, widget)
         report(owner, result === true ? "" : String(result || qsTr("Unable to add the widget.")))
     }
-    function importPackages(files) {
+    function importPackages(files, reportErrors = true) {
         const failures = []
         for (const file of files) {
             if (registry.install(file)) continue
@@ -71,7 +71,9 @@ ColumnLayout {
             try { name = decodeURIComponent(name) } catch (error) {}
             failures.push(name + ": " + registry.error)
         }
-        report("", failures.join("\n"))
+        const message = failures.join("\n")
+        if (reportErrors) report("", message)
+        return message
     }
     PilonWrapButton {
         objectName: "reorderSidebarTabs"
@@ -233,43 +235,14 @@ ColumnLayout {
                 }
             }
         }
-        PilonButton {
-            id: importAction
+        PilonAddTile {
             objectName: "importAddon"
             Layout.fillWidth: true; Layout.fillHeight: true
             Layout.minimumWidth: 0; Layout.preferredWidth: 220
             Layout.minimumHeight: implicitHeight
-            implicitHeight: 160
-            text: "+"
             Accessible.name: qsTr("Add add-ons")
-            ToolTip.visible: hovered; ToolTip.text: qsTr("Add add-ons")
             enabled: !page.changesBusy
             onClicked: page.fileWorkspace.selectFiles(qsTr("Add add-ons"), files => page.importPackages(files), "", ".piext", page.Window.window)
-            contentItem: Label {
-                text: importAction.text; textFormat: Text.PlainText
-                font.pixelSize: Math.max(28, importAction.font.pixelSize * 2)
-                color: importAction.palette.buttonText
-                horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
-                opacity: importAction.enabled ? 1 : .4
-            }
-            background: Rectangle {
-                radius: 8
-                color: importAction.down ? Qt.tint(importAction.palette.button, Qt.alpha(importAction.palette.buttonText, .12))
-                     : importAction.hovered ? Qt.tint(importAction.palette.button, Qt.alpha(importAction.palette.buttonText, .06)) : importAction.palette.button
-                Canvas {
-                    anchors.fill: parent
-                    property color strokeColour: Qt.alpha(importAction.palette.buttonText, importAction.activeFocus ? .48 : .2)
-                    onStrokeColourChanged: requestPaint()
-                    onWidthChanged: requestPaint()
-                    onHeightChanged: requestPaint()
-                    onPaint: {
-                        const ctx = getContext("2d")
-                        ctx.reset(); ctx.strokeStyle = strokeColour; ctx.lineWidth = 1
-                        ctx.setLineDash([4, 4]); ctx.beginPath()
-                        ctx.roundedRect(.5, .5, width - 1, height - 1, 8, 8); ctx.stroke()
-                    }
-                }
-            }
         }
     }
     PilonErrorPopup {

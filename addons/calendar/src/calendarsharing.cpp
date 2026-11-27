@@ -49,7 +49,6 @@ bool CalendarManager::sharingConfigured() const {
 }
 
 void CalendarManager::loadSharingConfiguration() {
-    if (m_gitUpdating) { m_sharingConfigurationError = tr("Finish or abort Calendar's Git update first."); emit sharingConfigurationChanged(); return; }
     if (m_sharingConfigurationBusy) return;
     m_sharingConfigurationBusy = true;
     m_sharingConfigurationError.clear();
@@ -61,7 +60,6 @@ void CalendarManager::loadSharingConfiguration() {
 }
 
 void CalendarManager::saveSharingConfiguration(const QString &server, const QString &publisherKey) {
-    if (m_gitUpdating) { m_sharingConfigurationError = tr("Finish or abort Calendar's Git update first."); emit sharingConfigurationChanged(); return; }
     if (m_sharingConfigurationBusy || m_sharingBusy) return;
     const auto origin = sharingOrigin(server);
     if (origin.isEmpty()) {
@@ -102,7 +100,6 @@ void CalendarManager::saveSharingConfiguration(const QString &server, const QStr
 }
 
 bool CalendarManager::clearSharingConfiguration() {
-    if (m_gitUpdating) { m_sharingConfigurationError = tr("Finish or abort Calendar's Git update first."); emit sharingConfigurationChanged(); return false; }
     if (m_sharingConfigurationBusy || m_sharingBusy || !m_shares.isEmpty()) {
         m_sharingConfigurationError = tr("Stop all shared links and wait for sharing to finish before resetting.");
         emit sharingConfigurationChanged(); return false;
@@ -172,11 +169,12 @@ QVariantMap CalendarManager::shareSnapshot(const QStringList &calendars, const Q
                 QVariantList instances;
                 for (const auto &value : cache.value("events").toList()) {
                     const auto instance = value.toMap();
-                    if (instance.value("master") != it.key()) continue;
+                    if (instance.value("master") != it.key() || instance.value("cancelled").toBool()
+                        || instance.value("deleted").toBool()) continue;
                     auto occurrence = source;
                     for (const auto *key : {"title", "start", "end", "allDay", "timeZone", "description", "location", "guests"})
                         if (instance.contains(key)) occurrence[key] = instance.value(key);
-                    if (CalendarFormat::dateTime(occurrence, "end") <= begin || CalendarFormat::dateTime(occurrence, "start") >= end) continue;
+                    if (!CalendarFormat::overlaps(occurrence, begin, end)) continue;
                     instances.append(project(occurrence, it.key() + "/" + instance.value("originalStart", instance.value("start")).toString(), false));
                 }
                 const bool coversRange = cache.value("from").toString() <= from
@@ -256,6 +254,7 @@ void CalendarManager::publishShare(const QString &id) {
     if (!m_active) return;
     const auto share = m_shares.value(id);
     const bool pending = share.value("pending").toBool();
+    // Creation retries reuse the persisted payload and token.
     const auto payload = pending ? share.value("publication").toMap()
         : shareSnapshot(share.value("calendars").toStringList(), share.value("fields").toStringList(),
                         share.value("from").toString(), share.value("through").toString());
@@ -316,7 +315,6 @@ bool CalendarManager::renameShare(const QString &id, const QString &name) {
 }
 
 void CalendarManager::revokeShare(const QString &id) {
-    if (m_gitUpdating) { m_sharingError = tr("Finish or abort Calendar's Git update first."); emit sharingChanged(); return; }
     if (m_sharingBusy || !m_shares.contains(id)) return;
     m_sharingBusy = true; m_sharingError.clear(); emit sharingChanged();
     shareRequest("DELETE", id, {}, [=, this](int status, QByteArray, QVariantMap) {

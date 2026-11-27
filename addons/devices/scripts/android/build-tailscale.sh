@@ -4,14 +4,15 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)
 if [[ "${PILON_ENV_LOADED:-0}" != 1 ]]; then
     exec python3 "$root/src/scripts/environment.py" bash "${BASH_SOURCE[0]}" "$@"
 fi
-work="$root/build/android/tailscale"
+pilon_dev="${PILON_DEV_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/pilon-dev}"
+work="$pilon_dev/dev-deps/android/tailscale"
 source="$work/upstream"
 patched="$work/without-taildrop"
 commit=d8673104f600c05b8c20b64d0e70951ed670236a
 sdk="${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}"
 ndk="${ANDROID_NDK_ROOT:-$sdk/ndk/27.2.12479018}"
-licenses="$root/builds/android/licenses/tailscale"
-mkdir -p "$work/bin" "$licenses" "$root/builds/android/java"
+licenses="$pilon_dev/builds/android/licenses/tailscale"
+mkdir -p "$work/bin" "$licenses" "$pilon_dev/builds/android/java"
 if [[ ! -d "$source/.git" ]]; then
     git clone --branch 1.104.5-t788384763-gd8673104f --depth 1 --single-branch \
         https://github.com/tailscale/tailscale-android.git "$source"
@@ -81,8 +82,8 @@ for module in modules:
                 shutil.copyfile(file,target)
     assert copied, f'No license found for compiled module {module}'
 PY
-cp "$work/libtailscale.aar" "$root/builds/android/java/libtailscale.aar.new"
-mv "$root/builds/android/java/libtailscale.aar.new" "$root/builds/android/java/libtailscale.aar"
+cp "$work/libtailscale.aar" "$pilon_dev/builds/android/java/libtailscale.aar.new"
+mv "$pilon_dev/builds/android/java/libtailscale.aar.new" "$pilon_dev/builds/android/java/libtailscale.aar"
 cp "$root/addons/devices/platform/android/tailscale/Gio-LICENSE.txt" "$licenses/Gio-LICENSE.txt"
 cp "$root/addons/devices/platform/android/tailscale/omit-taildrop.patch" "$licenses/SDK-omit-taildrop.patch"
 cat > "$licenses/SOURCE.txt" <<EOF
@@ -103,4 +104,4 @@ Compiled Go-module licenses and Go runtime notices are retained in this director
 Upstream libtailscale/log.go borrows MIT-licensed Gio logging code; notice retained from
 https://github.com/gioui/gio/blob/3f4f8ba7c1fae349f97621f1f623ef47e4da3e25/LICENSE
 EOF
-printf 'Tailscale AAR: %s\n' "$root/builds/android/java/libtailscale.aar"
+printf 'Tailscale AAR: %s\n' "$pilon_dev/builds/android/java/libtailscale.aar"

@@ -2,6 +2,7 @@
 #include <QAbstractListModel>
 #include <QFutureWatcher>
 #include <QRectF>
+#include <QSet>
 #include <QUrl>
 #include <QStandardItemModel>
 #include <QtQml/qqmlregistration.h>
@@ -30,6 +31,7 @@ class DocumentPreview : public QAbstractListModel {
     Q_PROPERTY(QAbstractItemModel *sectionModel READ sectionModel CONSTANT)
     Q_PROPERTY(QString selectedText READ selectedText NOTIFY selectionChanged)
     Q_PROPERTY(bool searching READ searching NOTIFY searchChanged)
+    Q_PROPERTY(QString searchError READ searchError NOTIFY searchChanged)
 public:
     explicit DocumentPreview(QObject *parent = nullptr);
     ~DocumentPreview() override;
@@ -47,6 +49,7 @@ public:
     QAbstractItemModel *sectionModel() { return &m_sectionModel; }
     QString selectedText() const;
     bool searching() const { return m_searching; }
+    QString searchError() const { return m_searchError; }
     static QVariantMap decodeDocument(const QVariantMap &request, const std::atomic_bool *cancel);
     Q_INVOKABLE qreal pageY(int page, qreal scale) const;
     Q_INVOKABLE int pageAt(qreal y, qreal scale) const;
@@ -71,7 +74,7 @@ private:
         QString text, error;
         QList<QRectF> characters;
         QVariantList links;
-        int resolution = 0;
+        int resolution = 0, failedResolution = 0;
     };
     struct State;
     struct Result {
@@ -85,7 +88,9 @@ private:
     };
     static Page decodedPage(const QVariantMap &map);
     void schedule();
-    void notifySelection();
+    void notifySelection(std::pair<int, int> previous);
+    std::pair<int, int> selectionPages() const;
+    void trimImages();
     void search(const QString &text, int fromPage, bool backwards, bool all);
     std::pair<int, int> position(qreal x, qreal y, qreal contentWidth, qreal scale) const;
     std::pair<int, int> range(int page) const;
@@ -95,10 +100,11 @@ private:
     std::shared_ptr<State> m_state;
     QList<Page> m_pages;
     QList<int> m_visible;
+    QSet<int> m_renderedPages;
     QVariantList m_sections;
     DocumentSections m_sectionModel{this};
     QUrl m_source;
-    QString m_error;
+    QString m_error, m_searchError;
     bool m_loading = false, m_working = false;
     bool m_searching = false;
     quint64 m_generation = 0;

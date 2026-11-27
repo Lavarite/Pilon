@@ -275,9 +275,12 @@ TestCase {
     }
     function test_firstPressAfterListScrollActivates(data) {
         owner.show()
+        owner.requestActivate()
+        tryCompare(owner, "active", true)
         scroll.visible = false
         const list = createTemporaryObject(scrollListProbe, surface)
         verify(list)
+        verify(waitForRendering(list))
         list.flick(0, -1200)
         tryVerify(() => list.contentY > 20)
         verify(list.moving)
@@ -286,8 +289,8 @@ TestCase {
             touchEvent(list).press(0, list, x, y).commit().release(0, list, x, y).commit()
         else
             mouseClick(list, x, y)
-        compare(actionCount, 1)
-        compare(list.moving, false)
+        tryCompare(test, "actionCount", 1)
+        tryCompare(list, "moving", false)
     }
     function test_wheelDistanceIndependentOfContentLength() {
         owner.show()

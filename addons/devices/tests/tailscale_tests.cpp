@@ -123,16 +123,36 @@ esac
         QVERIFY(http->bodies[1].isEmpty());QVERIFY(!PilonSettings().allKeys().contains("tailscale/discoveryEnabled"));
         for(const auto &key:PilonSettings().allKeys()) QVERIFY(!PilonSettings().value(key).toString().contains("fixture-client-secret"));
         QCOMPARE(manager.devices().size(),1);const auto peer=manager.devices().first().toMap();
-        QCOMPARE(peer.value("id").toString(),QString("api:peer-a"));QVERIFY(!peer.value("onlineKnown").toBool());
+        QCOMPARE(peer.value("id").toString(),QString("api:peer-a"));
+        QVERIFY(peer.value("onlineKnown").toBool()); QVERIFY(peer.value("online").toBool());
         manager.setDeviceIncluded("api:peer-a",true);QCOMPARE(manager.includedDevices().size(),1);
         QVERIFY(!manager.loggedIn());QVERIFY(!manager.usedByPilon());
         TailscaleManager restarted;restarted.restoreDiscovery();QTRY_VERIFY(!restarted.busy());
         QVERIFY(restarted.discoveryConnected());QCOMPARE(restarted.m_discoveryCredential,credential());
         QCOMPARE(restarted.devices().size(), 1);
         QCOMPARE(restarted.devices().first().toMap().value("name").toString(), QString("Fixture peer"));
+        QVERIFY(!restarted.devices().first().toMap().value("onlineKnown").toBool());
         QVERIFY(restarted.includedDevices().isEmpty()); // cached discovery cannot activate a connection
         restarted.disconnectDiscovery();QTRY_VERIFY(!restarted.busy());
         QVERIFY(!restarted.discoveryConnected());QVERIFY(credential().isEmpty());QVERIFY(restarted.devices().isEmpty());
+    }
+    void discoveryDistinguishesOfflineFromUnknown() {
+        TailscaleManager manager;
+        auto *http = network(manager);
+        http->responses = {{200, token()}, {200, R"({"devices":[
+            {"nodeId":"offline","hostname":"Offline","addresses":["100.64.0.2"],"connectedToControl":false},
+            {"nodeId":"missing","hostname":"Unknown","addresses":["100.64.0.3"]},
+            {"nodeId":"malformed","hostname":"Invalid status","addresses":["100.64.0.4"],"connectedToControl":"false"}
+        ]})"}};
+        manager.connectDiscovery("fixture-client", "fixture-client-secret-a");
+        QTRY_VERIFY(!manager.busy());
+        const auto devices = manager.devices();
+        QCOMPARE(devices.size(), 3);
+        for (const auto &entry : devices) {
+            const auto peer = entry.toMap();
+            QCOMPARE(peer.value("onlineKnown").toBool(), peer.value("id").toString() == "api:offline");
+            QVERIFY(!peer.value("online").toBool());
+        }
     }
     void activeDiscoveryFailureOnlyRetainsReadOnlyPeersWhenAccessIsUncertain() {
         TailscaleManager manager;
@@ -432,6 +452,45 @@ cat "$PILON_DEVICE_TEST_STATUS"
         QVERIFY(manager.statusKnown());QVERIFY(manager.loggedIn());QVERIFY(!manager.usedByPilon());QVERIFY(!manager.accountClaimed());
         QVERIFY(manager.includedDevices().isEmpty());manager.logoutUsedAccount();
         QVERIFY(!calls().contains("logout"));QVERIFY(manager.loggedIn());QVERIFY(manager.cleanupBlockedReason().isEmpty());
+    }
+    void stoppedVpnKeepsTheAccountSignedInUntilItReconnects()
+    {
+        TailscaleManager manager;
+        manager.refresh();
+        QTRY_VERIFY(!manager.busy());
+        QCOMPARE(manager.property("vpnDisconnected"), QVariant(false));
+        QVERIFY(status("fixture-account", "Stopped"));
+        manager.refresh();
+        QTRY_VERIFY(!manager.busy());
+        QVERIFY(manager.statusKnown());
+        QVERIFY(manager.serviceRunning());
+        QVERIFY(manager.loggedIn());
+        QCOMPARE(manager.property("vpnDisconnected"), QVariant(true));
+        QVERIFY(status());
+        manager.refresh();
+        QTRY_VERIFY(!manager.busy());
+        QCOMPARE(manager.property("vpnDisconnected"), QVariant(false));
+    }
+    void systemDiscoveryUsesDnsNameForSshAlias()
+    {
+        QVERIFY(write("status", R"({
+            "BackendState": "Running",
+            "Self": {"ID": "fixture-account", "UserID": 7, "HostName": "local"},
+            "Peer": {"peer-key": {"ID": "peer", "HostName": "peer-label", "DNSName": "peer-alias.fixture.ts.net.",
+                                  "TailscaleIPs": ["100.64.0.2"], "Online": true}}
+        })"));
+        PilonSettings().setValue("tailscale/deviceSelectionInitialized", true);
+        PilonSettings().setValue("tailscale/includedDevices", QStringList{"peer"});
+        TailscaleManager manager;
+        manager.refresh();
+        QTRY_COMPARE(manager.includedDevices().size(), 1);
+        const auto peer = manager.includedDevices().first().toMap();
+        QCOMPARE(peer.value("ip").toString(), QString("100.64.0.2"));
+        QCOMPARE(peer.value("sshAlias").toString(), QString("peer-alias"));
+        for (const auto &device : manager.devices()) {
+            const auto info = device.toMap();
+            if (info.value("self").toBool()) QVERIFY(info.value("sshAlias").toString().isEmpty());
+        }
     }
     void claimedAccountRequiresFreshStatusAndClearsOnlyAfterLogout() {
         TailscaleManager manager;QVERIFY(!manager.useCurrentAccount());

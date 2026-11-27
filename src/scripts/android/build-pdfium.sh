@@ -5,12 +5,13 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 if [[ "${PILON_ENV_LOADED:-0}" != 1 ]]; then
     exec python3 "$root/src/scripts/environment.py" bash "${BASH_SOURCE[0]}" "$@"
 fi
+pilon_dev="${PILON_DEV_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/pilon-dev}"
 version=8138
 checksum=fc73c8020d7204e52f7a9d8153489b3cac2e9c5dc5d70d3a37a976a7398c1a86
-archive="$root/downloads/pdfium-android-arm64-$version.tgz"
-sdk="$root/build/android/pdfium/sdk"
-runtime="$root/builds/android/runtime/arm64-v8a"
-licenses="$root/builds/android/licenses/pdfium"
+archive="$pilon_dev/dev-deps/downloads/pdfium-android-arm64-$version.tgz"
+sdk="$pilon_dev/dev-deps/android/pdfium/sdk"
+runtime="$pilon_dev/builds/android/runtime/arm64-v8a"
+licenses="$pilon_dev/builds/android/licenses/pdfium"
 mkdir -p "$(dirname "$archive")" "$sdk" "$runtime" "$licenses"
 if [[ ! -f "$archive" ]]; then
     curl --fail --location --retry 3 "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium/$version/pdfium-android-arm64.tgz" -o "$archive.new"

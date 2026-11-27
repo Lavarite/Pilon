@@ -83,6 +83,38 @@ class AddonTests : public QObject {
         QSettings().setValue("app/setupVersion", 1);
         QSettings().sync();
     }
+    void unreadableOwnershipPreventsPackagePublication() {
+        QTemporaryDir root;
+        const auto source = root.filePath("source.piext");
+        package(source, manifest());
+        const auto state = root.filePath("data/.registry");
+        QVERIFY(QDir().mkpath(state));
+        QFile ownership(state + "/registry.json");
+        QVERIFY(ownership.open(QIODevice::WriteOnly));
+        QVERIFY(ownership.write("damaged ownership record") > 0);
+        ownership.close();
+        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data/.registry"), false);
+        QVERIFY(!registry.install(QUrl::fromLocalFile(source)));
+        QVERIFY(registry.error().contains("ownership"));
+        QVERIFY(!QFileInfo::exists(root.filePath("installed/org.example.counter/org.example.counter.piext")));
+        QVERIFY(registry.addons().isEmpty());
+    }
+    void portableSettingsRejectOversizedValuesBeforePublishing() {
+        QTemporaryDir root;
+        const auto source = root.filePath("source.piext");
+        auto data = manifest();
+        data["portableSettings"] = QJsonArray{"label"};
+        package(source, data);
+        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data/.registry"), false);
+        QVERIFY(registry.install(QUrl::fromLocalFile(source)));
+        const QString id = "org.example.counter";
+        QVERIFY(registry.setSetting(id, "label", "existing"));
+        QSignalSpy changed(&registry, &AddonRegistry::changed);
+        QVERIFY(registry.setSetting(id, "label", "existing"));
+        QVERIFY(changed.isEmpty());
+        QVERIFY(!registry.setSetting(id, "label", QString(1024 * 1024 + 1, 'x')));
+        QCOMPARE(registry.setting(id, "label").toString(), QString("existing"));
+    }
     void configuredRestoreVerifiesIdentityVersionAndDigestBeforeInstallation() {
         QTemporaryDir root;
         const QString id = "org.example.counter";
@@ -92,7 +124,7 @@ class AddonTests : public QObject {
         QVERIFY(packageFile.open(QIODevice::ReadOnly));
         const auto digest = QString::fromLatin1(QCryptographicHash::hash(packageFile.readAll(), QCryptographicHash::Sha256).toHex());
         const auto url = QUrl::fromLocalFile(source);
-        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data"), false);
+        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data/.registry"), false);
         QVERIFY(!registry.installConfigured(url, "org.example.other", "", ""));
         QVERIFY(!registry.installConfigured(url, id, "1.2.3", digest));
         QVERIFY(!registry.installConfigured(url, id, "", QString(64, '0')));
@@ -111,7 +143,7 @@ class AddonTests : public QObject {
     void restoreRemovedBuiltinUsesPackagedCopyWithoutNetwork() {
         QTemporaryDir root;
         package(root.filePath("builtins/files.piext"), manifest("files"));
-        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data"), false);
+        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data/.registry"), false);
         const auto digest = row(registry, "files")["sha256"].toString();
         QVERIFY(!digest.isEmpty());
         QVERIFY(registry.setEnabled("files", false));
@@ -121,11 +153,39 @@ class AddonTests : public QObject {
         QCOMPARE(row(registry,"files").value("sha256").toString(),digest);
         QVERIFY(!registry.isEnabled("files"));
     }
+    void installedStagingIsConsumedAndRemovedAddonsStayRemoved() {
+        QTemporaryDir root;
+        const auto source = root.filePath("builtins/files.piext");
+        const auto legacy = root.filePath("installed/files.piext");
+        const auto installed = root.filePath("installed/files/files.piext");
+        package(source, manifest("files"));
+        package(installed, manifest("files"));
+        QVERIFY(QFile::copy(installed, legacy));
+        QFile marker(root.filePath("builtins/.install-packages"));
+        QVERIFY(marker.open(QIODevice::WriteOnly));
+        marker.close();
+        const auto state = root.filePath("state");
+        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), state, false);
+        QVERIFY2(registry.error().isEmpty(), qPrintable(registry.error()));
+        QVERIFY(!QFileInfo::exists(legacy));
+        QVERIFY(!QFileInfo::exists(source));
+        QVERIFY(QFileInfo::exists(installed));
+        QVERIFY(!QFileInfo::exists(state + "/cache"));
+        QVERIFY(registry.setEnabled("files", false));
+        QVERIFY2(registry.finalizeRemoval("files", true), qPrintable(registry.error()));
+        package(source, manifest("files"));
+        QVERIFY(marker.open(QIODevice::WriteOnly));
+        marker.close();
+        AddonRegistry upgraded(root.filePath("builtins"), root.filePath("installed"), state, false);
+        QVERIFY2(upgraded.error().isEmpty(), qPrintable(upgraded.error()));
+        QVERIFY(!QFileInfo::exists(installed));
+        QVERIFY(!QFileInfo::exists(source));
+    }
     void packagesAreDiscoveredWithoutQmlExecutionAndChoicesPersist() {
         QTemporaryDir root;
         package(root.filePath("builtins/files.piext"), manifest("files"));
         package(root.filePath("installed/counter.piext"), manifest());
-        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data"),
+        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data/.registry"),
                                false);
         QVERIFY(registry.isEnabled("files"));
         QVERIFY(!registry.isEnabled("org.example.counter"));
@@ -144,8 +204,8 @@ class AddonTests : public QObject {
                     .toMap()
                     .value("addonData")
                     .toList()
-                    .contains(QString("addon-data/org.example.counter")));
-        AddonRegistry next(root.filePath("builtins"), root.filePath("installed"), root.filePath("data"),
+                    .contains(QString("addons/org.example.counter/data")));
+        AddonRegistry next(root.filePath("builtins"), root.filePath("installed"), root.filePath("data/.registry"),
                            false);
         QVERIFY(next.isEnabled("org.example.counter"));
         QVERIFY(next.setEnabled("files", false));
@@ -174,10 +234,10 @@ class AddonTests : public QObject {
         QCOMPARE(compile.exitCode(), 0);
         QVERIFY(QResource::registerResource(outer));
         const auto unmount = qScopeGuard([&] { QResource::unregisterResource(outer); });
-        AddonRegistry registry(":/embedded-pilon-test", root.filePath("installed"), root.filePath("data"), false);
+        AddonRegistry registry(":/embedded-pilon-test", root.filePath("installed"), root.filePath("data/.registry"), false);
         QVERIFY2(registry.error().isEmpty(), qPrintable(registry.error()));
         QVERIFY(registry.isEnabled("files"));
-        QVERIFY(QFileInfo::exists(root.filePath("installed/files.piext")));
+        QVERIFY(QFileInfo::exists(root.filePath("installed/files/files.piext")));
         QFile page(':' + row(registry, "files").value("page").toUrl().path());
         QVERIFY(page.open(QIODevice::ReadOnly));
         QVERIFY(page.readAll().startsWith("not valid QML"));
@@ -193,11 +253,11 @@ class AddonTests : public QObject {
                 result << value.toMap().value("id").toString();
             return result;
         };
-        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data"), false);
+        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data/.registry"), false);
         const auto original = ids(registry.addons());
         QVERIFY(registry.setSidebarOrder({"org.example.counter", "notes", "files"}));
         QVERIFY(registry.setEnabled("notes", false));
-        AddonRegistry next(root.filePath("builtins"), root.filePath("installed"), root.filePath("data"), false);
+        AddonRegistry next(root.filePath("builtins"), root.filePath("installed"), root.filePath("data/.registry"), false);
         QCOMPARE(ids(next.sidebarAddons()), (QStringList{"org.example.counter", "notes", "files"}));
         QCOMPARE(ids(next.addons()), original);
         QVERIFY(next.setEnabled("notes", true));
@@ -211,13 +271,13 @@ class AddonTests : public QObject {
         QVERIFY(!next.setSidebarOrder({"org.example.missing"}));
         QCOMPARE(ids(next.sidebarAddons()), (QStringList{"files", "org.example.counter", "notes", "org.example.new"}));
         QSettings().setValue("addons/sidebarOrder", QStringList{"org.example.missing", "notes", "notes"});
-        QCOMPARE(ids(next.sidebarAddons()), (QStringList{"notes", "org.example.counter", "files", "org.example.new"}));
+        QCOMPARE(ids(next.sidebarAddons()), (QStringList{"notes", "files", "org.example.counter", "org.example.new"}));
     }
     void sidebarOrderWriteFailureKeepsPreviousOrder() {
         QTemporaryDir root;
         package(root.filePath("builtins/files.piext"), manifest("files"));
         package(root.filePath("builtins/notes.piext"), manifest("notes"));
-        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data"), false);
+        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data/.registry"), false);
         QVERIFY(registry.setSidebarOrder({"notes", "files"}));
         const auto folder = QFileInfo(QSettings().fileName()).absolutePath();
         const auto permissions = QFileInfo(folder).permissions();
@@ -239,7 +299,7 @@ class AddonTests : public QObject {
                     return value.toMap();
             return QVariantMap{};
         };
-        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data"), false);
+        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data/.registry"), false);
         QVERIFY(registry.setSidebarOrder({"notes", "files"}));
         QVERIFY(registry.setSetting("notes", "marker", 42));
         QVERIFY(page(registry, "notes").value("sidebarVisible").toBool());
@@ -252,7 +312,7 @@ class AddonTests : public QObject {
         QVERIFY(!registry.setPageVisible("org.example.settings", false));
         QCOMPARE(QSettings().value("addons/hiddenPages").toStringList(), QStringList{"notes"});
 
-        AddonRegistry next(root.filePath("builtins"), root.filePath("installed"), root.filePath("data"), false);
+        AddonRegistry next(root.filePath("builtins"), root.filePath("installed"), root.filePath("data/.registry"), false);
         QVERIFY(next.isEnabled("notes"));
         QVERIFY(!page(next, "notes").value("sidebarVisible").toBool());
         QVERIFY(next.setEnabled("notes", false));
@@ -276,7 +336,7 @@ class AddonTests : public QObject {
         QFETCH(bool, initiallyHidden);
         QTemporaryDir root;
         package(root.filePath("builtins/notes.piext"), manifest("notes"));
-        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data"), false);
+        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data/.registry"), false);
         if (initiallyHidden)
             QVERIFY(registry.setPageVisible("notes", false));
         const auto folder = QFileInfo(QSettings().fileName()).absolutePath();
@@ -309,7 +369,7 @@ class AddonTests : public QObject {
         if (!description.isUndefined())
             data["description"] = description;
         package(root.filePath("installed/input.piext"), data);
-        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data"),
+        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data/.registry"),
                                false);
         const auto item = row(registry, "org.example.counter");
         QCOMPARE(item.value("error").toString().isEmpty(), accepted);
@@ -400,7 +460,7 @@ class AddonTests : public QObject {
         QFETCH(bool, accepted);
         QTemporaryDir root;
         package(root.filePath("installed/input.piext"), data);
-        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data"), false);
+        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data/.registry"), false);
         const auto descriptor = row(registry, "org.example.counter");
         QCOMPARE(descriptor.value("error").toString().isEmpty(), accepted);
         if (accepted) {
@@ -467,8 +527,8 @@ class AddonTests : public QObject {
         valid["dependencies"] = QJsonArray{
             QJsonObject{{"id", "org.example.provider"}, {"minVersion", "1.2.0"}, {"maxVersion", "2.0.0"}}};
         valid["extensionPoints"] = QJsonArray{QJsonObject{{"id", "folder-actions"}, {"apiVersion", 1}}};
-        valid["integrations"] = QJsonArray{QJsonObject{{"id", "files-git"},
-                                                       {"name", "Git"},
+        valid["integrations"] = QJsonArray{QJsonObject{{"id", "files-action"},
+                                                       {"name", "Folder actions"},
                                                        {"target", "files"},
                                                        {"minVersion", "1.0.0"},
                                                        {"point", "folder-actions"},
@@ -483,8 +543,6 @@ class AddonTests : public QObject {
         add("lifecycle-only", data, true);
         data.remove("lifecycle");
         add("no-entry", data, false);
-        data = manifest("git");
-        add("shipped-git", data, true);
         data = manifest("devices");
         add("shipped-devices", data, true);
         const auto dependency = [&](const char *name, const QJsonObject &value, bool accepted) {
@@ -550,7 +608,7 @@ class AddonTests : public QObject {
         QFETCH(bool, accepted);
         QTemporaryDir root;
         package(root.filePath("installed/input.piext"), data);
-        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data"),
+        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data/.registry"),
                                false);
         const auto item = registry.addons().last().toMap();
         QCOMPARE(item.value("error").toString().isEmpty(), accepted);
@@ -581,7 +639,7 @@ class AddonTests : public QObject {
         QFETCH(QJsonObject, data);
         QTemporaryDir root;
         package(root.filePath("installed/invalid.piext"), data);
-        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data"),
+        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data/.registry"),
                                false);
         QCOMPARE(registry.addons().size(), 1);
         QVERIFY(!registry.addons().last().toMap().value("error").toString().isEmpty());
@@ -601,7 +659,7 @@ class AddonTests : public QObject {
                                          QJsonObject{{"id", "org.example.right"}, {"minVersion", "1.0.0"}}};
         for (const auto &data : {base, left, right, top})
             package(root.filePath("installed/" + data["id"].toString() + ".piext"), data);
-        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data"),
+        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data/.registry"),
                                false);
         QVERIFY(registry.setEnabled("org.example.top", true));
         QCOMPARE(
@@ -662,7 +720,7 @@ class AddonTests : public QObject {
         if (!missing)
             package(root.filePath("installed/provider.piext"), provider);
         QSettings().setValue("addons/enabled/org.example.counter", true);
-        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data"),
+        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data/.registry"),
                                false);
         QVERIFY(!registry.isEnabled("org.example.counter"));
         QVERIFY(row(registry, "org.example.counter").value("configuredEnabled").toBool());
@@ -677,77 +735,77 @@ class AddonTests : public QObject {
         QTemporaryDir root;
         auto files = manifest("files");
         files["extensionPoints"] = QJsonArray{QJsonObject{{"id", "folder-actions"}, {"apiVersion", 1}}};
-        auto git = manifest("git");
-        git["integrations"] = QJsonArray{QJsonObject{{"id", "files-git"},
-                                                     {"name", "Git"},
+        auto contributor = manifest("org.example.contributor");
+        contributor["integrations"] = QJsonArray{QJsonObject{{"id", "files-action"},
+                                                     {"name", "Folder actions"},
                                                      {"target", "files"},
                                                      {"minVersion", "1.0.0"},
                                                      {"point", "folder-actions"},
                                                      {"apiVersion", 1},
                                                      {"entry", "Integration.qml"}}};
-        package(root.filePath("installed/files.piext"), files);
-        package(root.filePath("installed/git.piext"), git);
-        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data"),
+        package(root.filePath("installed/files/files.piext"), files);
+        package(root.filePath("installed/org.example.contributor/org.example.contributor.piext"), contributor);
+        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data/.registry"),
                                false);
-        QVERIFY(registry.setEnabled("git", true));
-        QVERIFY(registry.isEnabled("git"));
+        QVERIFY(registry.setEnabled("org.example.contributor", true));
+        QVERIFY(registry.isEnabled("org.example.contributor"));
         QVERIFY(!registry.isEnabled("files"));
         QCOMPARE(registry.integrationRecords("files").size(), 1);
         QVERIFY(!registry.integrationRecords("files").first().toMap().value("available").toBool());
-        QVERIFY(!registry.setIntegrationEnabled("git", "files-git", true));
+        QVERIFY(!registry.setIntegrationEnabled("org.example.contributor", "files-action", true));
         QVERIFY(!registry.isEnabled("files"));
         QVERIFY(registry.setEnabled("files", true));
         auto record = registry.integrationRecords("files").first().toMap();
         QVERIFY(record.value("available").toBool());
         QVERIFY(!record.value("enabled").toBool());
-        QVERIFY(registry.setIntegrationEnabled("git", "files-git", true));
+        QVERIFY(registry.setIntegrationEnabled("org.example.contributor", "files-action", true));
         QVERIFY(registry.integrationRecords().first().toMap().value("enabled").toBool());
         QVERIFY(registry.setEnabled("files", false));
-        QVERIFY(registry.isEnabled("git"));
+        QVERIFY(registry.isEnabled("org.example.contributor"));
         QVERIFY(!registry.integrationRecords().first().toMap().value("enabled").toBool());
         QVERIFY(registry.integrationRecords().first().toMap().value("configuredEnabled").toBool());
         QVERIFY(registry.setEnabled("files", true));
         QVERIFY(registry.integrationRecords().first().toMap().value("enabled").toBool());
         files["extensionPoints"] = QJsonArray{QJsonObject{{"id", "folder-actions"}, {"apiVersion", 2}}};
-        package(root.filePath("installed/files.piext"), files);
-        AddonRegistry next(root.filePath("builtins"), root.filePath("installed"), root.filePath("data"),
+        package(root.filePath("installed/files/files.piext"), files);
+        AddonRegistry next(root.filePath("builtins"), root.filePath("installed"), root.filePath("data/.registry"),
                            false);
         QVERIFY(next.isEnabled("files"));
-        QVERIFY(next.isEnabled("git"));
+        QVERIFY(next.isEnabled("org.example.contributor"));
         QVERIFY(!next.integrationRecords().first().toMap().value("available").toBool());
     }
     void integrationDefaultsApplyWithoutEnablingTargetsAndPreserveOptOut() {
         QTemporaryDir root;
         auto files = manifest("files");
         files["extensionPoints"] = QJsonArray{QJsonObject{{"id", "folder-actions"}, {"apiVersion", 1}}};
-        auto git = manifest("git");
-        git["integrations"] = QJsonArray{QJsonObject{
-            {"id", "files"}, {"name", "Git folder actions"}, {"target", "files"},
+        auto contributor = manifest("org.example.contributor");
+        contributor["integrations"] = QJsonArray{QJsonObject{
+            {"id", "files"}, {"name", "Folder actions"}, {"target", "files"},
             {"minVersion", "1.0.0"}, {"point", "folder-actions"}, {"apiVersion", 1},
             {"entry", "Integration.qml"}, {"enabledByDefault", true}}};
-        package(root.filePath("installed/files.piext"), files);
-        package(root.filePath("installed/git.piext"), git);
-        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data"), false);
+        package(root.filePath("installed/files/files.piext"), files);
+        package(root.filePath("installed/org.example.contributor/org.example.contributor.piext"), contributor);
+        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data/.registry"), false);
         const auto record = [&] { return registry.integrationRecords("files").first().toMap(); };
         QVERIFY(record().value("configuredEnabled").toBool());
         QVERIFY(!record().value("enabled").toBool());
-        QVERIFY(registry.setEnabled("git", true));
+        QVERIFY(registry.setEnabled("org.example.contributor", true));
         QVERIFY(!registry.isEnabled("files"));
         QVERIFY(!record().value("enabled").toBool());
         QVERIFY(registry.setEnabled("files", true));
         QVERIFY(record().value("enabled").toBool());
-        QVERIFY(!QSettings().contains("addons/integrations/git/files"));
-        QVERIFY(registry.setEnabled("git", false));
+        QVERIFY(!QSettings().contains("addons/integrations/org.example.contributor/files"));
+        QVERIFY(registry.setEnabled("org.example.contributor", false));
         QVERIFY(!record().value("enabled").toBool());
-        QVERIFY(registry.setEnabled("git", true));
+        QVERIFY(registry.setEnabled("org.example.contributor", true));
         QVERIFY(record().value("enabled").toBool());
-        QVERIFY(registry.setIntegrationEnabled("git", "files", false));
-        QVERIFY(registry.setEnabled("git", false));
-        QVERIFY(registry.setEnabled("git", true));
+        QVERIFY(registry.setIntegrationEnabled("org.example.contributor", "files", false));
+        QVERIFY(registry.setEnabled("org.example.contributor", false));
+        QVERIFY(registry.setEnabled("org.example.contributor", true));
         QVERIFY(!record().value("configuredEnabled").toBool());
         QVERIFY(!record().value("enabled").toBool());
-        AddonRegistry next(root.filePath("builtins"), root.filePath("installed"), root.filePath("data"), false);
-        QVERIFY(next.isEnabled("git"));
+        AddonRegistry next(root.filePath("builtins"), root.filePath("installed"), root.filePath("data/.registry"), false);
+        QVERIFY(next.isEnabled("org.example.contributor"));
         QVERIFY(next.isEnabled("files"));
         QVERIFY(!next.integrationRecords("files").first().toMap().value("configuredEnabled").toBool());
         QVERIFY(!next.integrationRecords("files").first().toMap().value("enabled").toBool());
@@ -778,32 +836,56 @@ class AddonTests : public QObject {
         if (!hasSettings) target.remove("settings");
         if (apiVersion != 1)
             target["extensionPoints"] = QJsonArray{QJsonObject{{"id", point}, {"apiVersion", apiVersion}}};
-        auto contributor = manifest("git");
+        auto contributor = manifest("org.example.contributor");
         contributor["integrations"] = QJsonArray{QJsonObject{
             {"id", "augment"}, {"name", "Augment Files"}, {"target", "files"},
             {"minVersion", "1.0.0"}, {"point", point}, {"apiVersion", apiVersion},
             {"entry", "Integration.qml"}}};
-        package(root.filePath("installed/files.piext"), target);
-        package(root.filePath("installed/git.piext"), contributor);
-        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data"), false);
+        package(root.filePath("installed/files/files.piext"), target);
+        package(root.filePath("installed/org.example.contributor/org.example.contributor.piext"), contributor);
+        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data/.registry"), false);
         QVERIFY(registry.setEnabled("files", true));
-        QVERIFY(registry.setEnabled("git", true));
+        QVERIFY(registry.setEnabled("org.example.contributor", true));
         const auto record = registry.integrationRecords("files").first().toMap();
         QCOMPARE(record.value("available").toBool(), available);
         QVERIFY(!record.value("configuredEnabled").toBool());
-        QCOMPARE(registry.setIntegrationEnabled("git", "augment", true), available);
+        QCOMPARE(registry.setIntegrationEnabled("org.example.contributor", "augment", true), available);
         QCOMPARE(registry.integrationRecords("files").first().toMap().value("enabled").toBool(), available);
+    }
+    void retiredBuiltinsDoNotPreventLoadingInstalledAddons() {
+        QTemporaryDir root;
+        const auto stateDirectory = root.filePath("state");
+        QVERIFY(QDir().mkpath(stateDirectory));
+        QFile state(stateDirectory + "/registry.json");
+        QVERIFY(state.open(QIODevice::WriteOnly));
+        const QJsonObject retired{{"id", "retired-addon"}, {"name", "Retired add-on"}, {"lifecycleDeclared", true}};
+        const QJsonObject registryState{
+            {"schema", 1}, {"seeded", QJsonArray{"retired-addon"}},
+            {"owners", QJsonObject{{"retired-addon", retired}}},
+            {"seedHashes", QJsonObject{{"retired-addon", QString(64, 'a')}}}};
+        QVERIFY(state.write(QJsonDocument(registryState).toJson()) > 0);
+        state.close();
+        package(root.filePath("installed/retired-addon/retired-addon.piext"), manifest("retired-addon"));
+        package(root.filePath("builtins/files.piext"), manifest("files"));
+
+        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), stateDirectory, false);
+        QVERIFY2(registry.error().isEmpty(), qPrintable(registry.error()));
+        QVERIFY(registry.isEnabled("files"));
+        QVERIFY(row(registry, "retired-addon").isEmpty());
+        for (const auto &owner : registry.lifecycleOwners())
+            QVERIFY(owner.toMap().value("id") != "retired-addon");
+        QVERIFY(QFileInfo::exists(root.filePath("installed/retired-addon/retired-addon.piext")));
     }
     void shippedPackagesAreCopiedOnceAndDiscoveryIsAutomatic() {
         QTemporaryDir root;
         package(root.filePath("builtins/files.piext"), manifest("files"));
-        package(root.filePath("builtins/git.piext"), manifest("git"));
-        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data"),
+        package(root.filePath("builtins/devices.piext"), manifest("devices"));
+        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data/.registry"),
                                false);
-        QVERIFY(QFileInfo::exists(root.filePath("installed/files.piext")));
-        QVERIFY(QFileInfo::exists(root.filePath("installed/git.piext")));
+        QVERIFY(QFileInfo::exists(root.filePath("installed/files/files.piext")));
+        QVERIFY(QFileInfo::exists(root.filePath("installed/devices/devices.piext")));
         QVERIFY(registry.isEnabled("files"));
-        QVERIFY(!registry.isEnabled("git"));
+        QVERIFY(!registry.isEnabled("devices"));
         package(root.filePath("installed/new.piext"), manifest());
         QTRY_VERIFY_WITH_TIMEOUT(!row(registry, "org.example.counter").isEmpty(), 3000);
         QVERIFY(!registry.isEnabled("org.example.counter"));
@@ -811,21 +893,21 @@ class AddonTests : public QObject {
         QSignalSpy changes(&registry, &AddonRegistry::changed);
         QTest::qWait(500);
         QCOMPARE(changes.size(), 0);
-        QVERIFY(QFile::remove(root.filePath("installed/new.piext")));
+        QVERIFY(QFile::remove(root.filePath("installed/org.example.counter/org.example.counter.piext")));
         QTRY_VERIFY_WITH_TIMEOUT(row(registry, "org.example.counter").value("restartRequired").toBool(),
                                  3000);
-        QVERIFY(QFile::remove(root.filePath("installed/files.piext")));
-        AddonRegistry restarted(root.filePath("builtins"), root.filePath("installed"), root.filePath("data"),
+        QVERIFY(QFile::remove(root.filePath("installed/files/files.piext")));
+        AddonRegistry restarted(root.filePath("builtins"), root.filePath("installed"), root.filePath("data/.registry"),
                                 false);
-        QVERIFY(!QFileInfo::exists(root.filePath("installed/files.piext")));
+        QVERIFY(!QFileInfo::exists(root.filePath("installed/files/files.piext")));
         QVERIFY(!restarted.isEnabled("files"));
         QVERIFY(!row(restarted, "files").value("error").toString().isEmpty());
     }
     void mountedPackageBytesSurviveInPlaceOverwriteAndDirectoryReplacement() {
         QTemporaryDir root;
-        const auto path = root.filePath("installed/input.piext");
+        const auto path = root.filePath("installed/org.example.counter/org.example.counter.piext");
         package(path, manifest(), "immutable original bytes");
-        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data"),
+        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data/.registry"),
                                false);
         const auto url = row(registry, "org.example.counter").value("page").toUrl();
         QVERIFY(registry.setEnabled("org.example.counter", true));
@@ -850,36 +932,36 @@ class AddonTests : public QObject {
         auto shipped = manifest("files");
         const auto source = root.filePath("builtins/files.piext");
         package(source, shipped, "first shipped code");
-        AddonRegistry first(root.filePath("builtins"), root.filePath("installed"), root.filePath("data"),
+        AddonRegistry first(root.filePath("builtins"), root.filePath("installed"), root.filePath("data/.registry"),
                             false);
         const auto oldPage = row(first, "files").value("page").toUrl();
         shipped["version"] = "1.1.0";
         package(source, shipped, "updated shipped code");
-        AddonRegistry updated(root.filePath("builtins"), root.filePath("installed"), root.filePath("data"),
+        AddonRegistry updated(root.filePath("builtins"), root.filePath("installed"), root.filePath("data/.registry"),
                               false);
         QCOMPARE(row(updated, "files").value("version").toString(), QString("1.1.0"));
         QFile original(':' + oldPage.path());
         QVERIFY(original.open(QIODevice::ReadOnly));
         QCOMPARE(original.readAll(), QByteArray("first shipped code"));
         package(source, shipped, "same-version rebuilt code");
-        AddonRegistry rebuilt(root.filePath("builtins"), root.filePath("installed"), root.filePath("data"),
+        AddonRegistry rebuilt(root.filePath("builtins"), root.filePath("installed"), root.filePath("data/.registry"),
                               false);
         QFile current(':' + row(rebuilt, "files").value("page").toUrl().path());
         QVERIFY(current.open(QIODevice::ReadOnly));
         QCOMPARE(current.readAll(), QByteArray("same-version rebuilt code"));
         auto customized = shipped;
         customized["version"] = "9.0.0";
-        package(root.filePath("installed/files.piext"), customized, "user customized code");
+        package(root.filePath("installed/files/files.piext"), customized, "user customized code");
         shipped["version"] = "1.2.0";
         package(source, shipped, "newer shipped code");
-        AddonRegistry custom(root.filePath("builtins"), root.filePath("installed"), root.filePath("data"),
+        AddonRegistry custom(root.filePath("builtins"), root.filePath("installed"), root.filePath("data/.registry"),
                              false);
         QCOMPARE(row(custom, "files").value("version").toString(), QString("9.0.0"));
         QVERIFY(custom.setEnabled("files", false));
         QVERIFY(custom.finalizeRemoval("files"));
-        AddonRegistry removed(root.filePath("builtins"), root.filePath("installed"), root.filePath("data"),
+        AddonRegistry removed(root.filePath("builtins"), root.filePath("installed"), root.filePath("data/.registry"),
                               false);
-        QVERIFY(!QFileInfo::exists(root.filePath("installed/files.piext")));
+        QVERIFY(!QFileInfo::exists(root.filePath("installed/files/files.piext")));
         QVERIFY(row(removed, "files").isEmpty());
     }
     void failedSeedUpgradeRestoresCodeAndCanRetry() {
@@ -887,9 +969,9 @@ class AddonTests : public QObject {
         auto data = manifest("files");
         const auto source = root.filePath("builtins/files.piext");
         package(source, data, "old code");
-        AddonRegistry first(root.filePath("builtins"), root.filePath("installed"), root.filePath("data"),
+        AddonRegistry first(root.filePath("builtins"), root.filePath("installed"), root.filePath("data/.registry"),
                             false);
-        QFile installed(root.filePath("installed/files.piext"));
+        QFile installed(root.filePath("installed/files/files.piext"));
         QVERIFY(installed.open(QIODevice::ReadOnly));
         const auto original = installed.readAll();
         installed.close();
@@ -900,7 +982,7 @@ class AddonTests : public QObject {
         QVERIFY(QFile::setPermissions(folder, QFile::ReadOwner | QFile::ExeOwner));
         const auto restore = qScopeGuard([&] { QFile::setPermissions(folder, permissions); });
         {
-            AddonRegistry failed(root.filePath("builtins"), root.filePath("installed"), root.filePath("data"),
+            AddonRegistry failed(root.filePath("builtins"), root.filePath("installed"), root.filePath("data/.registry"),
                                  false);
             QVERIFY(!failed.error().isEmpty());
         }
@@ -908,7 +990,7 @@ class AddonTests : public QObject {
         QVERIFY(installed.open(QIODevice::ReadOnly));
         QCOMPARE(installed.readAll(), original);
         installed.close();
-        AddonRegistry retry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data"),
+        AddonRegistry retry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data/.registry"),
                             false);
         QCOMPARE(row(retry, "files").value("version").toString(), QString("1.1.0"));
     }
@@ -917,7 +999,7 @@ class AddonTests : public QObject {
         auto data = manifest();
         data["lifecycle"] = "Lifecycle.qml";
         package(root.filePath("installed/input.piext"), data);
-        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data"),
+        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data/.registry"),
                                false);
         auto owner = registry.lifecycleOwners().first().toMap();
         QVERIFY(owner.value("lifecycleDeclared").toBool());
@@ -935,16 +1017,16 @@ class AddonTests : public QObject {
         QVERIFY(!registry.finalizeRemoval("org.example.counter", true,
                                           {{"personal", QStringList{"../outside"}}}));
         QVERIFY(!registry.finalizeRemoval("org.example.counter", true, {{"unknown", QStringList{"Notes"}}}));
-        QVERIFY(QFileInfo::exists(root.filePath("installed/input.piext")));
+        QVERIFY(QFileInfo::exists(root.filePath("installed/org.example.counter/org.example.counter.piext")));
         const QVariantMap paths{{"personal", QStringList{"Notes"}},
                                 {"downloads", QStringList{"models"}},
                                 {"addonData", QStringList{"addon-data/org.example.counter"}}};
         QVERIFY(registry.finalizeRemoval("org.example.counter", true, paths));
         QVERIFY(row(registry, "org.example.counter").isEmpty());
-        QVERIFY(!QFileInfo::exists(root.filePath("installed/input.piext")));
+        QVERIFY(!QFileInfo::exists(root.filePath("installed/org.example.counter/org.example.counter.piext")));
         QVERIFY(saved.open(QIODevice::ReadOnly));
         QCOMPARE(saved.readAll(), QByteArray("keep saved work"));
-        AddonRegistry next(root.filePath("builtins"), root.filePath("installed"), root.filePath("data"),
+        AddonRegistry next(root.filePath("builtins"), root.filePath("installed"), root.filePath("data/.registry"),
                            false);
         owner = next.lifecycleOwners().first().toMap();
         QVERIFY(owner.value("removed").toBool());
@@ -958,27 +1040,27 @@ class AddonTests : public QObject {
         auto data = manifest("files");
         data["lifecycle"] = "Lifecycle.qml";
         package(root.filePath("builtins/files.piext"), data);
-        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data"),
+        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data/.registry"),
                                false);
         QVERIFY(registry.setEnabled("files", false));
         const auto state = root.filePath("data/.registry");
         const auto permissions = QFileInfo(state).permissions();
         QVERIFY(QFile::setPermissions(state, QFile::ReadOwner | QFile::ExeOwner));
         QVERIFY(!registry.finalizeRemoval("files", true));
-        QVERIFY(QFileInfo::exists(root.filePath("installed/files.piext")));
+        QVERIFY(QFileInfo::exists(root.filePath("installed/files/files.piext")));
         QVERIFY(!registry.lifecycleOwners().first().toMap().value("removed").toBool());
         QVERIFY(QFile::setPermissions(state, permissions));
-        QVERIFY(QFile::remove(root.filePath("installed/files.piext")));
-        AddonRegistry missing(root.filePath("builtins"), root.filePath("installed"), root.filePath("data"),
+        QVERIFY(QFile::remove(root.filePath("installed/files/files.piext")));
+        AddonRegistry missing(root.filePath("builtins"), root.filePath("installed"), root.filePath("data/.registry"),
                               false);
         const auto owner = missing.lifecycleOwners().first().toMap();
         QVERIFY(owner.value("missing").toBool());
         QVERIFY(owner.value("lifecycleDeclared").toBool());
         QVERIFY(owner.value("lifecycle").toUrl().isEmpty());
         QVERIFY(!missing.finalizeRemoval("files"));
-        QVERIFY(!QFileInfo::exists(root.filePath("installed/files.piext")));
+        QVERIFY(!QFileInfo::exists(root.filePath("installed/files/files.piext")));
         QVERIFY(missing.finalizeRemoval("files", true));
-        AddonRegistry removed(root.filePath("builtins"), root.filePath("installed"), root.filePath("data"),
+        AddonRegistry removed(root.filePath("builtins"), root.filePath("installed"), root.filePath("data/.registry"),
                               false);
         QVERIFY(row(removed, "files").isEmpty());
     }
@@ -986,15 +1068,15 @@ class AddonTests : public QObject {
         QTemporaryDir root;
         auto data = manifest();
         data["lifecycle"] = "Lifecycle.qml";
-        const auto path = root.filePath("installed/input.piext");
+        const auto path = root.filePath("installed/org.example.counter/org.example.counter.piext");
         package(path, data);
-        AddonRegistry first(root.filePath("builtins"), root.filePath("installed"), root.filePath("data"),
+        AddonRegistry first(root.filePath("builtins"), root.filePath("installed"), root.filePath("data/.registry"),
                             false);
         QVERIFY(first.lifecycleOwners().first().toMap().value("lifecycleDeclared").toBool());
         data.remove("lifecycle");
         data["version"] = "2.0.0";
         package(path, data);
-        AddonRegistry next(root.filePath("builtins"), root.filePath("installed"), root.filePath("data"),
+        AddonRegistry next(root.filePath("builtins"), root.filePath("installed"), root.filePath("data/.registry"),
                            false);
         const auto owner = next.lifecycleOwners().first().toMap();
         QVERIFY(owner.value("lifecycleDeclared").toBool());
@@ -1012,7 +1094,7 @@ class AddonTests : public QObject {
         broken.write("not an RCC file");
         broken.close();
         QVERIFY(QFile::link(root.filePath("installed/good.piext"), root.filePath("installed/linked.piext")));
-        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data"),
+        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data/.registry"),
                                false);
         int duplicates = 0, errors = 0;
         for (const auto &entry : registry.addons()) {
@@ -1035,7 +1117,7 @@ class AddonTests : public QObject {
         package(root.filePath("builtins/files.piext"), manifest("files"));
         package(root.filePath("installed/counter.piext"), manifest());
         QSettings().setValue("addons/enabled/org.example.counter", true);
-        AddonRegistry recovery(root.filePath("builtins"), root.filePath("installed"), root.filePath("data"),
+        AddonRegistry recovery(root.filePath("builtins"), root.filePath("installed"), root.filePath("data/.registry"),
                                true);
         QVERIFY(recovery.recovery());
         QVERIFY(!recovery.isEnabled("files"));
@@ -1043,7 +1125,7 @@ class AddonTests : public QObject {
         QVERIFY(row(recovery, "org.example.counter").value("configuredEnabled").toBool());
         QVERIFY(recovery.setEnabled("org.example.counter", false));
         QVERIFY(!recovery.isEnabled("org.example.counter"));
-        AddonRegistry normal(root.filePath("builtins"), root.filePath("installed"), root.filePath("data"),
+        AddonRegistry normal(root.filePath("builtins"), root.filePath("installed"), root.filePath("data/.registry"),
                              false);
         QVERIFY(normal.isEnabled("files"));
         QVERIFY(!normal.isEnabled("org.example.counter"));
@@ -1051,7 +1133,7 @@ class AddonTests : public QObject {
     void refreshRejectsNewCollisionsWithoutInvalidatingTheRegisteredOwner() {
         QTemporaryDir root;
         package(root.filePath("installed/owner.piext"), manifest(), "owner content");
-        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data"),
+        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data/.registry"),
                                false);
         QVERIFY(registry.setEnabled("org.example.counter", true));
         const auto ownerUrl = row(registry, "org.example.counter").value("page").toUrl();
@@ -1076,7 +1158,7 @@ class AddonTests : public QObject {
         QVERIFY(registry.isEnabled("org.example.counter"));
         registry.refresh();
         QVERIFY(registry.isEnabled("org.example.counter"));
-        AddonRegistry firstScan(root.filePath("builtins"), root.filePath("installed"), root.filePath("data"),
+        AddonRegistry firstScan(root.filePath("builtins"), root.filePath("installed"), root.filePath("data/.registry"),
                                 false);
         QVERIFY(!firstScan.isEnabled("org.example.counter"));
         firstScan.refresh();
@@ -1088,7 +1170,7 @@ class AddonTests : public QObject {
     void failedChoiceWriteKeepsThePreviousEnabledState() {
         QTemporaryDir root;
         package(root.filePath("installed/counter.piext"), manifest());
-        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data"),
+        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data/.registry"),
                                false);
         QVERIFY(registry.setEnabled("org.example.counter", true));
         const auto folder = QFileInfo(QSettings().fileName()).absolutePath();
@@ -1103,7 +1185,7 @@ class AddonTests : public QObject {
         QTemporaryDir root;
         package(root.filePath("installed/one.piext"), manifest());
         package(root.filePath("installed/two.piext"), manifest("org.example.other"));
-        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data"),
+        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data/.registry"),
                                false);
         QVERIFY(registry.setSetting("org.example.counter", "value", 12));
         QVERIFY(registry.setSetting("org.example.other", "value", 34));
@@ -1131,7 +1213,7 @@ class AddonTests : public QObject {
     void settingsPreflightChecksPermissionsAndLinksWithoutChangingData() {
         QTemporaryDir root;
         package(root.filePath("installed/input.piext"), manifest());
-        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data"),
+        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data/.registry"),
                                false);
         const auto directory = registry.dataDirectory("org.example.counter");
         const auto path = directory + "/settings.ini";
@@ -1188,13 +1270,13 @@ class AddonTests : public QObject {
         QTemporaryDir root;
         const auto source = root.filePath("source.piext");
         package(source, manifest(), "first version");
-        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data"),
+        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data/.registry"),
                                false);
         QVERIFY(registry.install(QUrl::fromLocalFile(source)));
         QVERIFY(!registry.isEnabled("org.example.counter"));
         const auto first = row(registry, "org.example.counter");
         QVERIFY(first.value("error").toString().isEmpty());
-        const auto installed = root.filePath("installed/org.example.counter.piext");
+        const auto installed = root.filePath("installed/org.example.counter/org.example.counter.piext");
         QVERIFY(QFileInfo::exists(installed));
         QFile before(installed);
         QVERIFY(before.open(QIODevice::ReadOnly));
@@ -1218,7 +1300,7 @@ class AddonTests : public QObject {
         QFile oldResource(':' + first.value("page").toUrl().path());
         QVERIFY(oldResource.open(QIODevice::ReadOnly));
         QCOMPARE(oldResource.readAll(), QByteArray("first version"));
-        AddonRegistry restarted(root.filePath("builtins"), root.filePath("installed"), root.filePath("data"),
+        AddonRegistry restarted(root.filePath("builtins"), root.filePath("installed"), root.filePath("data/.registry"),
                                 false);
         QCOMPARE(row(restarted, "org.example.counter").value("version").toString(), QString("2.0.0"));
     }
@@ -1234,7 +1316,7 @@ class AddonTests : public QObject {
                                root.filePath("example.piext"), "--rcc", rcc});
         QVERIFY(compile.waitForFinished(10000));
         QVERIFY2(compile.exitCode() == 0, compile.readAllStandardError().constData());
-        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data"),
+        AddonRegistry registry(root.filePath("builtins"), root.filePath("installed"), root.filePath("data/.registry"),
                                false);
         QVERIFY(registry.install(QUrl::fromLocalFile(root.filePath("example.piext"))));
         QVERIFY(QDir().mkpath(root.filePath("unsafe")));

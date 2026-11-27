@@ -36,11 +36,6 @@ User instructions take precedence. Work only on the requested add-on.
 
 The current API is trusted, in-process QML/JavaScript, not a sandbox. Namespaced
 settings prevent accidental collisions; they do not restrict hostile code.
-The built-in Git add-on owns its manager/coordinator and optional Files/Calendar
-commands. Generic native workspace-owner registration is a safety protocol,
-not an optional integration choice. Do not bypass guards or run background Git
-over managed documents. See [INTEGRATIONS](INTEGRATIONS.md); a new native owner
-requires a reviewed application change and its domain recovery tests.
 
 Required dependencies and optional integrations are different manifest contracts.
 Do not add undeclared access to another runtime or invent a dependency resolver.

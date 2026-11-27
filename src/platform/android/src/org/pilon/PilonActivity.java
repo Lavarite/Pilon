@@ -155,6 +155,12 @@ public class PilonActivity extends QtActivity {
     }
 
     @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        PilonStorage.permissionResult(requestCode);
+    }
+
+    @Override
     public void onStart() {
         super.onStart();
         if (nativeReceiverReady) attachNativeObserver();

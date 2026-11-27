@@ -44,6 +44,18 @@ class PiconfBundleTests : public QObject {
         PiconfDocument moved;
         QVERIFY2(moved.load(to.path(), error), qPrintable(error));
         QCOMPARE(moved.values("addon-data/org.example.timer/config.piconf")["settings"].toMap()["tint"].toString(), "#339944");
+
+        QVERIFY2(moved.setValue(main, {"application", "keyboardShortcutHints"}, false, error), qPrintable(error));
+        const auto returning = QUrl::fromLocalFile(to.filePath("return.PICONFPACK"));
+        QVERIFY2(PiconfBundle::save(returning, moved, error), qPrintable(error));
+        PiconfDocument restored;
+        QVERIFY2(PiconfBundle::open(returning, restored, error), qPrintable(error));
+        QCOMPARE(restored.files(), moved.files());
+        QVERIFY2(PiconfTransaction::commit(from.path(), files, restored.files(), error), qPrintable(error));
+        QVERIFY2(restored.load(from.path(), error), qPrintable(error));
+        QCOMPARE(restored.values().value("application").toMap().value("keyboardShortcutHints"), QVariant(false));
+        QCOMPARE(restored.files().value("config/theme.piconf"), files.value("config/theme.piconf"));
+        QCOMPARE(contents(from.filePath(".pilon/settings.ini")), "private-marker-never-export");
     }
 
     void rejectInvalidBundleMembersWithoutTouchingWorkspace_data() {
@@ -72,9 +84,9 @@ class PiconfBundleTests : public QObject {
         put(root.filePath(main),"external edit");
         QVERIFY(!PiconfTransaction::commit(root.path(), original, changes, error));
         QCOMPARE(contents(root.filePath(main)),"external edit");
-        QVERIFY(!QFile::exists(root.filePath("addon-data/org.example.timer/config.piconf")));
-        QVERIFY(QDir().mkpath(root.filePath("addon-data")));
-        QVERIFY(QFile::link(outside.path(), root.filePath("addon-data/org.example.timer")));
+        QVERIFY(!QFile::exists(root.filePath("addons/org.example.timer/data/config.piconf")));
+        QVERIFY(QDir().mkpath(root.filePath("addons")));
+        QVERIFY(QFile::link(outside.path(), root.filePath("addons/org.example.timer")));
         original[main]="external edit";
         QVERIFY(!PiconfTransaction::commit(root.path(),original,changes,error));
         QVERIFY(!QFile::exists(outside.filePath("config.piconf")));
@@ -89,6 +101,9 @@ class PiconfBundleTests : public QObject {
         put(root.filePath(main), "hand-edited");
         QVERIFY(!PiconfBundle::save(QUrl::fromLocalFile(root.filePath(main)), doc, error));
         QCOMPARE(contents(root.filePath(main)), "hand-edited");
+        const auto extensionless = root.filePath("Settings");
+        QVERIFY(!PiconfBundle::save(QUrl::fromLocalFile(extensionless), doc, error));
+        QVERIFY(!QFile::exists(extensionless));
     }
 
     void interruptedUpdateRestoresPreviousGraphAndNativeSettings() {

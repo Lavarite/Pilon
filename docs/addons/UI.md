@@ -34,13 +34,13 @@ controls outside the viewport. Wrap long labels and error text; reflow actions
 into one column or use scrolling instead of truncating required controls.
 
 When retaining separate versions of native map/list data, snapshot the
-JSON-compatible value before caching it, as the Git comparison dialog does.
+JSON-compatible value before caching it.
 QML may retain a live wrapper around a native property; a shallow copy alone can
 make an older preview show newer data. Test the provider reusing its object.
 When multiple visible views share a manager's last-preview property, own each
 view's cached result and pending request. Accept only matching root/path/operation
 results; another view's read must not invalidate the cache or start a read loop.
-Invalidate on actual repository/file mutations and test two visible views.
+Invalidate on actual file mutations and test two visible views.
 
 The external page host already applies 16px margins. A page should fill its
 given area without another outer 16px inset. Use 8px gaps between controls and
@@ -74,8 +74,7 @@ Disabled add-ons have no settings sections. An enabled add-on's settings remain
 passive: do not start its runtime/page from a constructor. Retain drafts across
 section changes and include hidden loaded forms in preparation. Use the shared
 label/rule header for distinct tasks, without headings around a single control.
-Respect owner pauses and edit guards; recovery must stay reachable. Background
-entries follow [the quiescence acknowledgement contract](API.md#preparation-and-cleanup).
+Background entries follow [the quiescence acknowledgement contract](API.md#preparation-and-cleanup).
 Forms use `PilonScrollView`. Native lists and grids keep their own viewport and
 use `PilonScrollMotion { view: viewport }` for the same wheel, touch and edge
 behavior. A fresh press stops momentum and reaches the control on the same click
@@ -83,10 +82,9 @@ or tap. Scrollbars appear when content overflows.
 
 Keep everyday actions visible and put secondary actions in the existing menus
 or a focused task form. Icon-only actions need a tooltip and accessible name.
-Do not replace actionable status/errors with an unexplained icon. Git uses
-separate Name and Email inputs in a `Name <Email>` row; SSH keeps the editable
-username beside `@` and a read-only device/address. Reflow these complete groups
-at narrow widths rather than hiding required fields.
+Do not replace actionable status or errors with an unexplained icon. SSH keeps
+the editable username beside `@` and a read-only device address. Reflow the full
+group at narrow widths so every field stays available.
 
 Show an operation failure over its owning view. Bind `message` to the error, clear it on dismissal or a new attempt, and use `details` or a recovery action when needed. Opening or dismissing the popup must preserve focus, selection, scroll position and layout. Empty-state
 copy should identify the state only when needed, such as Checklist's No items.

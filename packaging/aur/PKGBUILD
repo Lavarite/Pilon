@@ -1,0 +1,78 @@
+# SPDX-License-Identifier: 0BSD
+# Maintainer: Pilon maintainers <https://github.com/Lavarite/Pilon/issues>
+pkgname=pilon-app
+pkgver=1.0.0
+pkgrel=1
+pkgdesc='Extensible workspace for Linux with Files, Notes, Calendar and SSH'
+arch=('x86_64')
+url='https://github.com/Lavarite/Pilon'
+license=('GPL-3.0-only' 'MIT' 'MPL-2.0')
+depends=('glibc' 'libgcc' 'libstdc++' 'icu' 'libssh2' 'qt6-base>=6.10'
+         'qt6-declarative>=6.10' 'qt6-multimedia>=6.10' 'qt6-svg' 'python'
+         'hicolor-icon-theme' 'shared-mime-info')
+makedepends=('cmake' 'ninja' 'pkgconf')
+optdepends=('qt6-wayland: native Wayland support'
+            'openssh: SSH sessions and SCP transfers'
+            'libsecret: save credentials in the system keyring'
+            'tailscale: connect to devices on a tailnet'
+            'xdg-utils: open local files in desktop applications'
+            'poppler: PDF previews'
+            'libreoffice-fresh: Office document previews'
+            'ffmpeg: media conversion and previews')
+# Qt's two-pass resource compiler needs the intermediate object data.
+options=('!lto')
+_source_sha256=95bb9c1c201687549a2e0ed1e2a8f509587192d0a11e2d1c1448bafa155e9e6f
+_vterm=libvterm-0.3.3
+_ical=libical-3.0.20
+source=("$url/releases/download/v$pkgver/pilon-$pkgver-source.tar.gz"
+        "https://www.leonerd.org.uk/code/libvterm/$_vterm.tar.gz"
+        "https://github.com/libical/libical/releases/download/v${_ical#libical-}/$_ical.tar.gz")
+sha256sums=("$_source_sha256"
+            '09156f43dd2128bd347cbeebe50d9a571d32c64e0cf18d211197946aff7226e0'
+            'e73de92f5a6ce84c1b00306446b290a2b08cdf0a80988eca0a2c9d5c3510b4c2')
+
+build() {
+    cmake -S "pilon-$pkgver-source/src" -B build -G Ninja \
+        -DCMAKE_BUILD_TYPE=None -DCMAKE_INSTALL_PREFIX=/usr/lib/pilon \
+        -DPILON_BUILD_TESTS=OFF -DPILON_DEV_DIR="$srcdir/build/dev" \
+        -DFETCHCONTENT_SOURCE_DIR_LIBVTERM="$srcdir/$_vterm" \
+        -DFETCHCONTENT_SOURCE_DIR_LIBICAL="$srcdir/$_ical"
+    cmake --build build
+}
+
+package() {
+    DESTDIR="$pkgdir" cmake --install build --component Pilon
+    test -x "$pkgdir/usr/lib/pilon/pilon"
+    install -d "$pkgdir/usr/bin"
+    ln -s ../lib/pilon/pilon "$pkgdir/usr/bin/pilon-app"
+
+    cd "pilon-$pkgver-source"
+    local share="$pkgdir/usr/share"
+    install -Dm644 src/platform/linux/desktop/pilon-mime.xml "$share/mime/packages/pilon.xml"
+    install -Dm644 src/assets/icons/pilon.svg "$share/icons/hicolor/scalable/apps/pilon.svg"
+    local icons="$share/icons/hicolor/scalable/mimetypes"
+    install -Dm644 addons/notes/assets/icons/application-x-pilon-note.svg "$icons/application-x-pilon-note.svg"
+    install -Dm644 addons/calendar/assets/icons/application-x-pilon-calendar.svg "$icons/application-x-pilon-calendar.svg"
+    install -Dm644 src/assets/icons/application-x-pilon-extension.svg "$icons/application-x-pilon-extension.svg"
+    install -Dm644 src/assets/icons/cog-6-tooth.svg "$icons/application-x-pilon-config.svg"
+
+    install -d "$share/applications"
+    cat > "$share/applications/pilon.desktop" <<'DESKTOP'
+[Desktop Entry]
+Type=Application
+Name=Pilon
+Exec=pilon-app %F
+Icon=pilon
+Terminal=false
+Categories=Office;
+StartupWMClass=pilon
+MimeType=application/x-pilon-note;application/x-pilon-calendar;application/x-pilon-extension;
+DESKTOP
+
+    local notices="$share/licenses/$pkgname"
+    install -Dm644 COPYING "$notices/COPYING"
+    install -Dm644 addons/ssh/assets/licenses/LIBVTERM_LICENSE.txt "$notices/libvterm.txt"
+    install -Dm644 addons/calendar/assets/licenses/LIBICAL_LICENSE.txt "$notices/libical.txt"
+    install -Dm644 "$srcdir/build/_deps/pilon_phosphor-src/LICENSE" "$notices/Phosphor.txt"
+    install -Dm644 src/assets/phosphor/FUSE_LICENSE.txt "$notices/Fuse.txt"
+}

@@ -9,24 +9,29 @@ import re
 import shlex
 import struct
 import subprocess
+import sys
 import time
 import uuid
 import wave
 
 ROOT = Path(__file__).resolve().parents[4]
+sys.path.insert(0, str(ROOT / "src/scripts"))
+from environment import development_root
+
+DEV = development_root()
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--adb", default=str(Path.home() / "Android/Sdk/platform-tools/adb"))
-    parser.add_argument("--runtime", type=Path, default=ROOT / "builds/android/runtime/arm64-v8a")
+    parser.add_argument("--runtime", type=Path, default=DEV / "builds/android/runtime/arm64-v8a")
     parser.add_argument("--model", type=Path, required=True)
     parser.add_argument("--sample", type=Path, required=True)
     args = parser.parse_args()
     adb = [args.adb, "-d"]
     run_id = uuid.uuid4().hex
     remote = "/data/local/tmp/pilon-media-probe-" + run_id
-    proof = ROOT / "build/android/media-runtime/proof" / run_id
+    proof = DEV / "dev-deps/android/media-runtime/proof" / run_id
     proof.mkdir(parents=True)
 
     def command(*values, timeout=60, check=True):

@@ -22,7 +22,9 @@ PilonScrollView {
     required property color warningColour
     property bool runtimeActive: true
     property real headerRightInset: 0
+    property var openHuggingFaceAccount: null
     readonly property var connections: assistant.connections || null
+    readonly property var codexRuntime: assistant.codexRuntime || null
     readonly property bool hasChatGptSession: !!connections && (connections.hasChatGptSession || connections.account.type === "chatgpt")
     readonly property var catalog: assistant.models
     readonly property var repository: catalog.repository
@@ -47,6 +49,18 @@ PilonScrollView {
         onDismissed: if (source) source.dismissError()
     }
     function alpha(colour, opacity) { return Qt.rgba(colour.r, colour.g, colour.b, opacity) }
+    function accountQuotaGroups(rows) {
+        const groups = new Map()
+        for (const row of rows) {
+            if (!groups.has(row.bucket))
+                groups.set(row.bucket, {id: row.bucket, rows: [], weekly: -1, fiveHour: -1})
+            const group = groups.get(row.bucket)
+            group.rows.push(row)
+            if (row.windowMinutes === 10080) group.weekly = row.remaining
+            if (row.windowMinutes === 300) group.fiveHour = row.remaining
+        }
+        return Array.from(groups.values())
+    }
 
     component Modalities: Flow {
         property var capabilities: ({})
@@ -233,23 +247,128 @@ PilonScrollView {
         Column {
             width: parent.width; spacing: 8; visible: settings.connections !== null
             PilonSectionHeader { objectName: "modelsAccountSection"; width: parent.width; text: qsTr("ChatGPT account") }
-            Label {
-                width: parent.width; wrapMode: Text.Wrap; color: settings.mutedTextColour
-                visible: settings.hasChatGptSession
-                text: settings.connections && settings.connections.account.type === "chatgpt"
-                    ? (settings.connections.account.email || qsTr("Signed in")) + ", " + (settings.connections.account.planType || "ChatGPT")
-                    : qsTr("Saved session")
-            }
-            Flow {
-                width: parent.width; spacing: 8
-                Action { objectName: "chatgptSignIn"; text: qsTr("Sign in with ChatGPT"); visible: !!settings.connections && !settings.hasChatGptSession; enabled: !settings.assistant.busy && !!settings.connections && !settings.connections.signingIn && !settings.connections.signingOut; onClicked: settings.connections.signIn() }
-                Action { objectName: "chatgptCancelSignIn"; text: qsTr("Cancel sign-in"); visible: !!settings.connections && settings.connections.signingIn; onClicked: settings.connections.cancelSignIn() }
-                Action { objectName: "chatgptSignOut"; text: qsTr("Sign out"); enabled: !settings.assistant.busy && !!settings.connections && !settings.connections.signingOut; visible: settings.hasChatGptSession; onClicked: settings.connections.signOut() }
-                Action {
-                    objectName: "chatgptRefreshUsage"
-                    text: settings.connections?.refreshingUsage ? qsTr("Refreshing usage…") : qsTr("Refresh account")
-                    enabled: !settings.assistant.busy && !settings.connections?.refreshingUsage
-                    visible: settings.hasChatGptSession; onClicked: settings.connections.refreshAccount()
+            GridLayout {
+                id: accountOverview
+                readonly property bool sideBySide: quotaSummary.visible && accountIdentity.visible
+                    && width >= accountDetails.naturalWidth + quotaSummary.naturalWidth + columnSpacing
+                width: parent.width
+                columns: sideBySide ? 2 : 1
+                columnSpacing: 16; rowSpacing: 8
+                Column {
+                    id: accountDetails
+                    readonly property real naturalWidth: Math.max(accountIdentity.visible ? accountIdentity.implicitWidth : 0,
+                        accountActions.children.filter(item => item.visible).reduce(
+                            (width, item, index) => width + item.implicitWidth + (index ? accountActions.spacing : 0), 0))
+                    Layout.minimumWidth: 0
+                    Layout.preferredWidth: naturalWidth
+                    Layout.fillWidth: !accountOverview.sideBySide
+                    Layout.alignment: Qt.AlignVCenter
+                    spacing: 8
+                    Label {
+                        id: accountIdentity
+                        objectName: "chatgptAccountIdentity"
+                        width: parent.width; wrapMode: Text.Wrap; color: settings.mutedTextColour
+                        visible: settings.hasChatGptSession
+                        text: settings.connections && settings.connections.account.type === "chatgpt"
+                            ? (settings.connections.account.email || qsTr("Signed in")) + ", " + (settings.connections.account.planType || "ChatGPT")
+                            : qsTr("Saved session")
+                    }
+                    Flow {
+                        id: accountActions
+                        width: parent.width; spacing: 8
+                        Action { objectName: "chatgptSignIn"; text: qsTr("Sign in with ChatGPT"); visible: !!settings.connections && !settings.hasChatGptSession; enabled: !settings.assistant.busy && !!settings.connections && !settings.connections.signingIn && !settings.connections.signingOut; onClicked: settings.connections.signIn() }
+                        Action { objectName: "chatgptCancelSignIn"; text: qsTr("Cancel sign-in"); visible: !!settings.connections && settings.connections.signingIn; onClicked: settings.connections.cancelSignIn() }
+                        Action { objectName: "chatgptSignOut"; text: qsTr("Sign out"); enabled: !settings.assistant.busy && !!settings.connections && !settings.connections.signingOut; visible: settings.hasChatGptSession; onClicked: settings.connections.signOut() }
+                        Action {
+                            objectName: "chatgptRefreshUsage"
+                            text: qsTr("Refresh account")
+                            enabled: !settings.assistant.busy && !settings.connections?.refreshingUsage
+                            visible: settings.hasChatGptSession; onClicked: settings.connections.refreshAccount()
+                            ProgressBar {
+                                objectName: "chatgptRefreshUsageIndicator"
+                                anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
+                                anchors.margins: 4
+                                height: 3
+                                visible: settings.connections?.refreshingUsage === true
+                                indeterminate: visible
+                                palette.highlight: settings.accentColour
+                                Accessible.name: qsTr("Refreshing account usage")
+                            }
+                        }
+                    }
+                }
+                Column {
+                    id: quotaSummary
+                    readonly property var groups: settings.accountQuotaGroups(settings.connections?.usage || [])
+                    readonly property real naturalWidth: children.reduce(
+                        (widest, item) => Math.max(widest, item.implicitWidth || 0), 0)
+                    visible: groups.length > 0
+                    Layout.fillWidth: true; Layout.minimumWidth: 0
+                    Layout.preferredWidth: naturalWidth
+                    Layout.alignment: Qt.AlignVCenter
+                    spacing: 8
+                    Repeater {
+                        model: quotaSummary.groups
+                        delegate: RowLayout {
+                            id: quotaGroup
+                            required property var modelData
+                            width: parent.width; spacing: 12
+                            Canvas {
+                                objectName: "accountUsageRings_" + quotaGroup.modelData.id
+                                Layout.preferredWidth: 52; Layout.preferredHeight: 52
+                                readonly property real weeklyRemaining: quotaGroup.modelData.weekly
+                                readonly property real fiveHourRemaining: quotaGroup.modelData.fiveHour
+                                readonly property color fillColour: settings.accentColour
+                                readonly property color trackColour: Qt.alpha(settings.textColour, .18)
+                                visible: weeklyRemaining >= 0 || fiveHourRemaining >= 0
+                                Accessible.ignored: true
+                                onWeeklyRemainingChanged: requestPaint()
+                                onFiveHourRemainingChanged: requestPaint()
+                                onFillColourChanged: requestPaint()
+                                onTrackColourChanged: requestPaint()
+                                onWidthChanged: requestPaint()
+                                onHeightChanged: requestPaint()
+                                onAvailableChanged: if (available) requestPaint()
+                                onPaint: {
+                                    const ctx = getContext("2d")
+                                    ctx.reset()
+                                    ctx.lineWidth = 4
+                                    ctx.lineCap = "round"
+                                    const radius = (Math.min(width, height) - ctx.lineWidth) / 2 - 1
+                                    function arc(r, fraction, colour) {
+                                        ctx.beginPath()
+                                        ctx.arc(width / 2, height / 2, r, -Math.PI / 2, (2 * fraction - .5) * Math.PI, false)
+                                        ctx.strokeStyle = colour
+                                        ctx.stroke()
+                                    }
+                                    function ring(r, remaining) {
+                                        if (remaining < 0 || r <= 0) return
+                                        arc(r, 1, trackColour)
+                                        if (remaining > 0) arc(r, remaining / 100, fillColour)
+                                    }
+                                    ring(radius, weeklyRemaining)
+                                    ring(radius - 8, fiveHourRemaining)
+                                }
+                            }
+                            Column {
+                                id: quotaFigures
+                                Layout.fillWidth: true; Layout.minimumWidth: 0
+                                Layout.preferredWidth: children.reduce((widest, item) => Math.max(widest, item.implicitWidth || 0), 0)
+                                spacing: 4
+                                Repeater {
+                                    model: quotaGroup.modelData.rows
+                                    delegate: Label {
+                                        required property var modelData
+                                        objectName: "accountUsageValue_" + modelData.windowMinutes
+                                        width: quotaFigures.width; wrapMode: Text.Wrap
+                                        textFormat: Text.PlainText
+                                        text: qsTr("%1: %2% remaining").arg(modelData.label).arg(Math.round(modelData.remaining))
+                                        color: settings.mutedTextColour
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
             Column {
@@ -269,15 +388,6 @@ PilonScrollView {
                     width: parent.width; spacing: 8
                     Action { objectName: "chatgptCopyCode"; text: qsTr("Copy code"); onClicked: { signInCode.selectAll(); signInCode.copy(); signInCode.deselect() } }
                     Action { objectName: "chatgptContinueSignIn"; text: qsTr("Continue in browser"); onClicked: settings.connections.continueSignIn() }
-                }
-            }
-            Repeater {
-                model: settings.connections ? (settings.connections.usage || []) : []
-                delegate: Column {
-                    required property var modelData
-                    width: parent.width; spacing: 6
-                    Label { width: parent.width; wrapMode: Text.Wrap; text: modelData.label + ": " + Math.round(modelData.remaining) + qsTr("% remaining"); color: settings.mutedTextColour }
-                    ProgressBar { objectName: "accountUsageBar"; width: parent.width; from: 0; to: 100; value: modelData.remaining; palette.highlight: settings.accentColour }
                 }
             }
             PilonSectionHeader { objectName: "modelsApiSection"; width: parent.width; text: qsTr("API servers") }
@@ -324,12 +434,12 @@ PilonScrollView {
             Action { objectName: "addApiServer"; text: qsTr("Add API server"); enabled: !settings.assistant.busy; onClicked: apiEditor.edit(null) }
         }
         PilonSectionHeader { objectName: "modelsLocalSection"; width: parent.width; text: qsTr("Local models") }
-        Flow {
+        GridLayout {
             id: cards
             width: parent.width
-            spacing: 10
-            readonly property int columns: Math.max(1, Math.floor((width + spacing) / 260))
-            readonly property real cardWidth: (width - (columns - 1) * spacing) / columns
+            columns: Math.max(1, Math.floor((width + columnSpacing) / 260))
+            columnSpacing: 12; rowSpacing: 12
+            uniformCellWidths: true
             Repeater {
                 model: settings.catalog.installed
                 delegate: Rectangle {
@@ -338,8 +448,10 @@ PilonScrollView {
                     required property int index
                     readonly property bool selected: settings.assistant.modelIndex === index
                     objectName: "installedModelCard_" + index
-                    width: cards.cardWidth
-                    height: Math.max(136, cardContents.height + 24)
+                    Layout.fillWidth: true; Layout.fillHeight: true
+                    Layout.minimumWidth: 0; Layout.preferredWidth: 248
+                    Layout.minimumHeight: implicitHeight
+                    implicitHeight: Math.max(160, cardContents.height + 24)
                     radius: 8; color: settings.secondaryColour
                     border.color: selected ? settings.accentColour : settings.alpha(settings.textColour, 0.2)
                     border.width: selected ? 2 : 1
@@ -460,10 +572,13 @@ PilonScrollView {
                 objectName: "addModelCard"
                 property bool editing: false
                 property bool editingRepository: false
-                width: cards.cardWidth
-                height: editing ? addContents.height + 24 : 136
-                radius: 8; color: settings.secondaryColour
+                Layout.fillWidth: true; Layout.fillHeight: true
+                Layout.minimumWidth: 0; Layout.preferredWidth: 248
+                Layout.minimumHeight: implicitHeight
+                implicitHeight: editing ? addContents.height + 24 : addButton.implicitHeight
+                radius: 8; color: editing ? settings.secondaryColour : "transparent"
                 border.color: settings.alpha(settings.textColour, 0.2)
+                border.width: editing ? 1 : 0
                 function reset() {
                     lookup.stop()
                     editing = false
@@ -472,16 +587,12 @@ PilonScrollView {
                     newName.text = ""
                     settings.catalog.inspect("")
                 }
-                PilonButton {
+                PilonAddTile {
                     id: addButton
                     objectName: "addModel"
                     anchors.fill: parent
                     visible: !addCard.editing
-                    icon.source: "icons/plus.svg"; icon.width: 28; icon.height: 28
-                    icon.color: settings.textColour
-                    background: Item {}
                     Accessible.name: qsTr("Add model")
-                    ToolTip.visible: hovered
                     ToolTip.text: qsTr("Add a model from Hugging Face")
                     onClicked: {
                         addCard.editing = true
@@ -584,6 +695,13 @@ PilonScrollView {
                     }
                     Label {
                         width: parent.width
+                        visible: variant.visible && settings.repository.gated === true
+                        text: qsTr("Accept the model’s terms on Hugging Face before downloading.")
+                        color: settings.textColour
+                        wrapMode: Text.Wrap
+                    }
+                    Label {
+                        width: parent.width
                         visible: text.length > 0
                         text: variant.count > 0 ? settings.warning : ""
                         color: settings.warningColour; wrapMode: Text.Wrap
@@ -605,6 +723,12 @@ PilonScrollView {
                                 : settings.catalog.download(variant.currentIndex, settings.liteRtVariant ? -1 : projector.currentIndex - 1, newName.text)
                         }
                         Action {
+                            objectName: "modelHuggingFaceAccount"
+                            visible: !!settings.openHuggingFaceAccount && !settings.catalog.downloading
+                            text: qsTr("Hugging Face account")
+                            onClicked: settings.openHuggingFaceAccount()
+                        }
+                        Action {
                             objectName: "cancelModelAddition"
                             visible: !settings.catalog.downloading
                             text: qsTr("Cancel")
@@ -622,22 +746,42 @@ PilonScrollView {
             }
         }
 
-        PilonSectionHeader { width: parent.width; visible: (settings.catalog.supportModels || []).length > 0; text: qsTr("Supporting models") }
-        Repeater {
-            model: settings.catalog.supportModels || []
-            delegate: PilonModelDownloadRow {
-                required property var modelData
-                width: settings.availableWidth
-                model: modelData
-                catalog: settings.catalog
-            }
-        }
         Column {
             width: parent.width; spacing: 8
             visible: settings.catalog.downloading && !addCard.editing
             ProgressBar { width: parent.width; value: settings.catalog.progress }
             Label { width: parent.width; text: settings.catalog.status; color: settings.mutedTextColour; wrapMode: Text.Wrap }
             Action { text: qsTr("Cancel download"); onClicked: settings.catalog.cancelDownload() }
+        }
+        Column {
+            width: parent.width; spacing: 8
+            visible: settings.codexRuntime?.supported === true
+            PilonSectionHeader { width: parent.width; text: qsTr("Codex") }
+            Flow {
+                width: parent.width; spacing: 8
+                Label {
+                    objectName: "codexInstalledVersion"
+                    visible: text.length > 0
+                    text: settings.codexRuntime?.installedVersion ?? ""
+                    topPadding: 8; bottomPadding: 8
+                    color: settings.mutedTextColour
+                }
+                Action {
+                    objectName: "checkCodexUpdate"
+                    text: qsTr("Check for updates")
+                    Accessible.name: qsTr("Check for Codex updates")
+                    enabled: settings.runtimeActive && !settings.codexRuntime?.checking
+                    onClicked: settings.assistant.checkForCodexUpdate()
+                }
+            }
+            Label {
+                objectName: "codexUpdateStatus"
+                width: parent.width
+                visible: text.length > 0
+                text: settings.codexRuntime?.updateStatus ?? ""
+                color: settings.mutedTextColour
+                wrapMode: Text.Wrap
+            }
         }
         PilonSectionHeader {
             objectName: "modelsStyleSection"
@@ -736,6 +880,6 @@ PilonScrollView {
                 newName.edit()
             }
         }
-        function onDownloadCompleted() { addCard.reset() }
+        function onModelDownloaded() { addCard.reset() }
     }
 }

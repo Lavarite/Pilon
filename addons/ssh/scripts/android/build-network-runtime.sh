@@ -5,14 +5,15 @@ pilon_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 if [[ "${PILON_ENV_LOADED:-0}" != 1 ]]; then
     exec python3 "$pilon_root/src/scripts/environment.py" bash "${BASH_SOURCE[0]}" "$@"
 fi
-pilon_work="$pilon_root/build/android/network-runtime"
-pilon_output="$pilon_root/builds/android/runtime/arm64-v8a"
-pilon_android_build="${PILON_ANDROID_BUILD_DIR:-$pilon_root/build/android/app}"
+pilon_dev="${PILON_DEV_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/pilon-dev}"
+pilon_work="$pilon_dev/dev-deps/android/network-runtime"
+pilon_output="$pilon_dev/builds/android/runtime/arm64-v8a"
+pilon_android_build="${PILON_ANDROID_BUILD_DIR:-$pilon_dev/builds/work/android/app}"
 pilon_ndk="${ANDROID_NDK_ROOT:-${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}/ndk/27.2.12479018}"
 pilon_toolchain="$pilon_ndk/toolchains/llvm/prebuilt/linux-x86_64/bin"
 pilon_ssl="$pilon_android_build/_deps/pilon_openssl-build"
 pilon_ssl_source="$pilon_android_build/_deps/pilon_openssl-src"
-pilon_licenses="$pilon_root/builds/android/licenses/ssh"
+pilon_licenses="$pilon_dev/builds/android/licenses/ssh"
 mkdir -p "$pilon_work/downloads" "$pilon_output" "$pilon_licenses"
 [[ -f "$pilon_ssl/libcrypto.a" ]] || { printf 'Build pilon_android_openssl before the SSH runtime.\n' >&2; exit 1; }
 
@@ -29,8 +30,8 @@ download() {
 archive_build() {
     [[ -d "$1" ]] || return 0
     local pilon_archive
-    mkdir -p "$pilon_root/build/archive/autoconf"
-    pilon_archive="$(mktemp -d "$pilon_root/build/archive/autoconf/$(basename "$1").XXXXXX")"
+    mkdir -p "$pilon_dev/builds/work/archive/autoconf"
+    pilon_archive="$(mktemp -d "$pilon_dev/builds/work/archive/autoconf/$(basename "$1").XXXXXX")"
     mv -- "$1" "$pilon_archive/build"
 }
 

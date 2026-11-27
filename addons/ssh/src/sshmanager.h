@@ -8,6 +8,7 @@
 #include <QtQml/qqmlregistration.h>
 
 class QSocketNotifier;
+template<typename T> class QFutureWatcher;
 
 class SshManager : public QObject
 {
@@ -61,6 +62,8 @@ public:
     Q_INVOKABLE void connectToHost(const QString &username, const QString &host);
     Q_INVOKABLE void connectToHostAt(const QString &username, const QString &host,
                                      const QString &directory);
+    Q_INVOKABLE void connectToDevice(const QString &username, const QString &address,
+                                     const QString &sshAlias, const QString &directory);
     Q_INVOKABLE void disconnectFromHost();
     Q_INVOKABLE void retryConnection();
     Q_INVOKABLE void dismissError();
@@ -86,11 +89,16 @@ signals:
     void taskFinished(int exitCode, const QString &output);
 
 private:
+    void startDeviceConnection(const QString &username, const QString &address,
+                               const QString &sshAlias, const QString &directory, bool retry);
     void startConnection(const QString &username, const QString &host,
                          const QString &directory, const QString &command = {},
                          const QString &localPath = {}, const QString &remotePath = {},
-                         bool upload = false, bool retry = false);
+                         bool upload = false, bool retry = false, const QString &sshAlias = {},
+                         bool useDeviceAlias = false);
     void readPseudoTerminal();
+    void flushTerminalInput();
+    void appendTaskOutput(const QByteArray &output);
     void closePseudoTerminal();
     void handleFinished(int exitCode, QProcess::ExitStatus exitStatus);
     void setRunning(bool running);
@@ -110,13 +118,15 @@ private:
     QString m_secretToolExecutable;
     QProcess m_process;
     QProcess m_secretLookupProcess;
+    QFutureWatcher<bool> *m_deviceHostLookup = nullptr;
     QSocketNotifier *m_notifier = nullptr;
+    QSocketNotifier *m_writeNotifier = nullptr;
     int m_masterFd = -1;
-    QByteArray m_rawOutput;
+    QByteArray m_pendingInput;
+    QByteArray m_transferOutput;
     QByteArray m_preAuthenticationOutput;
     bool m_running = false;
     bool m_authenticated = false;
-    QString m_sessionOutput;
     QString m_errorMessage;
     QString m_errorDetails;
     bool m_canRetry = false;
@@ -125,6 +135,7 @@ private:
     QString m_initialDirectory;
     QString m_currentUsername;
     QString m_currentHost;
+    QString m_currentDeviceAlias;
     QString m_passwordToSave;
     quint64 m_passwordSaveRevision = 0;
     PromptKind m_promptKind = NoPrompt;
@@ -138,5 +149,6 @@ private:
     bool m_disconnectRequested = false;
     bool m_taskMode = false;
     bool m_transferMode = false;
+    bool m_taskOutputTruncated = false;
     QByteArray m_taskOutput;
 };

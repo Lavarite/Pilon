@@ -5,6 +5,7 @@ import android.app.Instrumentation;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Intent;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Parcel;
 import java.io.File;
@@ -15,6 +16,11 @@ public final class ClipboardProbeInstrumentation extends Instrumentation {
     private Bundle arguments;
     private void require(boolean condition, String message) {
         if (!condition) throw new AssertionError(message);
+    }
+    @SuppressWarnings("deprecation")
+    private static ClipData readClip(Parcel parcel) {
+        ClassLoader loader = ClipData.class.getClassLoader();
+        return Build.VERSION.SDK_INT >= 33 ? parcel.readParcelable(loader, ClipData.class) : parcel.readParcelable(loader);
     }
     @Override public void onCreate(Bundle args) {
         super.onCreate(args); arguments = args; start();
@@ -66,7 +72,7 @@ public final class ClipboardProbeInstrumentation extends Instrumentation {
                 byte[] bytes = Files.readAllBytes(snapshot.toPath());
                 parcel.unmarshall(bytes, 0, bytes.length); parcel.setDataPosition(0);
                 require(parcel.readInt() == 0x50494c43, "Invalid owned snapshot marker");
-                ClipData original = parcel.readParcelable(ClipData.class.getClassLoader(), ClipData.class);
+                ClipData original = readClip(parcel);
                 if (original == null) clipboard.clearPrimaryClip();
                 else clipboard.setPrimaryClip(original);
                 require(snapshot.delete(), "Clipboard restored but private snapshot could not be removed");

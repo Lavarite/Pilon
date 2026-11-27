@@ -107,6 +107,12 @@ TestCase {
         const scroll = findChild(bar, "sidebarPreviewScroll")
         tryVerify(() => scroll.contentWidth > scroll.width)
         verify(waitForRendering(bar))
+        let activated = ""
+        bar.activated.connect(id => activated = id)
+        const tap = touchEvent(bar)
+        tap.press(0, bar, 22, 22).commit()
+        tap.release(0, bar, 22, 22).commit()
+        compare(activated, "page0", "A quick tap still activates the tab")
         const swipe = touchEvent(bar)
         swipe.press(0, bar, 145, 22).commit()
         swipe.move(0, bar, 100, 22).commit()
@@ -118,7 +124,7 @@ TestCase {
         scroll.cancelFlick(); scroll.contentX = 0
         const drag = touchEvent(bar)
         drag.press(0, bar, 22, 22).commit()
-        tryVerify(() => bar.dragging, Qt.styleHints.mousePressAndHoldInterval + 600)
+        tryVerify(() => bar.dragging, 400, "A short hold starts reordering")
         drag.move(0, bar, bar.width - 8, 22).commit()
         tryVerify(() => scroll.contentX > 50)
         tryVerify(() => bar.dragTargetIndex > 3)

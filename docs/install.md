@@ -1,64 +1,68 @@
-# Installation
+# Install Pilon
+
+Use [GitHub Releases](https://github.com/Lavarite/Pilon/releases) for platform
+downloads, checksums, and source bundles.
 
 ## Linux
 
-The x86_64 archive uses system Qt and shared libraries. Check the minimum
-versions in the release notes. On a current Arch Linux install, the base
-runtime packages are `qt6-base`, `qt6-declarative`, `qt6-multimedia`,
-`qt6-svg` and `libssh2`. Use `qt6-wayland` for a native Wayland session.
+Install `curl`, `python3`, and the runtime libraries listed in the release notes.
+For the Linux x86-64 release archive, run the terminal installer.
 
-The [installer command](../README.md#install) uses Python 3, checks the release
-archive's SHA-256, installs under `~/.local/opt/pilon` and adds Pilon to your
-application menu. It installs for the current user.
+```sh
+curl -fsSL https://pilon.vasylevskyi.net/download | sh
+```
 
-For a manual install, download the archive and matching `SHA256SUMS` from
-[GitHub Releases](https://github.com/Lavarite/Pilon/releases). In the download folder, run:
+The installer verifies the download, installs to `~/Pilon` and adds Pilon to
+your application menu. Set `PILON_INSTALL_ROOT` to choose another location.
+
+<details>
+<summary>Install a Linux archive manually</summary>
+
+Download the archive and matching `SHA256SUMS` from the same release. Run these
+commands from their download folder.
 
 ```sh
 sha256sum --check --ignore-missing pilon-*-linux-x86_64-SHA256SUMS &&
-tar -xzf pilon-*-linux-x86_64.tar.gz &&
-cd pilon-*-linux-x86_64 &&
-./builds/pilon
+tar -xzf pilon-*-linux-x86_64.tar.gz
 ```
 
-Keep the extracted folder together. To add Pilon to your application menu,
-place the folder where you want to keep it, then run
-`python3 src/scripts/install-desktop-entry.py` from inside it.
+Open `.bin/pilon` inside the extracted folder. To add a launcher there, run
+`python3 src/scripts/install-desktop-entry.py`.
 
-If your system libraries are older than the release requires, see
-[Build from source](CONTRIBUTING.md#build-from-source). Model weights and optional
-Python and Office runtimes are separate. See [optional runtimes](CONTRIBUTING.md#optional-runtimes)
-and **Settings → Models**.
+On Arch, the system libraries for the manual archive are `qt6-base`,
+`qt6-declarative`, `qt6-multimedia`, `qt6-svg` and `libssh2`.
+Install `qt6-wayland` for native Wayland.
+
+</details>
+
+If your system libraries are too old, [build from source](../CONTRIBUTING.md#build-from-source).
+See [optional runtimes](../CONTRIBUTING.md#optional-runtimes) for previews,
+handwriting and local models.
 
 ## Android
 
-The preview APK requires Android 9 or later on an ARM64 device. Download
-`pilon-*-android-arm64-v8a.apk` from [GitHub Releases](https://github.com/Lavarite/Pilon/releases)
-to the device and open it. If Android prompts, allow installation from the
-browser or file manager that opened the APK.
+On ARM64 devices running Android 9 or later, open the signed APK from the
+release assets when available. Use the same signing certificate to update an
+existing installation. See the [Android build guide](../src/scripts/android/README.md)
+to build an APK from source.
 
-To verify the APK on Linux before copying it to the device:
+To install a published APK from Termux, install `curl` and `python` with `pkg`
+and run the terminal installer. It verifies the APK before opening it.
 
-```sh
-sha256sum --check --ignore-missing pilon-*-android-arm64-v8a-SHA256SUMS
-```
-
-Updates require the same signing certificate. Back up your Pilon data before
-replacing a differently signed installation.
-
-Native ARM64 device validation is pending. On the x86_64 Android emulator,
-ARM translation crashes in ONNX Runtime during startup. Codex device-code
-sign-in currently fails during token polling.
-
-See the [Android build guide](../src/scripts/android/README.md) for building
-and signing an APK.
+Startup and Files were tested on an Android 15 emulator with ARM64 translation.
+Native ARM64 device testing is pending. Codex device-code sign-in currently fails
+during token polling.
 
 ## First run
 
-Choose a writable Pilon workspace for notes, calendar files and generated
-artifacts. Use Pilon's storage settings to move existing data. Account
-credentials use the platform credential store.
+Choose a writable workspace. Android starts with a private workspace.
+Use **Settings → Add-ons** to enable features or import a trusted `.piext`.
 
-Enable built-in features or import trusted `.piext` packages in
-**Settings → Add-ons**. See [add-on installation and recovery](addons/install.md)
-and [feature guides](index.md#add-ons).
+| Add-on | Workspace folder |
+| --- | --- |
+| Notes | `notes/` when Notes first saves data |
+| Calendar | `calendar/` when Calendar starts |
+| Assistant | `artifacts/` when Assistant saves its first artifact |
+
+Only enabled add-ons create their folders. Disabling an add-on keeps its existing
+folders and files. [Add-on setup](addons/install.md) · [Workspace settings](configuration.md)

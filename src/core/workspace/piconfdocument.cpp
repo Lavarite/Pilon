@@ -239,6 +239,7 @@ struct PiconfDocument::Data {
     QMap<QString, File> documents;
     QMap<QString, Scope> scopes;
     QMap<QString, QString> addonFiles;
+    QStringList missingConfigs;
     qsizetype totalBytes = 0;
     qsizetype expandedBytes = 0;
     using Reader = std::function<bool(const QString &, QByteArray &, QString &)>;
@@ -310,7 +311,7 @@ struct PiconfDocument::Data {
             scope.entries.insert({"include"}, *include);
         return true;
     }
-    bool build(const Reader &read, QString &error);
+    bool build(const Reader &read, QString &error, const QString &workspace = {});
     bool resolve(const QString &scopeId, QString &error);
 };
 
@@ -322,6 +323,14 @@ bool PiconfDocument::validPath(const QString &path) {
         !(parts.size() >= 3 && parts.first() == "addon-data"))
         return false;
     return std::all_of(parts.cbegin(), parts.cend(), portablePart);
+}
+
+QString PiconfDocument::storagePath(const QString &relative) {
+    // The portable configuration format keeps its original paths.
+    const auto parts = relative.split('/');
+    if (parts.size() >= 2 && parts.first() == "addon-data")
+        return "addons/" + parts[1] + "/data" + relative.mid(QStringView(u"addon-data/").size() + parts[1].size());
+    return relative;
 }
 
 bool PiconfDocument::Data::resolve(const QString &scopeId, QString &error) {
@@ -466,7 +475,7 @@ bool PiconfDocument::Data::resolve(const QString &scopeId, QString &error) {
     return true;
 }
 
-bool PiconfDocument::Data::build(const Reader &read, QString &error) {
+bool PiconfDocument::Data::build(const Reader &read, QString &error, const QString &workspace) {
     if (!collect(MainPath, scopes[MainPath], read, 0, error) || !resolve(MainPath, error))
         return false;
     const auto hostIt = scopes.constFind(MainPath);
@@ -501,6 +510,13 @@ bool PiconfDocument::Data::build(const Reader &read, QString &error) {
             error = where(entry.file, entry.line,
                           "Expected a configuration file in this add-on’s data directory.");
             return false;
+        }
+        if (!workspace.isEmpty()) {
+            const QFileInfo folder(workspace + "/addons/" + id);
+            if (!folder.exists() && !folder.isSymLink() && !QFileInfo(workspace + "/addons").isSymLink()) {
+                missingConfigs << id;
+                continue;
+            }
         }
         addonFiles.insert(id, target);
         if (!collect(target, scopes[target], read, 0, error) || !resolve(target, error)) {
@@ -552,7 +568,7 @@ bool PiconfDocument::load(const QString &workspace, QString &error) {
     if (!result->build(
             [&](const QString &path, QByteArray &bytes, QString &issue) {
                 QString physical = root;
-                for (const auto &part : path.split(u'/')) {
+                for (const auto &part : storagePath(path).split(u'/')) {
                     physical = QDir(physical).filePath(part);
                     if (QFileInfo(physical).isSymLink()) {
                         issue = where(path, 1, "Symbolic links cannot be included.");
@@ -571,10 +587,13 @@ bool PiconfDocument::load(const QString &workspace, QString &error) {
                 }
                 return true;
             },
-            error))
+            error, root))
         return false;
     m_data = std::move(result);
     return true;
+}
+QStringList PiconfDocument::missingAddonConfigs() const {
+    return m_data ? m_data->missingConfigs : QStringList{};
 }
 const PiconfDocument::Files &PiconfDocument::files() const {
     static const Files empty;
@@ -584,7 +603,9 @@ QString PiconfDocument::addonFile(const QString &id) const {
     return m_data ? m_data->addonFiles.value(id) : QString();
 }
 QVariantMap PiconfDocument::values(const QString &path) const {
-    return m_data ? m_data->scopes.value(path).tree : QVariantMap{};
+    if (!m_data) return {};
+    const auto scope = m_data->scopes.constFind(path);
+    return scope == m_data->scopes.cend() ? QVariantMap{} : scope->tree;
 }
 
 QByteArray PiconfDocument::encode(const QVariantMap &values) {
@@ -788,5 +809,17 @@ bool PiconfDocument::apply(const QList<Edit> &edits, const Files &newFiles, QStr
         return true;
     for (auto it = changes.begin(); it != changes.end(); ++it)
         updated[it.key()] = rewrite(m_data->documents.constFind(it.key()).value(), it.value());
-    return parse(updated, error);
+    PiconfDocument staged;
+    if (!staged.parse(updated, error)) return false;
+    for (const auto &edit : edits) {
+        QVariant resolved = staged.values(edit.path);
+        for (const auto &key : edit.keys) resolved = resolved.toMap().value(key);
+        if (resolved.isValid() != edit.value.isValid() ||
+            QJsonValue::fromVariant(resolved) != QJsonValue::fromVariant(edit.value)) {
+            error = where(edit.path, 1, "Conflicting changes for " + keyText(edit.keys) + '.');
+            return false;
+        }
+    }
+    m_data = std::move(staged.m_data);
+    return true;
 }

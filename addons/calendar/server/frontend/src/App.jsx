@@ -1,8 +1,7 @@
 import {useEffect, useLayoutEffect, useRef, useState} from 'react';
-import {iso, parseDate, dateAt, addDays, rangeStart, dayEvents, timelineEvents, timeLabel, colour, eventTime, eventAccessibleName, publicationStatus, shareToken} from './calendar.js';
+import {iso, parseDate, dateAt, addDays, rangeStart, dayEvents, timelineEvents, timeLabel, colour, eventClockTimes, eventTime, eventAccessibleName, publicationStatus, shareToken, eventKey, currentEvent, refreshCalendar} from './calendar.js';
 
 const format = (date, options) => date.toLocaleDateString('en-GB', options);
-const eventKey = e => `${e.id}/${e.occurrence}`;
 const initialData = () => ({events: [], fields: [], preferences: {firstDay: 1, timeZone: ''}, range: null});
 
 function DatePicker({selected, firstDay, range, choose, close}) {
@@ -42,7 +41,7 @@ function Month({start, selected, events, fields, range, open, chooseDay}) {
       return <div className={`month-day ${key === iso(new Date()) ? 'today' : ''} ${allowed ? '' : 'outside-range'}`} key={key}>
         <div className={`day-number ${key === iso(new Date()) ? 'today' : ''} ${day.getMonth() !== selected.getMonth() ? 'other-month' : ''}`}>{day.getDate()}</div>
         {entries.slice(0, capacity).map(e => <EventBox className="month-event" key={eventKey(e)} onClick={fields.length ? () => open(e) : undefined} style={{'--event-colour': colour(named ? e.colour : '')}} aria-label={eventAccessibleName(e, fields)} title={named ? `${e.title || ''}\n${eventTime(e)}` : undefined}>{named && <>{e.allDay ? '' : `${timeLabel(e.startMinute)} `}{e.title}</>}</EventBox>)}
-        {entries.length > capacity && <button className="more" onClick={() => chooseDay(day)}>+{entries.length - capacity} more</button>}
+        {entries.length > capacity && <button className="more" aria-label={`+${entries.length - capacity} more`} onClick={() => chooseDay(day)}>+{entries.length - capacity}<span className="more-label"> more</span></button>}
       </div>;
     })}</div>
   </div>;
@@ -70,6 +69,7 @@ function EventDetails({event, fields, close}) {
   const dialog = useRef(null);
   useEffect(() => {dialog.current.showModal();}, []);
   const start = event.start.slice(0, 10), end = event.allDay ? iso(addDays(parseDate(event.end.slice(0, 10)), -1)) : event.end.slice(0, 10);
+  const [startTime, endTime] = event.allDay ? [] : eventClockTimes(event);
   return <dialog ref={dialog} className="event-dialog" aria-labelledby={fields.includes('title') && event.title ? 'shared-event-title' : 'shared-event-heading'} onClose={close}>
     <button className="close" aria-label="Close" onClick={() => dialog.current.close()}>×</button>
     <div className="event-heading" id="shared-event-heading">Event</div>
@@ -77,8 +77,8 @@ function EventDetails({event, fields, close}) {
     <div className="event-details">
       {fields.includes('location') && <><span>Location</span><div>{event.location || ''}</div></>}
       <span>All day</span><div>{event.allDay ? 'Yes' : 'No'}</div>
-      <span>Starts</span><div>{start}{event.allDay ? '' : ` ${event.start.slice(11, 16)}`}</div>
-      <span>Ends</span><div>{end}{event.allDay ? '' : ` ${event.end.slice(11, 16)}`}</div>
+      <span>Starts</span><div>{start}{event.allDay ? '' : ` ${startTime}`}</div>
+      <span>Ends</span><div>{end}{event.allDay ? '' : ` ${endTime}`}</div>
       <span>Time zone</span><div>{event.timeZone}</div>
       {fields.includes('guests') && <><span>Guests</span><div>{(event.guests || []).map(g => <div key={g.email}>{g.name ? `${g.name} (${g.email})` : g.email}</div>)}</div></>}
       {fields.includes('url') && (event.urls?.length || event.url) && <><span>Link</span><div>{(event.urls || [event.url]).map(url => <div key={url}><a href={url} target="_blank" rel="noreferrer">{url}</a></div>)}</div></>}
@@ -94,7 +94,9 @@ export default function App() {
   const [data, setData] = useState(initialData);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(Boolean(token));
-  const [event, setEvent] = useState(null);
+  const [openEventKey, setOpenEventKey] = useState(null);
+  const event = currentEvent(data.events, openEventKey);
+  const openEvent = event => setOpenEventKey(eventKey(event));
   const [pickDate, setPickDate] = useState(false);
   const dateButton = useRef(null);
   const initialized = useRef(false);
@@ -104,7 +106,7 @@ export default function App() {
       const next = shareToken(location.pathname, location.hash);
       activeRequest.current?.abort();
       initialized.current = false;
-      setToken(next); setData(initialData()); setEvent(null); setPickDate(false);
+      setToken(next); setData(initialData()); setOpenEventKey(null); setPickDate(false);
       setSelected(new Date()); setMode(2); setError(''); setLoading(Boolean(next));
     };
     window.addEventListener('hashchange', changed);
@@ -117,23 +119,29 @@ export default function App() {
     if (!token) return;
     const controller = new AbortController();
     activeRequest.current = controller;
-    async function load() {
+    async function load(signal) {
       try {
-        const response = await fetch(`/api/calendars/${token}?start=${from}&end=${through}`, {signal: controller.signal, cache: 'no-store'});
+        const response = await fetch(`/api/calendars/${token}?start=${from}&end=${through}`, {signal, cache: 'no-store'});
         if (!response.ok) throw new Error(response.status === 404 ? 'This share link is unavailable.' : 'Unable to load the shared calendar.');
         const next = await response.json();
-        if (controller.signal.aborted) return;
+        if (signal.aborted) throw signal.reason;
         setData(next); setError('');
+        setOpenEventKey(key => currentEvent(next.events, key) ? key : null);
         if (!initialized.current) {
           initialized.current = true; setMode(next.preferences.view ?? 2);
           const today = iso(new Date()); setSelected(parseDate(today < next.range.from ? next.range.from : today > next.range.through ? next.range.through : today));
         }
-      } catch (e) {if (e.name !== 'AbortError' && !controller.signal.aborted) {setError(e.message); setData(previous => ({...previous, events:[]})); setEvent(null);}}
-      finally {if (!controller.signal.aborted) setLoading(false);}
+      } catch (e) {
+        if (!controller.signal.aborted) {
+          setError(signal.reason?.message || e.message);
+          setData(previous => ({...previous, events:[]}));
+          setOpenEventKey(null);
+        }
+      } finally {if (!controller.signal.aborted) setLoading(false);}
     }
-    setLoading(true); load();
-    const interval = setInterval(load, 60000);
-    return () => {controller.abort(); clearInterval(interval); if (activeRequest.current === controller) activeRequest.current = null;};
+    setLoading(true);
+    const stopRefresh = refreshCalendar(load, controller.signal);
+    return () => {controller.abort(); stopRefresh(); if (activeRequest.current === controller) activeRequest.current = null;};
   }, [token, from, through]);
   function period(direction) {return mode === 2 ? dateAt(selected.getFullYear(), selected.getMonth() + direction, 1) : addDays(selected, direction * (mode === 1 ? 7 : 1));}
   function allowedPeriod(date) {
@@ -159,13 +167,13 @@ export default function App() {
       <div className="date-picker-anchor"><button ref={dateButton} onClick={() => pickDate ? closeDatePicker() : setPickDate(true)}>{format(selected, mode === 0 ? {day: 'numeric', month: 'long', year: 'numeric'} : {month: 'long', year: 'numeric'})}</button>
         {pickDate && <DatePicker selected={selected} firstDay={data.preferences.firstDay} range={data.range} choose={choose} close={closeDatePicker} />}
       </div>
-      <select aria-label="Calendar view" value={mode} onChange={e => {setMode(Number(e.target.value)); setEvent(null);}}><option value="0">Day</option><option value="1">Week</option><option value="2">Month</option></select>
+      <select aria-label="Calendar view" value={mode} onChange={e => {setMode(Number(e.target.value)); setOpenEventKey(null);}}><option value="0">Day</option><option value="1">Week</option><option value="2">Month</option></select>
     </div>
     <div className="calendar-status" role="status" aria-live="polite" aria-atomic="true">{error || (loading ? 'Loading shared calendar…' : <>{data.preferences.timeZone}<br />{publicationStatus(data.publishedAt)}</>)}</div>
     <div className="calendar-scroll">
-    {mode === 2 ? <Month start={start} selected={selected} events={data.events} fields={data.fields} range={data.range} open={setEvent} chooseDay={day => {setSelected(day); setMode(0);}} />
-      : <Timeline start={start} count={count} events={data.events} fields={data.fields} overlap={data.fields.includes('title') && data.preferences.eventLayout === 'overlap'} open={setEvent} />}
+    {mode === 2 ? <Month start={start} selected={selected} events={data.events} fields={data.fields} range={data.range} open={openEvent} chooseDay={day => {setSelected(day); setMode(0);}} />
+      : <Timeline start={start} count={count} events={data.events} fields={data.fields} overlap={data.fields.includes('title') && data.preferences.eventLayout === 'overlap'} open={openEvent} />}
     </div>
-    {event && <EventDetails key={eventKey(event)} event={event} fields={data.fields} close={() => setEvent(null)} />}
+    {event && <EventDetails key={eventKey(event)} event={event} fields={data.fields} close={() => setOpenEventKey(null)} />}
   </main>;
 }

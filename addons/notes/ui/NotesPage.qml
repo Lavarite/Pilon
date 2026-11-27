@@ -538,6 +538,10 @@ Control {
                         ? page.notes.storageDirectory.replace(/\/+$/, "") + page.libraryPath : page.notes.storageDirectory
                     readOnly: true
                     selectByMouse: true
+                    elideWhenUnfocused: true
+                    summaryElideMode: Text.ElideMiddle
+                    ToolTip.visible: hovered && showingSummary
+                    ToolTip.text: libraryLocation.text
                     background: Rectangle {
                         radius: 7
                         color: libraryLocation.hovered || libraryLocation.activeFocus ? page.withOpacity(page.textColour, .08) : "transparent"

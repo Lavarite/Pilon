@@ -7,12 +7,13 @@
 #include "applicationreset.h"
 #include "keybindings.h"
 #include "tabletinputguard.h"
-#include "../../addons/git/src/gitcredentials.h"
 #include <QQmlApplicationEngine>
 #include <QQuickWindow>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #ifdef Q_OS_ANDROID
+#include <QPushButton>
 #include <QStandardPaths>
 #include <QJniObject>
 #include <QJsonDocument>
@@ -43,12 +44,25 @@ int main(int argc, char *argv[])
         return app.exec();
     }
 #endif
-    if (argc >= 2 && QByteArray(argv[1]) == "--git-credential") {
+#ifndef Q_OS_ANDROID
+    if (argc == 2 && QByteArray(argv[1]) == "--assistant-workspace") {
         QCoreApplication app(argc, argv);
-        QFile input, output, errors;
-        input.open(stdin, QIODevice::ReadOnly); output.open(stdout, QIODevice::WriteOnly); errors.open(stderr, QIODevice::WriteOnly);
-        return GitCredentials::runHelper(argc == 3 ? QString::fromLocal8Bit(argv[2]) : QString(), input, output, errors);
+        QCoreApplication::setOrganizationName(QStringLiteral("Pilon"));
+        QCoreApplication::setApplicationName(QStringLiteral("Pilon"));
+        const auto root = PilonWorkspace::configuredRoot();
+        const QFileInfo privateRoot(root + "/.pilon"), pointer(PilonWorkspace::bootstrapFile());
+        QString error;
+        if (pointer.isSymLink() || privateRoot.isSymLink() || (pointer.exists() && (!privateRoot.isDir() ||
+            PilonWorkspace::appDataDirectory() != privateRoot.filePath()))) {
+            qWarning().noquote() << "Restore the selected Pilon folder and workspace.ini before setting up Assistant.";
+            return 1;
+        }
+        if (!PilonWorkspace::validateRoot(root, &error)) { qWarning().noquote() << error; return 1; }
+        QFile output;
+        const auto bytes = QFile::encodeName(PilonWorkspace::assistantAgentDirectory()) + '\n';
+        return output.open(stdout, QIODevice::WriteOnly) && output.write(bytes) == bytes.size() ? 0 : 1;
     }
+#endif
     QCoreApplication::setAttribute(Qt::AA_CompressTabletEvents, false);
     QCoreApplication::setAttribute(Qt::AA_CompressHighFrequencyEvents, false);
     // Qt Quick also coalesces touch updates between frames; ink and lassos need every sample.
@@ -73,9 +87,9 @@ int main(int argc, char *argv[])
         && !ApplicationService::prepareBackgroundDisplay()) return 75;
     QApplication app(argc, argv);
 #ifdef Q_OS_ANDROID
-    // Android does not provide HOME; helpers need the app's private home directory.
+    // Android helpers and Qt temporary files need writable app-private directories.
     qputenv("HOME", QFile::encodeName(QDir(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)).canonicalPath()));
-    if (!AndroidStorage::ensureAccess()) return 1;
+    qputenv("TMPDIR", QFile::encodeName(QStandardPaths::writableLocation(QStandardPaths::TempLocation)));
 #endif
     TabletInputGuard tabletInputGuard;
     QGuiApplication::setDesktopFileName(QStringLiteral("pilon"));
@@ -83,7 +97,11 @@ int main(int argc, char *argv[])
     bool firstLaunch = true;
     int resumeSetupStep = -1;
     ApplicationService service(background);
-    if (!service.claimInstance()) return service.error().isEmpty() ? 0 : 1;
+    if (!service.claimInstance()) {
+        if (service.error().isEmpty()) return 0;
+        qWarning().noquote() << service.error();
+        return 1;
+    }
     auto &configuration = PiconfPreferences::instance();
     configuration.reportError = [&service](const QString &error) { service.reportError(error); };
     for (;;) {
@@ -91,14 +109,22 @@ int main(int argc, char *argv[])
         QVariantMap keep, ownedPaths;
         QString resetRoot, destination;
         QString storageError;
-        while (!PilonWorkspace::initializeStorage(&storageError)) {
+        while (!ApplicationReset::recover(ApplicationReset::locations(), &storageError) || !PilonWorkspace::initializeStorage(&storageError)) {
+#ifdef Q_OS_ANDROID
+            if (AndroidStorage::needsSharedAccess(PilonWorkspace::configuredRoot())) {
+                QMessageBox access(QMessageBox::Warning, QObject::tr("Pilon"),
+                    QObject::tr("Allow file access to open your saved Pilon folder."), QMessageBox::Close);
+                const auto grant = access.addButton(QObject::tr("Allow file access"), QMessageBox::AcceptRole);
+                access.exec();
+                if (access.clickedButton() != grant) return 1;
+                AndroidStorage::ensureAccess();
+                continue;
+            }
+#endif
             if (QMessageBox::critical(nullptr, QObject::tr("Pilon"), storageError,
                     QMessageBox::Retry | QMessageBox::Cancel, QMessageBox::Retry) != QMessageBox::Retry) return 1;
         }
-        const bool previousStartup = PilonSettings().value("app/backgroundEnabled",false).toBool();
-        bool configurationReady = configuration.start(PilonWorkspace::configuredRoot(), storageError);
-        if (configurationReady && previousStartup != PilonSettings().value("app/backgroundEnabled", false).toBool())
-            configurationReady = service.reconcileConfiguredStartup(previousStartup, storageError);
+        const bool configurationReady = service.startConfiguration(storageError);
         service.reloadPreferences(background);
         KeyBindings::instance()->reloadPreferences();
         if (!configurationReady) service.reportError(storageError);
@@ -142,8 +168,7 @@ int main(int argc, char *argv[])
         if (result != ApplicationService::ResetExitCode) return result;
         // Destroy QML Settings and feature managers before erasing data/preferences.
         resetError.clear();
-        if (ApplicationReset::removeSelected(keep, ownedPaths, {resetRoot}, &resetError)
-            && ApplicationReset::clearPreferences(&resetError)) {
+        if (ApplicationReset::reset(keep, ownedPaths, {resetRoot}, &resetError)) {
             KeyBindings::instance()->setRecording(false);
             KeyBindings::instance()->reset();
         }

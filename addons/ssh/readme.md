@@ -1,31 +1,17 @@
 # SSH
 
-Enable SSH in **Settings → Add-ons**, then open its sidebar page. Set the host,
-user and port before connecting. The page provides a remote terminal; connection
-defaults are configured in the add-on's settings.
+1. Enable SSH in **Settings → Add-ons**.
+2. Open **SSH → Connections** and add a host with its username. On Linux, an OpenSSH alias can retain its configured port and identity.
+3. Open the SSH page and connect. Verify an unfamiliar fingerprint with the server owner before accepting it.
 
-**SSH → Connections → Trusted X11 forwarding** enables OpenSSH `-Y` for new
-interactive terminals. A trusted remote application can read and control the
-local X11 display. The local session needs `DISPLAY` and, for cookie-based
-authentication, `xauth`. The remote SSH server must permit X11 forwarding.
-Android has no built-in X11 display. Pilon shows the setting as unavailable
-when the session supplies none. File transfers and background commands
-always disable X11 forwarding.
+Saved passwords use the platform credential store. Ctrl+C copies selected terminal text or interrupts the remote command when nothing is selected.
 
-Verify an unknown host fingerprint with the server owner before accepting it.
-A changed host key must be investigated rather than accepted automatically.
-Saved passwords use the platform credential store. Disconnection closes the
-session; disabling the add-on preserves its saved configuration and accounts.
+Use Files for SFTP. Use the SSH terminal for aliases that require a proxy or jump host. Selected [Tailscale peers](../devices/readme.md) can appear in both.
 
-Use **SSH → Connections → Add device** to save a host by IP address or DNS name.
-Saved hosts and enabled peers from the optional Tailscale integration appear in
-SSH and Files. Disabling SSH removes access to other devices while keeping
-local Files available.
+## X11 forwarding
 
-## Source layout
+Enable **Trusted X11 forwarding** in SSH connection settings for a new interactive terminal. It needs a working local X display and a server that permits forwarding. Trusted remote apps can read and control that display.
 
-`src/` and `package/` contain the native implementation and terminal/page
-entries. `platform/android/` owns SSH patches, `scripts/android/` builds network
-helpers, and `tests/` contains connection/input probes. Shared host packaging
-assembles the Android inputs. See [Contributing](../../docs/CONTRIBUTING.md)
-for checks and [API 1](../../docs/addons/API.md) for ownership and cleanup.
+## Disable SSH
+
+Disabling SSH closes access to remote devices and preserves saved connections. Local Files stays available.

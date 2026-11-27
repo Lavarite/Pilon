@@ -215,6 +215,21 @@ TestCase {
         compare(KeyBindings.stylusBindings.middle, "none")
         compare(KeyBindings.bindings.noteToolEraser.length, 0)
     }
+    function test_failed_stylus_save_keeps_the_keyboard_binding() {
+        compare(KeyBindings.setBinding("noteToolPointerHold", "Space; Stylus secondary button"), "")
+        const folder = tabletInput.settingsPath().replace(/\/[^/]+$/, "")
+        verify(tabletInput.setDirectoryWritable(folder, false))
+        try {
+            verify(KeyBindings.setStylusBinding("middle", "eraser").length > 0)
+            compare(KeyBindings.stylusBindings.middle, "pointer")
+            compare(KeyBindings.bindings.noteToolPointerHold.join("; "), "Space; Stylus secondary button")
+        } finally {
+            verify(tabletInput.setDirectoryWritable(folder, true))
+        }
+        compare(KeyBindings.setStylusBinding("middle", "eraser"), "")
+        compare(KeyBindings.stylusBindings.middle, "eraser")
+        compare(KeyBindings.bindings.noteToolPointerHold.join("; "), "Space")
+    }
     function test_stylus_settings_remain_inside_narrow_and_wide_settings() {
         findChild(settings, "searchKeybindings").text = "stylus"
         wait(30)

@@ -8,6 +8,7 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QSet>
+#include <QTemporaryDir>
 
 namespace {
 // The registry already diagnoses missing, incompatible and cyclic dependencies.
@@ -108,7 +109,8 @@ QVariantMap ApplicationService::configuredAddons() const
 {
     PiconfDocument document;
     QString error;
-    return document.load(workspaceRoot(), error) ? document.values().value("addons").toMap() : QVariantMap{};
+    return document.load(workspaceRoot(), error)
+        ? PiconfPreferences::supportedAddons(document.values().value("addons").toMap()) : QVariantMap{};
 }
 
 QVariant ApplicationService::prepareConfiguredAddon(const QString &id)
@@ -118,15 +120,51 @@ QVariant ApplicationService::prepareConfiguredAddon(const QString &id)
     return true;
 }
 
-bool ApplicationService::exportConfiguration(const QUrl &destination)
+bool ApplicationService::configurationExportTargetExists(const QUrl &destination) const
+{
+    if (!destination.isLocalFile()) return false;
+    const QFileInfo file(destination.toLocalFile());
+    return file.exists() || file.isSymbolicLink();
+}
+
+bool ApplicationService::exportConfiguration(const QUrl &destination, bool replaceExisting)
 {
     QString error;
     PiconfDocument document;
-    if (!PiconfPreferences::instance().flush(error) || !document.load(workspaceRoot(), error)
-        || !PiconfBundle::save(destination, document, error)) {
+    if (!PiconfPreferences::instance().flush(error) || !document.load(workspaceRoot(), error)) {
+        reportError(error); return false;
+    }
+    if (!replaceExisting && configurationExportTargetExists(destination)) {
+        reportError(tr("A file with this name already exists. Review it before replacing it."));
+        return false;
+    }
+    if (!PiconfBundle::save(destination, document, error)) {
         reportError(error); return false;
     }
     reportError({}); return true;
+}
+
+QUrl ApplicationService::prepareConfigurationExport(const QString &name)
+{
+    if (!name.endsWith(QLatin1String(".piconfpack"), Qt::CaseInsensitive)
+        || name.contains(u'/') || name.contains(u'\\') || name.contains(QChar::Null)) {
+        reportError(tr("Choose a valid configuration file name."));
+        return {};
+    }
+    auto directory = std::make_unique<QTemporaryDir>();
+    if (!directory->isValid()) {
+        reportError(tr("Unable to prepare the configuration for upload."));
+        return {};
+    }
+    const auto file = QUrl::fromLocalFile(directory->filePath(name));
+    if (!exportConfiguration(file)) return {};
+    m_configurationExport = std::move(directory);
+    return file;
+}
+
+void ApplicationService::discardConfigurationExport()
+{
+    m_configurationExport.reset();
 }
 
 QVariantMap ApplicationService::previewConfiguration(const QUrl &source, const QVariantList &installed)
@@ -141,10 +179,9 @@ QVariantMap ApplicationService::previewConfiguration(const QUrl &source, const Q
         || !preferences.validate(pending->incoming, error)) {
         reportError(error); return {};
     }
-    // A valid backup can replace a graph that failed to load at startup. Snapshot each
-    // destination so the same conflict checks protect a repair and a normal import.
+    // An unreadable graph may also have been edited after startup.
     PiconfDocument current;
-    pending->repairing = !preferences.active();
+    pending->repairing = !preferences.active() || !current.load(pending->root, error);
     if (pending->repairing) {
         if (!PiconfTransaction::snapshotEditable(pending->root, pending->incoming.files().keys(), pending->expected, error)) {
             reportError(error); return {};
@@ -195,6 +232,12 @@ QVariantMap ApplicationService::previewConfiguration(const QUrl &source, const Q
 }
 
 void ApplicationService::cancelConfigurationImport() { m_configuration.reset(); }
+
+bool ApplicationService::startConfiguration(QString &error)
+{
+    const bool previous = PilonSettings().value("app/backgroundEnabled", false).toBool();
+    return PiconfPreferences::instance().start(workspaceRoot(), error) && reconcileConfiguredStartup(previous, error);
+}
 
 bool ApplicationService::reconcileConfiguredStartup(bool previous, QString &error)
 {

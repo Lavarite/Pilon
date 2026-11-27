@@ -42,20 +42,6 @@
  	    slash ? "/" : "", path != NULL ? path : "")) <= 0) {
  		error_f("xasprintf failed");
  		goto out;
---- a/hostfile.c
-+++ b/hostfile.c
-@@ -729,7 +729,11 @@
- 			r = SSH_ERR_SYSTEM_ERROR;
- 			goto fail;
- 		}
-+#ifdef __ANDROID__
-+		if (rename(filename, back) == -1) {
-+#else
- 		if (link(filename, back) == -1) {
-+#endif
- 			oerrno = errno;
- 			error_f("link %.100s to %.100s: %s", filename,
- 			    back, strerror(errno));
 --- a/openbsd-compat/explicit_bzero.c
 +++ b/openbsd-compat/explicit_bzero.c
 @@ -36,10 +36,10 @@

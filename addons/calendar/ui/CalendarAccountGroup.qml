@@ -55,10 +55,28 @@ ColumnLayout {
                 }
             }
         }
-        Label {
-            visible: !group.calendars.length && !group.account.setupUrl && !group.syncing
-            Layout.fillWidth: true; Layout.minimumWidth: 0; wrapMode: Text.Wrap
-            text: qsTr("No calendars available for this account."); color: group.mutedTextColour
+        Item {
+            visible: !group.calendars.length && !group.account.setupUrl
+            Layout.fillWidth: true; Layout.minimumWidth: 0
+            implicitHeight: emptyCalendars.implicitHeight
+            Label {
+                id: emptyCalendars
+                width: parent.width
+                visible: !group.syncing
+                wrapMode: Text.Wrap
+                text: qsTr("No calendars available for this account.")
+                color: group.mutedTextColour
+            }
+            ProgressBar {
+                objectName: "calendarAccountRefresh-" + group.account.id
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
+                width: Math.min(160, parent.width)
+                height: 3
+                visible: group.syncing
+                indeterminate: visible
+                Accessible.name: qsTr("Syncing calendars")
+            }
         }
     }
 }

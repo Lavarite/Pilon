@@ -128,6 +128,8 @@ void TailscaleManager::markDiscoveryDevicesCached()
     for (auto &entry : m_discoveryDevices) {
         auto device = entry.toMap();
         device.insert("cached", true);
+        device.insert("online", false);
+        device.insert("onlineKnown", false);
         entry = device;
     }
 }
@@ -309,8 +311,9 @@ void TailscaleManager::requestDiscoveryDevices(const QByteArray &credential, boo
             }
             if (!valid || address.isEmpty()) { finishDiscovery(tr("Tailscale returned an unreadable device list.")); return; }
             ids.insert(id);
+            const auto connected = device.value("connectedToControl");
             devices.append(QVariantMap{{"id", "api:" + id}, {"name", name}, {"ip", address},
-                {"online", false}, {"onlineKnown", false}, {"self", self}, {"saved", false}});
+                {"online", connected.toBool()}, {"onlineKnown", connected.isBool()}, {"self", self}, {"saved", false}});
         }
         const auto accept = [this, devices] {
             m_discoveryDevices = devices; m_discoveryConnected = true;

@@ -1,6 +1,7 @@
 // Exercise the private traversal as well as its asynchronous UI lifecycle without
 // adding test-only search paths or authentication bypasses to the application.
 #include "../src/remotefilemanager.cpp"
+#include "../../../src/platform/android/androidstorage.h"
 #include <QPromise>
 #include <filesystem>
 #include <sys/inotify.h>
@@ -47,6 +48,39 @@ class RemoteFileTests : public QObject
     }
 
 private slots:
+#ifndef Q_OS_ANDROID
+    void localHomeBrowsesTheProvidedFallback()
+    {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        QVERIFY(touch(directory.filePath("local-file")));
+        RemoteFileManager manager;
+        QVERIFY(QMetaObject::invokeMethod(&manager, "browseLocalHome", directory.path(), true));
+        QTRY_COMPARE(manager.currentPath(), directory.path());
+        QCOMPARE(manager.currentDeviceId(), QString("local"));
+        QCOMPARE(manager.entries().size(), 1);
+    }
+#endif
+
+    void androidStorageScopeKeepsLocalPathsInsideTheirRoot()
+    {
+        QTemporaryDir directory;
+        const auto scope = directory.filePath("shared");
+        const auto outside = directory.filePath("shared-other");
+        QVERIFY(QDir().mkpath(scope + "/Documents"));
+        QVERIFY(QDir().mkpath(outside));
+        QVERIFY(QFile::link(outside, scope + "/escape"));
+        QVERIFY(QFile::link(scope + "/Documents", scope + "/inside"));
+        QVERIFY(QFile::link(scope + "/missing", scope + "/broken"));
+        QVERIFY(AndroidStorage::pathInRoot(scope, scope));
+        QVERIFY(AndroidStorage::pathInRoot(scope + "/inside/new.txt", scope));
+        QVERIFY(!AndroidStorage::pathInRoot(outside, scope));
+        QVERIFY(!AndroidStorage::pathInRoot(scope + "/../shared-other", scope));
+        QVERIFY(!AndroidStorage::pathInRoot(scope + "/escape", scope));
+        QVERIFY(!AndroidStorage::pathInRoot(scope + "/escape/new.txt", scope));
+        QVERIFY(!AndroidStorage::pathInRoot(scope + "/broken/new.txt", scope));
+    }
+
     void disablingSshStopsRemoteOperationsAndKeepsLocalFiles()
     {
         QTemporaryDir directory;
@@ -106,6 +140,30 @@ private slots:
         QVERIFY(!QFileInfo::exists(file));
         QTRY_VERIFY(!reopened.busy());
         QCOMPARE(reopened.currentDeviceId(), QString("local"));
+    }
+
+    void unavailableLocationPreservesItsRowsAndRejectsRemoteMutations()
+    {
+        RemoteFileManager manager;
+        manager.setAutomaticRefreshEnabled(false);
+        const auto peer = device("offline-listing");
+        const QVariantList rows{QVariantMap{{"name", "draft.txt"}, {"path", "/notes/draft.txt"}}};
+        manager.showListing(peer, "fixture", "/notes", rows);
+        const auto liveRemoteRows = manager.entries();
+        manager.setHasMoreEntries(true);
+        manager.markListingUnavailable();
+        QVERIFY(manager.cachedListing());
+        QVERIFY(!manager.hasMoreEntries());
+        QCOMPARE(manager.entries(), liveRemoteRows);
+        manager.createDirectory(peer, "fixture", "/notes", "new-folder");
+        QVERIFY(!manager.busy());
+        QVERIFY(manager.errorMessage().contains("Refresh"));
+
+        manager.showListing(manager.localDevice(), {}, "/notes", rows);
+        const auto liveLocalRows = manager.entries();
+        manager.markListingUnavailable();
+        QVERIFY(!manager.cachedListing());
+        QCOMPARE(manager.entries(), liveLocalRows);
     }
 
     void rejectedSftpAccessClearsLiveAndCachedListings_data()
@@ -311,6 +369,77 @@ private slots:
         QVERIFY(!manager.m_operationWatcher.isRunning());
         QCOMPARE(busy.count(), 0);
     }
+    void largeFolderReadsOnlyTheRequestedPages()
+    {
+        QTemporaryDir folder, other;
+        QVERIFY(folder.isValid() && other.isValid());
+        for (int i = 0; i < 520; ++i)
+            QVERIFY(touch(folder.filePath(QString::number(i))));
+        QVERIFY(touch(other.filePath("different")));
+        RemoteFileManager manager;
+        const auto local = manager.localDevice();
+        manager.browse(local, {}, folder.path());
+        QTRY_VERIFY(!manager.busy());
+        const auto firstPage = manager.entries();
+        QCOMPARE(firstPage.size(), 256);
+        QVERIFY(manager.property("hasMoreEntries").toBool());
+        QCOMPARE(manager.m_fileWatcher.files().size(), firstPage.size());
+        QSet<QString> loadedNames;
+        for (const auto &entry : firstPage) loadedNames.insert(entry.toMap().value("name").toString());
+        QString unloadedName;
+        for (int i = 0; i < 520 && unloadedName.isEmpty(); ++i) {
+            if (!loadedNames.contains(QString::number(i))) unloadedName = QString::number(i);
+        }
+        QVERIFY(manager.localEntryExists(unloadedName));
+        QVERIFY(!manager.localEntryExists("does-not-exist"));
+        QVERIFY(QMetaObject::invokeMethod(&manager, "loadMoreEntries"));
+        QTRY_VERIFY(!manager.busy());
+        const auto secondPage = manager.entries();
+        QCOMPARE(secondPage.size(), 512);
+        QCOMPARE(secondPage.first(firstPage.size()), firstPage);
+        QVERIFY(manager.property("hasMoreEntries").toBool());
+        manager.refresh();
+        QTRY_VERIFY(!manager.busy());
+        QCOMPARE(manager.entries(), secondPage);
+        QVERIFY(QMetaObject::invokeMethod(&manager, "loadMoreEntries"));
+        QTRY_VERIFY(!manager.busy());
+        QCOMPARE(manager.entries().size(), 520);
+        QSet<QString> paths;
+        for (const auto &entry : manager.entries()) paths.insert(entry.toMap().value("path").toString());
+        QCOMPARE(paths.size(), 520);
+        QVERIFY(!manager.property("hasMoreEntries").toBool());
+
+        manager.browse(local, {}, other.path());
+        QTRY_VERIFY(!manager.busy());
+        QVERIFY(QMetaObject::invokeMethod(&manager, "loadMoreEntries"));
+        QTRY_VERIFY(!manager.busy());
+        QCOMPARE(manager.entries().size(), 1);
+        QCOMPARE(manager.entries().first().toMap().value("name").toString(), QString("different"));
+    }
+
+    void revokedRemoteListingDiscardsAnAlreadyFetchedPage()
+    {
+        RemoteFileManager manager;
+        const auto peer = device("page-revocation");
+        const QString username = "fixture", path = "/folder";
+        manager.showListing(peer, username, path, {QVariantMap{{"name", "old"}, {"path", path + "/old"}}});
+        manager.m_listingCursor = std::make_shared<FileListingCursor>();
+        manager.setHasMoreEntries(true);
+        manager.m_pendingRequest = {{"kind", "browseMore"}, {"devices", QVariantList{peer}},
+            {"username", username}, {"path", path}};
+        manager.m_cancelRequested = std::make_shared<std::atomic_bool>(false);
+        manager.setBusy(true);
+        manager.setRefreshing(true);
+        QVariantMap response{{"status", "ok"}, {"entries", QVariantList{QVariantMap{{"name", "stale"}, {"path", path + "/stale"}}}},
+            {"device", peer}, {"username", username}, {"path", path}};
+        manager.m_operationWatcher.setFuture(QtFuture::makeReadyValueFuture(response));
+        emit sftpAccessChanges().accessRejected(peer.value("id").toString(), peer.value("ip").toString(), username, path);
+        QTRY_VERIFY(!manager.busy());
+        QVERIFY(manager.currentPath().isEmpty());
+        QVERIFY(manager.entries().isEmpty());
+        QVERIFY(!manager.hasMoreEntries());
+    }
+
     void automaticRefreshCanPauseWithoutDisablingExplicitBrowsing()
     {
         QTemporaryDir directory;
@@ -371,14 +500,15 @@ private slots:
                 auto *previous = std::exchange(transferProgress, progress.get());
                 auto reset = qScopeGuard([&] { transferProgress = previous; });
                 SftpConnection connection;
-                connection.socket.connectToHost(QHostAddress::LocalHost, port);
-                if (!connection.socket.waitForConnected(1000)) return failure("Fixture connection failed");
+                QTcpSocket socket;
+                socket.connectToHost(QHostAddress::LocalHost, port);
+                if (!socket.waitForConnected(1000) || !connection.adoptSocket(socket)) return failure("Fixture connection failed");
                 connection.registerSocket();
                 connection.session = libssh2_session_init();
                 libssh2_session_set_timeout(connection.session, connectionTimeoutMs);
                 libssh2_session_set_blocking(connection.session, blocking);
                 const auto handshake = [&] {
-                    return libssh2_session_handshake(connection.session, connection.socket.socketDescriptor());
+                    return libssh2_session_handshake(connection.session, connection.socket);
                 };
                 const int result = blocking ? handshake() : connection.call(handshake, cancel);
                 return QVariantMap{{"status", cancel->load() ? "cancelled" : "error"}, {"code", result}};
@@ -486,19 +616,87 @@ private slots:
         QVERIFY(manager.errorMessage().contains("unsafe")); QVERIFY(!QFileInfo::exists(directory.filePath("escape.txt")));
         QVERIFY(!QFileInfo::exists(unsafe + ".extracted"));
     }
+    void audioPreviewDecodesWaveformAndClearsIt_data() {
+        QTest::addColumn<QString>("extension");
+        QTest::addColumn<QString>("container");
+        QTest::newRow("MP3") << QString("mp3") << QString("mp3");
+        QTest::newRow("M4A") << QString("m4a") << QString("mp4");
+        QTest::newRow("MP4A") << QString("mp4a") << QString("mp4");
+        QTest::newRow("AAC") << QString("aac") << QString("adts");
+    }
+
     void audioPreviewDecodesWaveformAndClearsIt() {
+        QFETCH(QString, extension);
+        QFETCH(QString, container);
         QTemporaryDir directory;
-        const auto file = directory.filePath("tone.mp3");
+        const auto file = directory.filePath("tone." + extension);
         QProcess ffmpeg;
-        ffmpeg.start("ffmpeg", {"-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=2", file});
+        ffmpeg.start("ffmpeg", {"-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=2", "-f", container, file});
         QVERIFY(ffmpeg.waitForFinished(10000)); QCOMPARE(ffmpeg.exitCode(), 0);
         RemoteFileManager manager; manager.viewFile(localEndpoint(file), "");
         QTRY_VERIFY_WITH_TIMEOUT(!manager.busy(), 10000);
         QCOMPARE(manager.previewKind(), QString("audio"));
+        QCOMPARE(manager.previewUrl(), QUrl::fromLocalFile(file));
         const auto waveform = manager.property("previewWaveform").toList();
         QCOMPARE(waveform.size(), 48);
         for (const auto &value : waveform) QVERIFY(value.toDouble() > 0 && value.toDouble() <= 1);
         manager.clearPreview(); QVERIFY(manager.property("previewWaveform").toList().isEmpty());
+    }
+
+    void stillImagePreviewKeepsOriginalFile_data() {
+        QTest::addColumn<QString>("extension");
+        QTest::addColumn<QSize>("size");
+        QTest::newRow("HEIC") << QString("heic") << QSize(384, 512);
+        QTest::newRow("HEIF") << QString("heif") << QSize(384, 512);
+        QTest::newRow("QOI") << QString("qoi") << QSize(64, 48);
+        QTest::newRow("JPEG2000") << QString("jp2") << QSize(64, 48);
+        QTest::newRow("OpenEXR") << QString("exr") << QSize(64, 48);
+        QTest::newRow("DPX") << QString("dpx") << QSize(64, 48);
+    }
+
+    void stillImagePreviewKeepsOriginalFile() {
+        QFETCH(QString, extension);
+        QFETCH(QSize, size);
+        QTemporaryDir directory;
+        const auto path = directory.filePath("photo." + extension);
+        if (extension == "heic" || extension == "heif") {
+            const auto fixture = QFINDTESTDATA("../../../src/tests/fixtures/preview-grid.heic");
+            QVERIFY(!fixture.isEmpty());
+            QVERIFY(QFile::copy(fixture, path));
+        } else {
+            QProcess ffmpeg;
+            ffmpeg.start("ffmpeg", {"-v", "error", "-f", "lavfi", "-i", "color=red:s=64x48", "-frames:v", "1", "-update", "1", path});
+            QVERIFY(ffmpeg.waitForFinished(10000)); QCOMPARE(ffmpeg.exitCode(), 0);
+        }
+        const auto original = contents(path);
+        RemoteFileManager manager; manager.viewFile(localEndpoint(path), "");
+        manager.m_operationWatcher.waitForFinished();
+        QVERIFY(manager.transfer().isEmpty());
+        QTRY_VERIFY_WITH_TIMEOUT(!manager.busy(), 15000);
+        QCOMPARE(manager.previewKind(), QString("image"));
+        QCOMPARE(manager.previewUrl(), QUrl::fromLocalFile(path));
+        const auto preview = manager.property("previewImageUrl").toUrl();
+        QImageReader reader(preview.isEmpty() ? path : preview.toLocalFile());
+        reader.setAutoTransform(true);
+        QCOMPARE(reader.read().size(), size);
+        QCOMPARE(contents(path), original);
+        manager.clearPreview();
+        QVERIFY(manager.property("previewImageUrl").toUrl().isEmpty());
+        if (!preview.isEmpty()) QVERIFY(!QFileInfo::exists(preview.toLocalFile()));
+    }
+
+    void unsupportedImageLeavesTheOriginalAvailable() {
+        QTemporaryDir directory;
+        const auto path = directory.filePath("bad.heic");
+        const QByteArray original("invalid image contents");
+        QVERIFY(writeVersion(path, original, 10000));
+        RemoteFileManager manager; manager.viewFile(localEndpoint(path), "");
+        QTRY_VERIFY_WITH_TIMEOUT(!manager.busy(), 10000);
+        QCOMPARE(manager.previewKind(), QString("external"));
+        QCOMPARE(manager.previewUrl(), QUrl::fromLocalFile(path));
+        QVERIFY(manager.previewImageUrl().isEmpty());
+        QVERIFY(!manager.previewText().isEmpty());
+        QCOMPARE(contents(path), original);
     }
     void nativeFilesOpenDirectlyWithoutPreview() {
         QTemporaryDir directory;
@@ -594,7 +792,7 @@ private slots:
         bootstrap.setValue("workspace/version", 1);
         bootstrap.sync();
         const auto data = PilonWorkspace::addonDataDirectory("files");
-        QCOMPARE(data, workspace.filePath("addon-data/files"));
+        QCOMPARE(data, workspace.filePath("addons/files/data"));
         QVERIFY(QDir().mkpath(data));
 
         RemoteFileManager manager;
@@ -667,6 +865,25 @@ private slots:
         QTRY_VERIFY(manager.entries().first().toMap().value("size").isValid());
         const auto size = manager.entries().first().toMap().value("size").toLongLong();
         QVERIFY(size >= 7); QVERIFY(size < 500000);
+    }
+
+    void automaticFolderSizeDefersLargeChildUntilExplicitRefresh()
+    {
+        QTemporaryDir root;
+        QVERIFY(QDir().mkpath(root.filePath("large")));
+        for (int i = 0; i < 4097; ++i)
+            QVERIFY(touch(root.filePath("large/" + QString::number(i))));
+
+        RemoteFileManager manager;
+        manager.browse(manager.localDevice(), {}, root.path());
+        QTRY_VERIFY(!manager.busy());
+        QCOMPARE(manager.entries().size(), 1);
+        QTRY_VERIFY(manager.entries().first().toMap().value("sizeUnavailable").toBool());
+        QVERIFY(!manager.entries().first().toMap().value("size").isValid());
+
+        manager.refresh(true);
+        QTRY_VERIFY(manager.entries().first().toMap().value("size").isValid());
+        QVERIFY(!manager.entries().first().toMap().value("sizeUnavailable").toBool());
     }
 
     void watchedSizesSkipUnchangedSubtreesAndSeeInPlaceFileResizes()
@@ -846,12 +1063,14 @@ private slots:
         auto reset = qScopeGuard([] { transferProgress = nullptr; });
         const auto result = copyLocalFile(source, target, std::make_shared<std::atomic_bool>(false));
         QCOMPARE(result.value("status"), QString("ok"));
-        QCOMPARE(progress.sent, QFileInfo(source).size());
-        QCOMPARE(progress.total, progress.sent); QCOMPARE(progress.overall, progress.sent);
+        QCOMPARE(progress.overall, QFileInfo(source).size());
+        QCOMPARE(progress.total, progress.overall);
         QCOMPARE(contents(source), contents(target));
         RemoteFileManager manager;
         QSignalSpy ready(&manager, &RemoteFileManager::selectionReady);
         manager.prepareSelection({localEndpoint(source)}, {});
+        manager.m_operationWatcher.waitForFinished();
+        QVERIFY(manager.transfer().isEmpty());
         QTRY_COMPARE(ready.size(), 1);
         QCOMPARE(ready.first().first().toList().first().toUrl(), QUrl::fromLocalFile(source));
     }
@@ -885,14 +1104,27 @@ private slots:
         QVERIFY(QFile::exists(source));
     }
 
+    void ordinaryTransfersUseRealSftpInBothDirections_data()
+    {
+        QTest::addColumn<QString>("address");
+        QTest::addColumn<QString>("sshAlias");
+        QTest::newRow("saved-alias") << QString("pilon-sftp-alias") << QString{};
+        QTest::newRow("discovered-device") << QString("127.0.0.1") << QString("pilon-sftp-alias");
+    }
+
     void ordinaryTransfersUseRealSftpInBothDirections()
     {
+        QFETCH(QString, address);
+        QFETCH(QString, sshAlias);
         const QString sshd = QStandardPaths::findExecutable("sshd");
+        const QString ssh = QStandardPaths::findExecutable("ssh");
         const QString keygen = QStandardPaths::findExecutable("ssh-keygen");
-        if (sshd.isEmpty() || keygen.isEmpty()) QSKIP("OpenSSH tools are unavailable.");
+        if (sshd.isEmpty() || ssh.isEmpty() || keygen.isEmpty()) QSKIP("OpenSSH tools are unavailable.");
         QTemporaryDir fixture;
         const QString key = fixture.filePath("key");
+        const QString otherHostKey = fixture.filePath("other-host-key");
         QCOMPARE(QProcess::execute(keygen, {"-q", "-t", "ed25519", "-N", "", "-f", key}), 0);
+        QCOMPARE(QProcess::execute(keygen, {"-q", "-t", "ecdsa", "-N", "", "-f", otherHostKey}), 0);
         QTcpServer portReservation;
         QVERIFY(portReservation.listen(QHostAddress::LocalHost, 0));
         const auto port = portReservation.serverPort();
@@ -900,9 +1132,9 @@ private slots:
         const QString config = fixture.filePath("sshd_config");
         QFile configuration(config);
         QVERIFY(configuration.open(QIODevice::WriteOnly));
-        configuration.write((QString("ListenAddress 127.0.0.1\nPort %1\nHostKey %2\nAuthorizedKeysFile %2.pub\n"
-            "PidFile %3\nStrictModes no\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nUsePAM no\n"
-            "Subsystem sftp internal-sftp\n").arg(port).arg(key, fixture.filePath("pid"))).toUtf8());
+        configuration.write((QString("ListenAddress 127.0.0.1\nPort %1\nHostKey %2\nHostKey %3\nAuthorizedKeysFile %2.pub\n"
+            "PidFile %4\nStrictModes no\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nUsePAM no\n"
+            "Subsystem sftp internal-sftp\n").arg(port).arg(key, otherHostKey, fixture.filePath("pid"))).toUtf8());
         configuration.close();
         QProcess server;
         server.setProcessChannelMode(QProcess::MergedChannels);
@@ -916,19 +1148,140 @@ private slots:
         })(), 5000);
         QVERIFY2(server.state() != QProcess::NotRunning, serverLog.constData());
         libssh2_init(0);
-        SftpConnection local, remote;
+        SftpConnection local, probe, remote;
         local.local = true;
-        remote.socket.connectToHost(QHostAddress::LocalHost, port);
-        QVERIFY(remote.socket.waitForConnected(5000));
-        remote.session = libssh2_session_init();
-        QVERIFY(remote.session);
-        libssh2_session_set_timeout(remote.session, 5000);
-        QCOMPARE(libssh2_session_handshake(remote.session, remote.socket.socketDescriptor()), 0);
-        const auto account = pilonLocalDevice().value("username").toString().toUtf8();
-        const auto privateKey = QFile::encodeName(key);
-        QCOMPARE(libssh2_userauth_publickey_fromfile(remote.session, account.constData(), nullptr, privateKey.constData(), ""), 0);
-        remote.sftp = libssh2_sftp_init(remote.session);
-        QVERIFY(remote.sftp);
+        QTcpSocket probeSocket;
+        probeSocket.connectToHost(QHostAddress::LocalHost, port);
+        QVERIFY(probeSocket.waitForConnected(5000));
+        QVERIFY(probe.adoptSocket(probeSocket));
+        probe.session = libssh2_session_init();
+        QVERIFY(probe.session);
+        QCOMPARE(libssh2_session_method_pref(probe.session, LIBSSH2_METHOD_HOSTKEY, "ssh-ed25519"), 0);
+        libssh2_session_set_timeout(probe.session, 5000);
+        QCOMPARE(libssh2_session_handshake(probe.session, probe.socket), 0);
+        size_t hostKeySize = 0;
+        const auto *hostKey = libssh2_session_hostkey(probe.session, &hostKeySize, nullptr);
+        QVERIFY(hostKey && hostKeySize);
+        QFile clientConfig(fixture.filePath("client_config"));
+        QVERIFY(clientConfig.open(QIODevice::WriteOnly));
+        clientConfig.write(QString("Host pilon-sftp-alias\n HostName localhost\n Port %1\n"
+                                   " User unused-fixture-user\n IdentitiesOnly yes\n IdentityAgent none\n IdentityFile %2\n"
+                                   "Host other-peer\n HostName 127.0.0.2\n Port 1\n IdentityFile %2\n"
+                                   "Host 127.0.0.1\n Port %1\n IdentitiesOnly yes\n IdentityAgent none\n IdentityFile none\n")
+                               .arg(port).arg(key).toUtf8());
+        clientConfig.close();
+        const auto path = qgetenv("PATH");
+        const auto restorePath = qScopeGuard([&] { qputenv("PATH", path); });
+        QFile client(fixture.filePath("ssh"));
+        QVERIFY(client.open(QIODevice::WriteOnly));
+        client.write(QString("#!/bin/sh\nexec \"%1\" -F \"%2\" \"$@\"\n")
+                         .arg(ssh, clientConfig.fileName()).toUtf8());
+        client.close();
+        QVERIFY(client.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+        qputenv("PATH", QFile::encodeName(fixture.path()) + ':' + path);
+        const QString account = pilonLocalDevice().value("username").toString();
+        const QVariantMap endpoint{{"id", "sftp-alias-fixture"}, {"name", "SFTP alias fixture"},
+                                   {"ip", address}, {"sshAlias", sshAlias}, {"online", true}};
+        const QByteArray trustedKey(hostKey, hostKeySize);
+        const auto authenticated = authenticate(remote, endpoint, account, {}, false,
+            trustedKey, {});
+        QVERIFY2(authenticated.isEmpty(), qPrintable(authenticated.value("error",
+            authenticated.value("status")).toString()));
+        if (!sshAlias.isEmpty()) {
+            const auto differentPeer = deviceSftpEndpoint(address, "other-peer", account, {});
+            QCOMPARE(differentPeer.host, address);
+            QCOMPARE(differentPeer.port, port);
+            QVERIFY(differentPeer.error.isEmpty());
+            QVERIFY(differentPeer.identityFiles.isEmpty());
+
+            const QString trustSetting = trustedHostKeySetting(endpoint.value("id").toString());
+            PilonSettings settings;
+            settings.setValue(trustSetting, trustedKey.toBase64());
+            settings.sync();
+            auto clearTrust = qScopeGuard([&] { settings.remove(trustSetting); });
+            RemoteFileManager manager;
+            manager.setAutomaticRefreshEnabled(false);
+            manager.browse(endpoint, account, fixture.path());
+            QTRY_VERIFY(!manager.busy());
+            QVERIFY2(manager.promptKind().isEmpty(), qPrintable(manager.promptText()));
+            QVERIFY2(manager.errorMessage().isEmpty(), qPrintable(manager.errorMessage()));
+            QCOMPARE(manager.currentPath(), fixture.path());
+            QVERIFY(!manager.entries().isEmpty());
+            const auto fromListing = deviceFromEntry(manager.entries().first().toMap());
+            QCOMPARE(fromListing.value("sshAlias").toString(), sshAlias);
+            QCOMPARE(fromListing.value("ip").toString(), address);
+
+            QTemporaryDir staging;
+            QVERIFY(staging.isValid());
+            const QString bundleName = "settings backup.piconfpack";
+            const QString sourceBundle = staging.filePath(bundleName);
+            const auto bundleBytes = QByteArray("configuration bundle transfer fixture");
+            QVERIFY(writeVersion(sourceBundle, bundleBytes, 0));
+            QSignalSpy uploadFinished(&manager, &RemoteFileManager::uploadFinished);
+            manager.uploadFile(endpoint, account, fixture.path(), QUrl::fromLocalFile(sourceBundle));
+            QTRY_COMPARE(uploadFinished.size(), 1);
+            QVERIFY(uploadFinished.takeFirst().at(0).toBool());
+            QTRY_VERIFY(!manager.busy());
+            QCOMPARE(contents(fixture.filePath(bundleName)), bundleBytes);
+
+            const auto entries = manager.entries();
+            const auto bundle = std::find_if(entries.cbegin(), entries.cend(), [&](const QVariant &entry) {
+                return entry.toMap().value("name").toString() == bundleName;
+            });
+            QVERIFY(bundle != entries.cend());
+            QSignalSpy selectionReady(&manager, &RemoteFileManager::selectionReady);
+            manager.prepareSelection({localEndpoint(sourceBundle), *bundle}, account);
+            manager.m_operationWatcher.waitForFinished();
+            QCOMPARE(manager.transfer().value("file").toString(), bundleName);
+            QCOMPARE(manager.transfer().value("total").toLongLong(), bundleBytes.size());
+            QTRY_COMPARE(selectionReady.size(), 1);
+            QTRY_VERIFY(!manager.busy());
+            const auto files = selectionReady.takeFirst().at(0).toList();
+            QCOMPARE(files.size(), 2);
+            QCOMPARE(files.first().toUrl(), QUrl::fromLocalFile(sourceBundle));
+            const auto downloadedBundle = files.last().toUrl();
+            QCOMPARE(contents(downloadedBundle.toLocalFile()), bundleBytes);
+            manager.discardPreparedSelection(downloadedBundle);
+            QVERIFY(!QFileInfo::exists(downloadedBundle.toLocalFile()));
+
+            QVERIFY(writeVersion(sourceBundle, "replacement", 0));
+            manager.uploadFile(endpoint, account, fixture.path(), QUrl::fromLocalFile(sourceBundle));
+            QTRY_COMPARE(uploadFinished.size(), 1);
+            QVERIFY(!uploadFinished.takeFirst().at(0).toBool());
+            QTRY_VERIFY(!manager.busy());
+            QCOMPARE(contents(fixture.filePath(bundleName)), bundleBytes);
+
+            const auto paged = fixture.filePath("paged");
+            QVERIFY(QDir().mkdir(paged));
+            for (int i = 0; i < 257; ++i)
+                QVERIFY(touch(QDir(paged).filePath(QString::number(i))));
+            manager.browse(endpoint, account, paged);
+            QTRY_VERIFY(!manager.busy());
+            const auto firstPage = manager.entries();
+            QCOMPARE(firstPage.size(), 256);
+            QVERIFY(manager.hasMoreEntries());
+            manager.loadMoreEntries();
+            QTRY_VERIFY(!manager.busy());
+            QCOMPARE(manager.entries().size(), 257);
+            QCOMPARE(manager.entries().first(256), firstPage);
+            QVERIFY(!manager.hasMoreEntries());
+            QVERIFY2(manager.errorMessage().isEmpty(), qPrintable(manager.errorMessage()));
+
+            const auto cached = fixture.filePath("cached");
+            QVERIFY(QDir().mkdir(cached));
+            QVERIFY(touch(QDir(cached).filePath("old")));
+            QVERIFY(touch(QDir(cached).filePath(".hidden")));
+            manager.browse(endpoint, account, cached);
+            QTRY_VERIFY(!manager.busy());
+            const auto snapshot = listingSnapshot(endpoint, account, cached, trustedKey);
+            QCOMPARE(NetworkSnapshot::read(snapshot).value("entries").toArray().size(), 2);
+            QVERIFY(QFile::rename(QDir(cached).filePath("old"), QDir(cached).filePath("new")));
+            manager.setShowHidden(false);
+            QTRY_VERIFY(!manager.busy());
+            const auto savedRows = NetworkSnapshot::read(snapshot).value("entries").toArray();
+            QCOMPARE(savedRows.size(), 1);
+            QCOMPARE(savedRows.first().toObject().value("name").toString(), QString("new"));
+        }
         QCOMPARE(remoteCommand(remote, "printf pilon-command"), QByteArray("pilon-command"));
         const QString source = fixture.filePath("source"), uploaded = fixture.filePath("uploaded"), downloaded = fixture.filePath("downloaded");
         QVERIFY(QDir().mkpath(source + "/nested"));
@@ -1107,6 +1460,60 @@ private slots:
         QGuiApplication::clipboard()->clear();
     }
 
+    void failedBookmarkSavesKeepThePersistedList()
+    {
+        QTemporaryDir workspace;
+        QVERIFY(workspace.isValid());
+        QSettings pointer(PilonWorkspace::bootstrapFile(), QSettings::IniFormat);
+        const auto originalVersion = pointer.value("workspace/version");
+        const auto originalRoot = pointer.value("workspace/root");
+        const auto restorePointer = qScopeGuard([&] {
+            if (originalVersion.isValid()) pointer.setValue("workspace/version", originalVersion);
+            else pointer.remove("workspace/version");
+            if (originalRoot.isValid()) pointer.setValue("workspace/root", originalRoot);
+            else pointer.remove("workspace/root");
+            pointer.sync();
+        });
+        pointer.setValue("workspace/version", 1);
+        pointer.setValue("workspace/root", workspace.path());
+        pointer.sync();
+        const auto directory = workspace.filePath(".pilon"), saved = workspace.filePath("saved-settings");
+        RemoteFileManager manager;
+        const auto first = localEndpoint(workspace.filePath("first"));
+        const auto second = localEndpoint(workspace.filePath("second"));
+        const auto third = localEndpoint(workspace.filePath("third"));
+        QVERIFY(manager.addBookmarks({first, second}, {}));
+        const auto original = manager.bookmarks();
+        QVERIFY(QDir().rename(directory, saved));
+        const auto restoreSettings = qScopeGuard([&] {
+            QFile::remove(directory);
+            QDir().rename(saved, directory);
+        });
+        QVERIFY(touch(directory));
+        QSignalSpy changed(&manager, &RemoteFileManager::bookmarksChanged);
+
+        QVERIFY(!manager.addBookmarks({third}, {}));
+        QVERIFY(!manager.nameBookmark(first, "Edited"));
+        manager.reorderBookmarks({second, first});
+        manager.removeBookmark("local", first.value("username").toString(), first.value("path").toString());
+        manager.m_currentDeviceId = "local";
+        manager.m_currentUsername = first.value("username").toString();
+        manager.m_currentPath = first.value("path").toString();
+        manager.toggleCurrentBookmark();
+        QCOMPARE(manager.bookmarks(), original);
+        QCOMPARE(changed.size(), 0);
+        QVERIFY(manager.errorMessage().contains("bookmarks"));
+
+        QVERIFY(QFile::remove(directory));
+        QVERIFY(QDir().rename(saved, directory));
+        RemoteFileManager reopened;
+        QCOMPARE(reopened.bookmarks(), original);
+        QVERIFY(manager.addBookmarks({third}, {}));
+        QCOMPARE(changed.size(), 1);
+        reopened.reloadBookmarks();
+        QCOMPARE(reopened.bookmarks(), manager.bookmarks());
+    }
+
     void cutClipboardMovesAndFailurePreservesClipboardAndBothFiles()
     {
         QTemporaryDir source;
@@ -1119,11 +1526,11 @@ private slots:
         second.browse(second.localDevice(), "", destination.path());
         QTRY_VERIFY(!first.busy() && !second.busy());
         first.copyToClipboard(first.entries(), true);
-        const auto signature = clipboardSignature(QGuiApplication::clipboard()->mimeData());
+        const auto *cut = QGuiApplication::clipboard()->mimeData();
         second.pasteFromClipboard(second.localDevice(), "", destination.path());
         QTRY_VERIFY(!second.busy());
         QVERIFY(!second.errorMessage().isEmpty());
-        QCOMPARE(clipboardSignature(QGuiApplication::clipboard()->mimeData()), signature);
+        QCOMPARE(QGuiApplication::clipboard()->mimeData(), cut);
         QVERIFY(QFileInfo::exists(source.filePath("file.txt")));
         QVERIFY(QFileInfo::exists(destination.filePath("file.txt")));
         QVERIFY(QFile::remove(destination.filePath("file.txt")));
@@ -1163,6 +1570,152 @@ private slots:
         QVERIFY(!QFileInfo::exists(source.filePath("folder")));
         QVERIFY(QFileInfo::exists(destination.filePath("folder/data.txt")));
         QGuiApplication::clipboard()->clear();
+    }
+
+    void clipboardPasteLeavesUnrelatedPayloadsAndNewCutSelectionsAlone()
+    {
+        class RichClipboard final : public QMimeData {
+        public:
+            mutable int richReads = 0;
+        protected:
+            QVariant retrieveData(const QString &format, QMetaType type) const override
+            {
+                if (format == "image/png") ++richReads;
+                return QMimeData::retrieveData(format, type);
+            }
+        };
+        QTemporaryDir source, destination;
+        const auto path = source.filePath("file.txt");
+        QVERIFY(touch(path));
+        auto *clipboard = QGuiApplication::clipboard();
+        const auto cleanClipboard = qScopeGuard([&] { clipboard->clear(); });
+        auto *copy = new RichClipboard;
+        copy->setUrls({QUrl::fromLocalFile(path)});
+        copy->setData("image/png", "unrelated data");
+        clipboard->setMimeData(copy);
+
+        RemoteFileManager manager;
+        const auto local = manager.localDevice();
+        manager.pasteFromClipboard(local, {}, destination.path());
+        QTRY_VERIFY(!manager.busy());
+        QVERIFY2(manager.errorMessage().isEmpty(), qPrintable(manager.errorMessage()));
+        QVERIFY(QFileInfo::exists(destination.filePath("file.txt")));
+        QCOMPARE(copy->richReads, 0);
+        manager.undo();
+        QTRY_VERIFY(!manager.busy());
+
+        manager.copyToClipboard({localEndpoint(path)}, true);
+        auto *replacement = new QMimeData;
+        const auto *cut = clipboard->mimeData();
+        for (const auto &format : cut->formats()) replacement->setData(format, cut->data(format));
+        manager.pasteFromClipboard(local, {}, destination.path());
+        QVERIFY(manager.busy());
+        clipboard->setMimeData(replacement);
+        QTRY_VERIFY(!manager.busy());
+        QVERIFY2(manager.errorMessage().isEmpty(), qPrintable(manager.errorMessage()));
+        QVERIFY(QFileInfo::exists(destination.filePath("file.txt")));
+        QCOMPARE(clipboard->mimeData(), replacement);
+    }
+
+    void partialPasteRetainsUndoAndRefreshesTheListing()
+    {
+        QTemporaryDir source, destination;
+        const auto first = source.filePath("first.txt"), second = source.filePath("second.txt");
+        const auto copied = destination.filePath("first.txt"), existing = destination.filePath("second.txt");
+        QVERIFY(touch(first)); QVERIFY(touch(second));
+        QVERIFY(writeVersion(existing, "existing destination", 100000));
+        RemoteFileManager manager;
+        manager.setAutomaticRefreshEnabled(false);
+        const auto local = manager.localDevice();
+        manager.browse(local, {}, destination.path());
+        QTRY_VERIFY(!manager.busy());
+        manager.pasteEntries({localEndpoint(first), localEndpoint(second)}, local, {}, destination.path(), false);
+        QTRY_VERIFY(!manager.busy());
+        QVERIFY(QFileInfo::exists(copied));
+        QCOMPARE(manager.entries().size(), 2);
+        QVERIFY(manager.errorMessage().contains("first.txt"));
+        QVERIFY(manager.errorMessage().contains("second.txt"));
+        QVERIFY(manager.canUndo());
+        manager.undo();
+        QTRY_VERIFY(!manager.busy());
+        QVERIFY(!QFileInfo::exists(copied));
+        QCOMPARE(contents(existing), QByteArray("existing destination"));
+        QVERIFY(!manager.canUndo());
+    }
+
+    void undoRetrySkipsAlreadyCompletedRecords()
+    {
+        QTemporaryDir source, destination;
+        const auto first = source.filePath("first.txt"), second = source.filePath("second.txt");
+        const auto movedFirst = destination.filePath("first.txt"), movedSecond = destination.filePath("second.txt");
+        QVERIFY(touch(first)); QVERIFY(touch(second));
+        RemoteFileManager manager;
+        manager.setAutomaticRefreshEnabled(false);
+        const auto local = manager.localDevice();
+        manager.pasteEntries({localEndpoint(first), localEndpoint(second)}, local, {}, destination.path(), true);
+        QTRY_VERIFY(!manager.busy());
+        QVERIFY(manager.canUndo());
+        QVERIFY(writeVersion(first, "new file", 100000));
+
+        manager.undo();
+        QTRY_VERIFY(!manager.busy());
+        QVERIFY(QFileInfo::exists(second));
+        QVERIFY(!QFileInfo::exists(movedSecond));
+        QVERIFY(QFileInfo::exists(movedFirst));
+        QCOMPARE(contents(first), QByteArray("new file"));
+        QVERIFY(manager.canUndo());
+        QVERIFY(QFile::remove(first));
+
+        manager.undo();
+        QTRY_VERIFY(!manager.busy());
+        QVERIFY2(manager.errorMessage().isEmpty(), qPrintable(manager.errorMessage()));
+        QVERIFY(QFileInfo::exists(first));
+        QVERIFY(QFileInfo::exists(second));
+        QVERIFY(!QFileInfo::exists(movedFirst));
+        QVERIFY(!manager.canUndo());
+    }
+
+    void undoRefusesToDeleteAnEditedCopy_data()
+    {
+        QTest::addColumn<QString>("change");
+        QTest::newRow("same-size file edit") << QString("edit");
+        QTest::newRow("replaced file with identical bytes") << QString("replace");
+        QTest::newRow("new directory child") << QString("child");
+    }
+
+    void undoRefusesToDeleteAnEditedCopy()
+    {
+        QFETCH(QString, change);
+        QTemporaryDir source, destination;
+        const bool directory = change == "child";
+        const auto original = source.filePath("copied"), copied = destination.filePath("copied");
+        if (directory) {
+            QVERIFY(QDir().mkdir(original));
+            QVERIFY(touch(original + "/original.txt"));
+        } else {
+            QVERIFY(writeVersion(original, "before", 100000));
+        }
+        RemoteFileManager manager;
+        manager.setAutomaticRefreshEnabled(false);
+        const auto local = manager.localDevice();
+        manager.pasteEntries({localEndpoint(original, directory)}, local, {}, destination.path(), false);
+        QTRY_VERIFY(!manager.busy());
+        QVERIFY(manager.canUndo());
+        const qint64 previousTime = QFileInfo(copied).lastModified().toMSecsSinceEpoch();
+        if (directory) QVERIFY(touch(copied + "/new.txt"));
+        else if (change == "replace") {
+            QVERIFY(QFile::rename(copied, destination.filePath("saved-original")));
+            QVERIFY(writeVersion(copied, "before", previousTime));
+        } else QVERIFY(writeVersion(copied, "edited", previousTime));
+
+        manager.undo();
+        QTRY_VERIFY(!manager.busy());
+        QVERIFY(manager.errorMessage().contains("changed"));
+        QVERIFY(manager.errorMessage().contains(copied));
+        if (directory) {
+            QVERIFY(QFileInfo::exists(copied + "/original.txt"));
+            QVERIFY(QFileInfo::exists(copied + "/new.txt"));
+        } else QCOMPARE(contents(copied), change == "replace" ? QByteArray("before") : QByteArray("edited"));
     }
 
     void remoteClipboardEntriesNeverBecomeLocalUrls()
@@ -1321,6 +1874,208 @@ private slots:
         pendingRefresh.finish();
         QTRY_VERIFY(!manager.busy());
         QVERIFY2(!QFileInfo::exists(path), "Confirming Delete during a folder refresh must reach the filesystem");
+    }
+
+    void openDuringRefreshUsesTheRequestedFileAfterPublishingTheListing()
+    {
+        QTemporaryDir folder;
+        const auto first = folder.filePath("first.txt"), second = folder.filePath("second.txt");
+        QVERIFY(writeVersion(first, "first", 10000));
+        QVERIFY(writeVersion(second, "second", 10000));
+        RemoteFileManager manager;
+        manager.setAutomaticRefreshEnabled(false);
+        manager.browse(manager.localDevice(), {}, folder.path());
+        QTRY_VERIFY(!manager.busy());
+
+        QPromise<QVariantMap> pendingRefresh;
+        pendingRefresh.start();
+        manager.m_pendingRequest = manager.m_listingRequest;
+        manager.m_pendingRequest.insert("refresh", true);
+        manager.setRefreshing(true);
+        manager.setBusy(true);
+        manager.m_operationWatcher.setFuture(pendingRefresh.future());
+        manager.viewFile(localEndpoint(first), {});
+        manager.viewFile(localEndpoint(second), {});
+        pendingRefresh.addResult({{"status", "ok"}, {"device", manager.localDevice()},
+            {"path", folder.path()}, {"entries", manager.entries()}});
+        pendingRefresh.finish();
+
+        QTRY_COMPARE(manager.previewUrl(), QUrl::fromLocalFile(second));
+        QCOMPARE(manager.previewText(), QString("second"));
+        QCOMPARE(manager.entries().size(), 2);
+        QVERIFY(!manager.busy());
+    }
+
+    void cancellingBeforeDeliveryDiscardsCompletedPreview_data()
+    {
+        QTest::addColumn<bool>("remote");
+        QTest::newRow("original") << false;
+        QTest::newRow("staged-copy") << true;
+    }
+
+    void cancellingBeforeDeliveryDiscardsCompletedPreview()
+    {
+        QFETCH(bool, remote);
+        QTemporaryDir folder;
+        RemoteFileManager manager;
+        const auto path = remote ? manager.m_previewDirectory.filePath("preview.heic") : folder.filePath("preview.heic");
+        QVERIFY(touch(path));
+        auto entry = localEndpoint(path);
+        if (remote) entry["deviceId"] = "peer";
+        manager.m_pendingRequest = {{"kind", "view"}, {"localPath", path},
+            {"devices", QVariantList{deviceFromEntry(entry)}}};
+        manager.m_cancelRequested = std::make_shared<std::atomic_bool>(false);
+        manager.setBusy(true);
+        finishSearch(manager, {{"status", "ok"}, {"operation", "view"}, {"name", "preview.heic"},
+            {"previewKind", "image"}, {"previewUrl", QUrl::fromLocalFile(path)}, {"previewEntry", entry}});
+        manager.clearPreview();
+
+        QTRY_VERIFY(!manager.busy());
+        QVERIFY(manager.previewUrl().isEmpty());
+        QVERIFY(manager.previewEntry().isEmpty());
+        QCOMPARE(QFileInfo::exists(path), !remote);
+    }
+
+    void newPreviewWaitsForCancelledPreviewToFinish()
+    {
+        QTemporaryDir folder;
+        const auto first = folder.filePath("first.heic"), second = folder.filePath("second.txt");
+        QVERIFY(writeVersion(first, "invalid image", 10000));
+        QVERIFY(writeVersion(second, "next file", 10000));
+        RemoteFileManager manager;
+        manager.viewFile(localEndpoint(first), {});
+        manager.clearPreview();
+        manager.viewFile(localEndpoint(second), {});
+
+        QTRY_COMPARE(manager.previewUrl(), QUrl::fromLocalFile(second));
+        QCOMPARE(manager.previewText(), QString("next file"));
+        QVERIFY(!manager.busy());
+        QVERIFY(manager.transfer().isEmpty());
+    }
+
+    void disablingRemoteDuringPreviewRestoresTheLocalListing_data()
+    {
+        QTest::addColumn<bool>("lateOpen");
+        QTest::newRow("disabled") << false;
+        QTest::newRow("late-open") << true;
+    }
+
+    void disablingRemoteDuringPreviewRestoresTheLocalListing()
+    {
+        QFETCH(bool, lateOpen);
+        QTemporaryDir folder;
+        const auto localPath = folder.filePath("local.txt");
+        QVERIFY(writeVersion(localPath, "local", 10000));
+        RemoteFileManager manager;
+        manager.setAutomaticRefreshEnabled(false);
+        manager.browse(manager.localDevice(), {}, folder.path());
+        QTRY_COMPARE(manager.currentPath(), folder.path());
+
+        const auto staged = manager.m_previewDirectory.filePath("staged.heic");
+        QVERIFY(touch(staged));
+        manager.m_pendingRequest = {{"kind", "view"}, {"localPath", staged}, {"devices", QVariantList{device("peer")}}};
+        manager.m_cancelRequested = std::make_shared<std::atomic_bool>(false);
+        manager.setBusy(true);
+        finishSearch(manager, {{"status", "ok"}, {"operation", "view"}, {"name", "staged.heic"},
+            {"previewKind", "image"}, {"previewUrl", QUrl::fromLocalFile(staged)}});
+        manager.setRemoteEnabled(false);
+        if (lateOpen) manager.viewFile(localEndpoint(localPath), {});
+
+        QTRY_COMPARE(manager.currentPath(), folder.path());
+        QCOMPARE(manager.entries().size(), 1);
+        QVERIFY(!manager.busy());
+        QVERIFY(manager.previewName().isEmpty());
+        QVERIFY(!QFileInfo::exists(staged));
+    }
+
+    void disablingRemoteDuringSelectionDiscardsOnlyItsStaging()
+    {
+        QTemporaryDir localFolder;
+        RemoteFileManager manager;
+        manager.setAutomaticRefreshEnabled(false);
+        manager.browse(manager.localDevice(), {}, localFolder.path());
+        QTRY_COMPARE(manager.currentPath(), localFolder.path());
+
+        const auto previous = manager.m_previewDirectory.filePath(QUuid::createUuid().toString(QUuid::WithoutBraces));
+        const auto staging = manager.m_previewDirectory.filePath(QUuid::createUuid().toString(QUuid::WithoutBraces));
+        QVERIFY(QDir().mkpath(staging + "/0"));
+        QVERIFY(QDir().mkpath(previous + "/0"));
+        const auto stagedFile = staging + "/0/staged.txt", previousFile = previous + "/0/keep.txt";
+        QVERIFY(touch(stagedFile));
+        QVERIFY(touch(previousFile));
+        QSignalSpy ready(&manager, &RemoteFileManager::selectionReady);
+        manager.m_pendingRequest = {{"kind", "select"}, {"temporaryDirectory", staging}, {"devices", QVariantList{device("peer")}}};
+        manager.m_cancelRequested = std::make_shared<std::atomic_bool>(false);
+        manager.setBusy(true);
+        finishSearch(manager, {{"status", "ok"}, {"operation", "select"},
+            {"files", QVariantList{QUrl::fromLocalFile(previousFile), QUrl::fromLocalFile(stagedFile)}}});
+        manager.setRemoteEnabled(false);
+
+        QTRY_COMPARE(manager.currentPath(), localFolder.path());
+        QCOMPARE(ready.size(), 0);
+        QVERIFY(QFileInfo::exists(previousFile));
+        QVERIFY(!QFileInfo::exists(staging));
+    }
+
+    void closingQueuedPreviewDoesNotReopenItAfterSearch()
+    {
+        QTemporaryDir folder;
+        const auto path = folder.filePath("result.txt");
+        QVERIFY(writeVersion(path, "search result", 10000));
+        RemoteFileManager manager;
+        QPromise<QVariantMap> search;
+        search.start();
+        manager.m_pendingRequest = {{"kind", "search"}};
+        manager.m_cancelRequested = std::make_shared<std::atomic_bool>(false);
+        manager.setSearching(true);
+        manager.m_operationWatcher.setFuture(search.future());
+        manager.viewFile(localEndpoint(path), {});
+        QCOMPARE(manager.previewName(), QString("result.txt"));
+        QCOMPARE(manager.m_queuedRequest.value("kind").toString(), QString("view"));
+        manager.clearPreview();
+        search.addResult({{"status", "cancelled"}});
+        search.finish();
+
+        QTRY_VERIFY(!manager.searching() && !manager.busy());
+        QVERIFY(manager.previewName().isEmpty());
+        QVERIFY(manager.previewUrl().isEmpty());
+    }
+
+    void supersedingPreviewKeepsPendingFolderRefresh()
+    {
+        QTemporaryDir folder;
+        const auto first = folder.filePath("first.heic"), second = folder.filePath("second.txt");
+        QVERIFY(writeVersion(first, "invalid image", 10000));
+        QVERIFY(writeVersion(second, "next file", 10000));
+        RemoteFileManager manager;
+        manager.setAutomaticRefreshEnabled(false);
+        manager.browse(manager.localDevice(), {}, folder.path());
+        QTRY_COMPARE(manager.entries().size(), 2);
+        manager.viewFile(localEndpoint(first), {});
+        QVERIFY(touch(folder.filePath("added.txt")));
+        manager.refresh(false);
+        manager.viewFile(localEndpoint(second), {});
+
+        QTRY_COMPARE(manager.previewUrl(), QUrl::fromLocalFile(second));
+        QTRY_COMPARE(manager.entries().size(), 3);
+    }
+
+    void failedLocalOpenKeepsTheRequestedEntryForRetry()
+    {
+        QTemporaryDir folder;
+        const auto path = folder.filePath("missing.txt");
+        const auto entry = localEndpoint(path);
+        RemoteFileManager manager;
+        manager.viewFile(entry, {});
+        QCOMPARE(manager.previewName(), QString("missing.txt"));
+        QCOMPARE(manager.previewEntry(), entry);
+        QVERIFY(!manager.errorMessage().isEmpty());
+
+        QVERIFY(writeVersion(path, "back", 10000));
+        manager.viewFile(manager.previewEntry(), {});
+        QTRY_COMPARE(manager.previewUrl(), QUrl::fromLocalFile(path));
+        QCOMPARE(manager.previewText(), QString("back"));
+        QVERIFY(manager.errorMessage().isEmpty());
     }
 
     void externalLocalEditsAndAtomicReplacementRefreshEntries()
@@ -1660,5 +2415,15 @@ private slots:
     }
 };
 
-QTEST_MAIN(RemoteFileTests)
+int main(int argc, char **argv)
+{
+    QTemporaryDir storage;
+    if (!storage.isValid()) return 1;
+    qputenv("XDG_CONFIG_HOME", QFile::encodeName(storage.filePath("config")));
+    qputenv("XDG_DATA_HOME", QFile::encodeName(storage.filePath("data")));
+    qputenv("XDG_CACHE_HOME", QFile::encodeName(storage.filePath("cache")));
+    QGuiApplication app(argc, argv);
+    RemoteFileTests tests;
+    return QTest::qExec(&tests, argc, argv);
+}
 #include "remotefile_tests.moc"

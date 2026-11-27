@@ -7,11 +7,16 @@ import math
 from pathlib import Path
 import shlex
 import subprocess
+import sys
 import time
 import uuid
 
 
 ROOT = Path(__file__).resolve().parents[4]
+sys.path.insert(0, str(ROOT / "src/scripts"))
+from environment import development_root
+
+DEV = development_root()
 FIXTURES = ROOT / "addons/notes/tests/fixtures/android-ocr"
 EXPECTED = ("Hello", "Imported meeting agenda")
 
@@ -51,9 +56,9 @@ def main():
     parser.add_argument("--models", type=Path, default=ROOT / "models/ppocrv5")
     parser.add_argument("--qt", type=Path, default=Path.home() / "Qt/6.12.0/android_arm64_v8a")
     parser.add_argument("--ndk", type=Path, default=Path.home() / "Android/Sdk/ndk/27.2.12479018")
-    parser.add_argument("--output", type=Path, default=ROOT / "build/android/ocr/proof/smoke.json")
+    parser.add_argument("--output", type=Path, default=DEV / "dev-deps/android/ocr/proof/smoke.json")
     args = parser.parse_args()
-    runtime = ROOT / "builds/android/runtime/arm64-v8a"
+    runtime = DEV / "builds/android/runtime/arm64-v8a"
     libraries = [runtime / "libpilon_ocr.so", runtime / "libonnxruntime.so",
                  args.qt / "lib/libQt6Core_arm64-v8a.so",
                  args.ndk / "toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so"]

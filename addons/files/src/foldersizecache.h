@@ -16,7 +16,7 @@ public:
     ~FolderSizeCache();
     static FolderSizeCache &shared();
     std::optional<qint64> measure(const QString &path, const std::atomic_bool &cancel, bool *watched = nullptr,
-                                  qint64 *transferBytes = nullptr);
+                                  qint64 *transferBytes = nullptr, qsizetype *remainingEntries = nullptr);
 
 private:
     struct Directory {
@@ -31,7 +31,8 @@ private:
         bool watched = false;
         qint64 transferBytes = -1;
     };
-    Result scan(const QByteArray &path, const struct stat &info, const std::atomic_bool &cancel, int depth);
+    Result scan(const QByteArray &path, const struct stat &info, const std::atomic_bool &cancel, int depth,
+                qsizetype *remainingEntries);
     void drainChanges();
     void reset();
     int watchDirectory(const QByteArray &path, const struct stat &info);

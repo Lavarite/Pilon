@@ -4,6 +4,7 @@ import QtQuick.Controls.Basic as Basic
 Basic.TextField {
     id: control
     property bool elideWhenUnfocused: false
+    property int summaryElideMode: Text.ElideRight
     readonly property bool showingSummary: elideWhenUnfocused && !activeFocus
     implicitHeight: Math.max(36, contentHeight + topPadding + bottomPadding)
     leftPadding: 10; rightPadding: 10; topPadding: 8; bottomPadding: 8
@@ -33,7 +34,7 @@ Basic.TextField {
             horizontalAlignment: control.horizontalAlignment
             verticalAlignment: control.verticalAlignment
             textFormat: Text.PlainText
-            elide: Text.ElideRight
+            elide: control.summaryElideMode
             Accessible.ignored: true
         }
     }

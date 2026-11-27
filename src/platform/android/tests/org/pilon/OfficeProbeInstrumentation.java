@@ -7,6 +7,7 @@ import android.app.Instrumentation;
 import android.content.Context;
 import android.graphics.pdf.PdfRenderer;
 import android.graphics.pdf.content.PdfPageTextContent;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.ParcelFileDescriptor;
 import android.os.Process;
@@ -200,6 +201,7 @@ public final class OfficeProbeInstrumentation extends Instrumentation {
         Bundle result = new Bundle();
         int status = Activity.RESULT_CANCELED;
         try {
+            require(Build.VERSION.SDK_INT >= 35, "Office text verification requires Android 15 or newer");
             checks(); result.putInt("checks", checks); result.putString("stream", "Pilon Office checks passed: " + checks + "\n");
             status = Activity.RESULT_OK;
         } catch (Throwable failure) {

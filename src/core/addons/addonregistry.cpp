@@ -16,7 +16,6 @@
 #include <QSaveFile>
 #include <QScopeGuard>
 #include <QSet>
-#include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTemporaryFile>
 #include <QUuid>
@@ -27,7 +26,7 @@
 #include <memory>
 
 namespace {
-const QStringList builtinIds{"files", "ssh", "assistant", "notes", "calendar", "git", "devices"};
+const QStringList builtinIds{"files", "ssh", "assistant", "notes", "calendar", "devices"};
 QString enabledKey(const QString &id) {
     return "addons/enabled/" + id;
 }
@@ -101,10 +100,17 @@ bool privateDirectory(const QString &path, QString *error) {
 }
 QByteArray fileHash(const QString &path) {
     QFile file(path);
-    if (!file.open(QIODevice::ReadOnly))
+    if (!file.open(QIODevice::ReadOnly) || file.size() > AddonRegistry::MaxPackageBytes)
         return {};
     QCryptographicHash hash(QCryptographicHash::Sha256);
-    return hash.addData(&file) ? hash.result() : QByteArray{};
+    qint64 total = 0;
+    while (!file.atEnd()) {
+        const auto bytes = file.read(1024 * 1024);
+        total += bytes.size();
+        if (file.error() != QFileDevice::NoError || total > AddonRegistry::MaxPackageBytes) return {};
+        hash.addData(bytes);
+    }
+    return hash.result();
 }
 bool copyPackage(const QString &source, const QString &destination, QString *error) {
     if (!QFileInfo(source).isFile() || QFileInfo(source).isSymLink() || QFileInfo(destination).isSymLink()) {
@@ -113,14 +119,15 @@ bool copyPackage(const QString &source, const QString &destination, QString *err
     }
     QFile input(source);
     QSaveFile output(destination);
-    if (!input.open(QIODevice::ReadOnly) || !output.open(QIODevice::WriteOnly)) {
+    if (!input.open(QIODevice::ReadOnly) || input.size() > AddonRegistry::MaxPackageBytes
+        || !output.open(QIODevice::WriteOnly) || !output.setPermissions(QFile::ReadOwner | QFile::WriteOwner)) {
         *error = issue("Cannot copy the add-on package.");
         return false;
     }
-    output.setPermissions(QFile::ReadOwner | QFile::WriteOwner);
     while (!input.atEnd()) {
         const auto bytes = input.read(1024 * 1024);
-        if ((bytes.isEmpty() && input.error() != QFile::NoError) || output.write(bytes) != bytes.size()) {
+        if (input.error() != QFile::NoError || output.pos() + bytes.size() > AddonRegistry::MaxPackageBytes
+            || output.write(bytes) != bytes.size()) {
             *error = issue("Cannot copy the add-on package.");
             return false;
         }
@@ -152,7 +159,7 @@ QUrl resourceUrl(const QString &root, const QString &path) {
     return url;
 }
 QVariantMap readPackage(const QString &path, bool builtin, const QString &expectedId, const QByteArray &hash,
-                        bool retain, const QString &cacheDirectory = {}) {
+                        bool retain) {
     QVariantMap row{{"id", expectedId},
                     {"name", QFileInfo(path).completeBaseName()},
                     {"description", ""},
@@ -178,25 +185,26 @@ QVariantMap readPackage(const QString &path, bool builtin, const QString &expect
         return reject(issue("The .piext package is missing or is a symbolic link."));
     if (file.suffix().compare("piext", Qt::CaseInsensitive) != 0 || hash.isEmpty())
         return reject(issue("Choose a readable .piext package."));
-    QString mountedPath = path;
-    if (retain) {
-        QString problem;
-        if (!privateDirectory(cacheDirectory, &problem))
-            return reject(problem);
-        mountedPath = QDir(cacheDirectory).absoluteFilePath(QString::fromLatin1(hash.toHex()) + ".piext");
-        if (!QFileInfo::exists(mountedPath) && !copyPackage(path, mountedPath, &problem))
-            return reject(problem);
-        if (QFileInfo(mountedPath).isSymLink() || fileHash(mountedPath) != hash)
-            return reject(
-                issue("The add-on changed while it was being copied. Try again after the copy finishes."));
-    }
-    const QString cacheKey =
-        QFileInfo(mountedPath).absoluteFilePath() + ':' + QString::fromLatin1(hash.toHex());
+    const QString cacheKey = QString::fromLatin1(hash.toHex());
     const auto existing = pool()->mounts.value(cacheKey);
     const auto root = existing.second.isEmpty()
                           ? "/pilon-addons/" + QUuid::createUuid().toString(QUuid::Id128)
                           : existing.second;
     const bool newlyMounted = existing.second.isEmpty();
+    QString mountedPath = path;
+    std::unique_ptr<QTemporaryDir> snapshot;
+    if (newlyMounted) {
+        // Qt keeps the private file mapping after its temporary name is removed.
+        snapshot = std::make_unique<QTemporaryDir>();
+        if (!snapshot->isValid())
+            return reject(issue("Cannot stage the add-on package."));
+        mountedPath = snapshot->filePath("package.piext");
+        QString problem;
+        if (!copyPackage(path, mountedPath, &problem))
+            return reject(problem);
+        if (fileHash(mountedPath) != hash)
+            return reject(issue("The add-on changed while it was being copied. Try again after the copy finishes."));
+    }
     if (newlyMounted && !QResource::registerResource(mountedPath, root))
         return reject(issue("This file is not a valid Qt resource package."));
     bool accepted = false;
@@ -223,7 +231,7 @@ QVariantMap readPackage(const QString &path, bool builtin, const QString &expect
         if (!data.value("apiVersion").isDouble() || data.value("apiVersion").toDouble() != 1)
             return reject(issue("This package requires an unsupported add-on API version."));
         const auto id = data.value("id").toString();
-        if (!addonId(id) || (builtin && (!builtinIds.contains(id) || id != expectedId)))
+        if (!addonId(id) || (builtin && !builtinIds.contains(id)) || (!expectedId.isEmpty() && id != expectedId))
             return reject(issue("Use a unique namespaced add-on ID or a known shipped ID."));
         row["id"] = id;
         if (!text(data.value("name")) || !text(data.value("version"), 64))
@@ -483,14 +491,11 @@ AddonRegistry::AddonRegistry(QObject *parent)
                     QCoreApplication::applicationDirPath() + "/addons",
 #endif
                     PilonWorkspace::addonsDirectory(),
-                    PilonWorkspace::addonDataRoot(), PilonWorkspace::appDataDirectory() + "/addons",
+                    PilonWorkspace::appDataDirectory() + "/addons",
                     QCoreApplication::arguments().contains("--disable-addons"), parent) {}
-AddonRegistry::AddonRegistry(const QString &builtins, const QString &installed, const QString &data,
-                             bool recovery, QObject *parent)
-    : AddonRegistry(builtins, installed, data, data + "/.registry", recovery, parent) {}
-AddonRegistry::AddonRegistry(const QString &builtins, const QString &installed, const QString &data,
+AddonRegistry::AddonRegistry(const QString &builtins, const QString &installed,
                              const QString &state, bool recovery, QObject *parent)
-    : QObject(parent), m_builtins(builtins), m_installed(installed), m_data(data), m_recovery(recovery),
+    : QObject(parent), m_builtins(builtins), m_installed(installed), m_recovery(recovery),
       m_stateDirectory(QDir::cleanPath(state)) {
     connect(this, &AddonRegistry::changed, this, &AddonRegistry::sidebarChanged);
     m_refreshTimer.setSingleShot(true);
@@ -498,7 +503,16 @@ AddonRegistry::AddonRegistry(const QString &builtins, const QString &installed, 
     connect(&m_refreshTimer, &QTimer::timeout, this, &AddonRegistry::refresh);
     connect(&m_watcher, &QFileSystemWatcher::directoryChanged, this, [this] { m_refreshTimer.start(); });
     connect(&m_watcher, &QFileSystemWatcher::fileChanged, this, [this] { m_refreshTimer.start(); });
-    refresh();
+    if (refresh()) {
+        for (const auto &name : {QString("cache"), QString("builtin-packages")}) {
+            const QDir cache(m_stateDirectory + '/' + name);
+            if (QFileInfo(cache.path()).isSymLink()) continue;
+            for (const auto &file : cache.entryInfoList({"*.piext"}, QDir::Files | QDir::NoSymLinks))
+                if (matches(file.fileName(), R"(\A[0-9a-f]{64}\.piext\z)"))
+                    QFile::remove(file.absoluteFilePath());
+            QDir().rmdir(cache.path());
+        }
+    }
 }
 bool AddonRegistry::loadState() {
     if (m_stateLoaded)
@@ -523,14 +537,20 @@ bool AddonRegistry::loadState() {
         return fail(
             issue("The add-on ownership records are invalid. Restore the records before changing add-ons."));
     QStringList seeded;
+    QSet<QString> retired;
     QVariantMap receipts;
     for (const auto &value : state.value("seeded").toArray()) {
-        if (!value.isString() || !builtinIds.contains(value.toString()))
+        const auto id = value.toString();
+        if (!value.isString() || !sectionId(id))
             return fail(issue("The add-on seed records are invalid."));
-        seeded << value.toString();
+        if (builtinIds.contains(id))
+            seeded << id;
+        else
+            retired.insert(id);
     }
     const auto owners = state.value("owners").toObject();
     for (auto i = owners.begin(); i != owners.end(); ++i) {
+        if (retired.contains(i.key())) continue;
         const auto owner = i->toObject();
         if (!addonId(i.key()) || !i->isObject() || owner.value("id").toString() != i.key() ||
             !text(owner.value("name")) || !owner.value("lifecycleDeclared").isBool())
@@ -547,9 +567,10 @@ bool AddonRegistry::loadState() {
         return fail(issue("The add-on seed hashes are invalid."));
     const auto hashes = state.value("seedHashes").toObject();
     for (auto i = hashes.begin(); i != hashes.end(); ++i) {
-        if (!builtinIds.contains(i.key()) || !i->isString() || !matches(i->toString(), "\\A[0-9a-f]{64}\\z"))
+        if ((!builtinIds.contains(i.key()) && !retired.contains(i.key())) ||
+            !i->isString() || !matches(i->toString(), "\\A[0-9a-f]{64}\\z"))
             return fail(issue("The add-on seed hashes are invalid."));
-        seedHashes[i.key()] = i->toString();
+        if (!retired.contains(i.key())) seedHashes[i.key()] = i->toString();
     }
     m_seeded = seeded;
     m_seedHashes = seedHashes;
@@ -565,9 +586,8 @@ bool AddonRegistry::saveState() {
     if (QFileInfo(path).isSymLink())
         return fail(issue("Add-on ownership records cannot use symbolic links."));
     QSaveFile output(path);
-    if (!output.open(QIODevice::WriteOnly))
+    if (!output.open(QIODevice::WriteOnly) || !output.setPermissions(QFile::ReadOwner | QFile::WriteOwner))
         return fail(issue("Cannot save add-on ownership records."));
-    output.setPermissions(QFile::ReadOwner | QFile::WriteOwner);
     const auto bytes = QJsonDocument(QJsonObject{{"schema", 1},
                                                  {"seeded", QJsonArray::fromStringList(m_seeded)},
                                                  {"seedHashes", QJsonObject::fromVariantMap(m_seedHashes)},
@@ -586,6 +606,10 @@ bool AddonRegistry::seedPackages() {
     const auto oldSeeded = m_seeded;
     const auto oldHashes = m_seedHashes;
     QStringList created;
+    QMap<QString, QByteArray> stagedPackages;
+    const auto marker = QDir(m_builtins).filePath(".install-packages");
+    const bool consume = !m_builtins.startsWith(":/") && !QFileInfo(m_builtins).isSymLink() &&
+                         QFileInfo(marker).isFile() && !QFileInfo(marker).isSymLink();
     std::unique_ptr<QTemporaryDir> backups;
     QMap<QString, QString> replaced;
     bool complete = false;
@@ -610,11 +634,17 @@ bool AddonRegistry::seedPackages() {
             continue;
         const auto sourceHash = fileHash(source);
         const auto sourceHex = QString::fromLatin1(sourceHash.toHex());
-        const auto row = readPackage(source, true, id, sourceHash, source.startsWith(":/"),
-                                     m_stateDirectory + "/builtin-packages");
+        if (consume && !sourceHash.isEmpty() && !QFileInfo(source).isSymLink())
+            stagedPackages[source] = sourceHash;
+        if (!sourceHash.isEmpty() && m_seeded.contains(id) && m_seedHashes.value(id) == sourceHex) continue;
+        const auto row = readPackage(source, true, id, sourceHash, false);
         if (!row.value("error").toString().isEmpty())
             return fail(row.value("error").toString());
-        const auto destination = QDir(m_installed).absoluteFilePath(id + ".piext");
+        const auto destination = packagePath(id);
+        if (QFileInfo(destination).isSymLink())
+            return fail(issue("The package destination cannot use symbolic links."));
+        if (QFileInfo(QFileInfo(destination).absolutePath()).isSymLink())
+            return fail(issue("Add-on storage cannot use symbolic links."));
         if (m_seeded.contains(id)) {
             if (!QFileInfo::exists(destination) || !m_seedHashes.contains(id) ||
                 m_seedHashes.value(id) == sourceHex)
@@ -636,6 +666,8 @@ bool AddonRegistry::seedPackages() {
             continue;
         }
         if (!QFileInfo::exists(destination)) {
+            if (!privateDirectory(QFileInfo(destination).absolutePath(), &problem))
+                return fail(problem);
             if (!copyPackage(source, destination, &problem))
                 return fail(problem);
             created << destination;
@@ -647,6 +679,58 @@ bool AddonRegistry::seedPackages() {
     if ((m_seeded != oldSeeded || m_seedHashes != oldHashes) && !saveState())
         return false;
     complete = true;
+    if (consume) {
+        bool removed = true;
+        for (auto i = stagedPackages.cbegin(); i != stagedPackages.cend(); ++i)
+            if (QFileInfo(i.key()).isSymLink() || fileHash(i.key()) != i.value() || !QFile::remove(i.key()))
+                removed = false;
+        if (removed && QFile::remove(marker))
+            QDir().rmdir(m_builtins);
+    }
+    return true;
+}
+
+QString AddonRegistry::packagePath(const QString &id) const {
+    return QDir(m_installed).absoluteFilePath(id + '/' + id + ".piext");
+}
+
+QStringList AddonRegistry::packagePaths() const {
+    QStringList paths;
+    if (QFileInfo(m_installed).isSymLink()) return paths;
+    const QDir root(m_installed);
+    for (const auto &entry : root.entryInfoList({"*.piext"}, QDir::Files | QDir::System))
+        paths << entry.absoluteFilePath();
+    for (const auto &entry : root.entryInfoList(QDir::Dirs | QDir::NoSymLinks | QDir::NoDotAndDotDot)) {
+        if (!addonId(entry.fileName())) continue;
+        const auto path = packagePath(entry.fileName());
+        if (QFileInfo::exists(path) || QFileInfo(path).isSymLink()) paths << path;
+    }
+    return paths;
+}
+
+bool AddonRegistry::migrateFlatPackages() {
+    QMap<QString, QStringList> legacy;
+    for (const auto &path : packagePaths()) {
+        if (QFileInfo(path).absolutePath() != m_installed || m_snapshots.contains(path)) continue;
+        const auto row = readPackage(path, false, {}, fileHash(path), false);
+        if (row.value("error").toString().isEmpty()) legacy[row.value("id").toString()] << path;
+    }
+    for (auto i = legacy.cbegin(); i != legacy.cend(); ++i) {
+        if (i.value().size() != 1) continue;
+        const auto source = i.value().first();
+        const auto target = packagePath(i.key());
+        QString problem;
+        if (!privateDirectory(QFileInfo(target).absolutePath(), &problem)) return fail(problem);
+        if (QFileInfo(target).isSymLink()) continue;
+        if (QFileInfo::exists(target)) {
+            const auto hash = fileHash(source);
+            if (!hash.isEmpty() && fileHash(target) == hash && !QFile::remove(source))
+                return fail(issue("Cannot remove the duplicate add-on package."));
+            continue;
+        }
+        if (!QFile::rename(source, target))
+            return fail(issue("Cannot move the installed add-on into its own folder."));
+    }
     return true;
 }
 void AddonRegistry::rearmWatches() {
@@ -661,10 +745,12 @@ void AddonRegistry::rearmWatches() {
     QStringList paths{ancestor};
     if (QFileInfo(m_installed).isDir() && !QFileInfo(m_installed).isSymLink())
         paths << m_installed;
-    if (!QFileInfo(m_installed).isSymLink())
-        for (const auto &file : QDir(m_installed).entryInfoList({"*.piext"}, QDir::Files | QDir::System))
-            if (!file.isSymLink())
-                paths << file.absoluteFilePath();
+    if (!QFileInfo(m_installed).isSymLink()) {
+        for (const auto &folder : QDir(m_installed).entryInfoList(QDir::Dirs | QDir::NoSymLinks | QDir::NoDotAndDotDot))
+            if (addonId(folder.fileName())) paths << folder.absoluteFilePath();
+        for (const auto &path : packagePaths())
+            if (!QFileInfo(path).isSymLink()) paths << path;
+    }
     paths.removeDuplicates();
     if (!paths.isEmpty())
         m_watcher.addPaths(paths);
@@ -1011,7 +1097,7 @@ QVariantList AddonRegistry::lifecycleOwners() const {
         owner["lifecycleDeclared"] = !removed && owner.value("lifecycleDeclared").toBool();
         auto paths = owner.value("ownedPaths").toMap();
         auto scoped = paths.value("addonData").toList();
-        const auto directory = "addon-data/" + i.key();
+        const auto directory = "addons/" + i.key() + "/data";
         if (!scoped.contains(directory))
             scoped << directory;
         paths["addonData"] = scoped;
@@ -1030,7 +1116,7 @@ bool AddonRegistry::finalizeRemoval(const QString &id, bool cleanupSucceeded, co
     const bool selected =
         row ? configured(*row)
             : PilonSettings()
-                  .value(enabledKey(id), m_seeded.contains(id) && id != "git" && id != "devices")
+                  .value(enabledKey(id), m_seeded.contains(id) && id != "devices")
                   .toBool();
     if (selected)
         return fail(issue("Disable this add-on before removing it."));
@@ -1061,13 +1147,14 @@ bool AddonRegistry::finalizeRemoval(const QString &id, bool cleanupSucceeded, co
     if (!ownedPaths(retained, &checked))
         return fail(issue("The retained ownership paths are too large."));
     const auto filename = receipt.value("file").toString();
-    if (!localPath(filename) || filename.contains('/'))
+    const auto canonical = id + '/' + id + ".piext";
+    if (!localPath(filename) || (filename.contains('/') && filename != canonical))
         return fail(issue("This add-on's package path is invalid."));
     const auto path = QDir(m_installed).absoluteFilePath(filename);
     QString directoryError;
     if (!privateDirectory(m_installed, &directoryError))
         return fail(directoryError);
-    if (QFileInfo(m_installed).isSymLink() || QFileInfo(path).isSymLink() ||
+    if (QFileInfo(QFileInfo(path).absolutePath()).isSymLink() || QFileInfo(path).isSymLink() ||
         (QFileInfo::exists(path) && !QFileInfo(path).isFile()))
         return fail(issue("The installed package is not a regular file."));
     if (QFileInfo::exists(path) &&
@@ -1092,14 +1179,13 @@ bool AddonRegistry::finalizeRemoval(const QString &id, bool cleanupSucceeded, co
     m_snapshots.remove(path);
     if (exists)
         QFile::remove(staged);
-    refresh();
-    return true;
+    return refresh();
 }
-void AddonRegistry::refresh() {
+bool AddonRegistry::refresh() {
     m_error.clear();
     const auto watches = qScopeGuard([this] { rearmWatches(); });
-    if (!loadState() || !seedPackages())
-        return;
+    if (!loadState() || !migrateFlatPackages() || !seedPackages())
+        return false;
     QList<QVariantMap> rows;
     QStringList paths, seen;
     const auto previousSnapshots = m_snapshots;
@@ -1117,11 +1203,12 @@ void AddonRegistry::refresh() {
             m_error = issue("An installed add-on changed. Restart Pilon to load its new code.");
             return;
         }
-        auto row = readPackage(path, builtin, expectedId, hash, true, m_stateDirectory + "/cache");
+        auto row = previous != previousSnapshots.cend() ? previous->row
+            : readPackage(path, builtin, expectedId, hash, true);
         row["packagePath"] = path;
         row["sha256"] = QString::fromLatin1(hash.toHex());
         row["builtin"] = builtinIds.contains(row.value("id").toString());
-        row["defaultEnabled"] = m_seeded.contains(row.value("id").toString()) && row.value("id") != "git" &&
+        row["defaultEnabled"] = m_seeded.contains(row.value("id").toString()) &&
                                 row.value("id") != "devices";
         row["lifecycleDeclared"] = !row.value("lifecycle").toUrl().isEmpty();
         if (row.value("error").toString().isEmpty())
@@ -1129,9 +1216,10 @@ void AddonRegistry::refresh() {
         rows << row;
         paths << path;
     };
-    for (const auto &file :
-         QDir(m_installed).entryInfoList({"*.piext"}, QDir::Files | QDir::System, QDir::Name))
-        scan(file.absoluteFilePath(), false, {});
+    for (const auto &path : packagePaths()) {
+        const QFileInfo file(path);
+        scan(path, false, file.absolutePath() == m_installed ? QString{} : file.dir().dirName());
+    }
     for (auto i = previousSnapshots.cbegin(); i != previousSnapshots.cend(); ++i)
         if (!seen.contains(i.key())) {
             auto row = i->row;
@@ -1164,7 +1252,7 @@ void AddonRegistry::refresh() {
             receipt["portableSettings"] = row.value("portableSettings").toStringList();
             if (row.contains("source")) receipt["source"] = row.value("source");
             receipt["name"] = row.value("name");
-            receipt["file"] = QFileInfo(paths[i]).fileName();
+            receipt["file"] = QDir(m_installed).relativeFilePath(paths[i]);
             receipt["lifecycleDeclared"] =
                 receipt.value("lifecycleDeclared").toBool() || row.value("lifecycleDeclared").toBool();
             receipt["hash"] = QString::fromLatin1(candidates.value(paths[i]).hash.toHex());
@@ -1174,7 +1262,7 @@ void AddonRegistry::refresh() {
     }
     if (m_receipts != previousReceipts && !saveState()) {
         m_receipts = previousReceipts;
-        return;
+        return false;
     }
     for (auto i = m_receipts.cbegin(); i != m_receipts.cend(); ++i) {
         const auto receipt = i->toMap();
@@ -1194,7 +1282,7 @@ void AddonRegistry::refresh() {
             {"extensionPoints", QVariantList{}},
             {"missing", true},
             {"builtin", builtinIds.contains(i.key())},
-            {"defaultEnabled", m_seeded.contains(i.key()) && i.key() != "git" && i.key() != "devices"},
+            {"defaultEnabled", m_seeded.contains(i.key()) && i.key() != "devices"},
             {"lifecycleDeclared", receipt.value("lifecycleDeclared")},
             {"error",
              issue("This add-on package is missing or invalid. Restore its package before cleanup.")}};
@@ -1202,6 +1290,7 @@ void AddonRegistry::refresh() {
     m_snapshots = nextSnapshots;
     m_rows = rows;
     emit changed();
+    return true;
 }
 bool AddonRegistry::install(const QUrl &url) {
     return installPackage(url, {}, {}, {});
@@ -1215,7 +1304,13 @@ bool AddonRegistry::installConfigured(const QUrl &url, const QString &id, const 
 }
 bool AddonRegistry::installConfiguredBuiltin(const QString &id, const QString &version, const QString &sha256) {
     if (!builtinIds.contains(id)) return fail(issue("This package is not a shipped Pilon add-on."));
+    if (!hasBundledPackage(id)) return fail(issue("Choose a .piext package to reinstall this add-on."));
     return installConfigured(QUrl::fromLocalFile(QDir(m_builtins).filePath(id + ".piext")), id, version, sha256);
+}
+bool AddonRegistry::hasBundledPackage(const QString &id) const {
+    if (!builtinIds.contains(id)) return false;
+    const QFileInfo package(QDir(m_builtins).filePath(id + ".piext"));
+    return package.isFile() && !package.isSymLink();
 }
 bool AddonRegistry::installPackage(const QUrl &url, const QString &expected, const QString &pinnedVersion,
                                    const QString &sha256) {
@@ -1225,15 +1320,18 @@ bool AddonRegistry::installPackage(const QUrl &url, const QString &expected, con
     if (!QFileInfo(source).isFile() || QFileInfo(source).isSymLink() ||
         QFileInfo(source).suffix().compare("piext", Qt::CaseInsensitive) != 0)
         return fail(issue("Choose a regular .piext file, not a folder or symbolic link."));
+    if (!loadState()) return false;
     QString directoryError;
     if (!privateDirectory(m_installed, &directoryError))
         return fail(directoryError);
     QTemporaryFile stage(QDir(m_installed).absoluteFilePath(".install-XXXXXX.piext"));
     if (!source.open(QIODevice::ReadOnly) || !stage.open())
         return fail(issue("Cannot read or stage this package."));
+    if (source.size() > MaxPackageBytes) return fail(issue("Add-on packages must be at most 128 MiB."));
     while (!source.atEnd()) {
         const auto bytes = source.read(1024 * 1024);
-        if ((bytes.isEmpty() && source.error() != QFile::NoError) || stage.write(bytes) != bytes.size())
+        if (stage.pos() + bytes.size() > MaxPackageBytes) return fail(issue("Add-on packages must be at most 128 MiB."));
+        if (source.error() != QFileDevice::NoError || stage.write(bytes) != bytes.size())
             return fail(issue("Cannot copy this package."));
     }
     if (!stage.flush())
@@ -1250,7 +1348,7 @@ bool AddonRegistry::installPackage(const QUrl &url, const QString &expected, con
         return fail(issue("The chosen package has a different add-on ID."));
     if (!pinnedVersion.isEmpty() && row.value("version").toString() != pinnedVersion)
         return fail(issue("The package does not match its configured version."));
-    const auto destination = QDir(m_installed).absoluteFilePath(id + ".piext");
+    const auto destination = packagePath(id);
     for (const auto &existing : m_rows)
         if (existing.value("id") == id && existing.value("error").toString().isEmpty()) {
             bool atDestination = false;
@@ -1263,6 +1361,8 @@ bool AddonRegistry::installPackage(const QUrl &url, const QString &expected, con
     if (QFileInfo(destination).isSymLink() ||
         (QFileInfo::exists(destination) && !QFileInfo(destination).isFile()))
         return fail(issue("The package destination is not a regular file."));
+    if (!privateDirectory(QFileInfo(destination).absolutePath(), &directoryError))
+        return fail(directoryError);
     if (!expected.isEmpty()) {
         if (QFileInfo::exists(destination))
             return fail(issue("The package appeared while it was being restored. Refresh the add-on list."));
@@ -1273,22 +1373,25 @@ bool AddonRegistry::installPackage(const QUrl &url, const QString &expected, con
         const QVariant previous = settings.value(key);
         settings.setValue(key, false);
         settings.sync();
-        if (settings.status() != QSettings::NoError)
+        if (settings.status() != QSettings::NoError) {
+            if (previous.isValid()) settings.setValue(key, previous);
+            else settings.remove(key);
+            settings.sync();
             return fail(issue("Cannot save the activation state for this package."));
+        }
         if (!QFile::rename(stage.fileName(), destination)) {
             if (previous.isValid()) settings.setValue(key, previous);
             else settings.remove(key);
             settings.sync();
             return fail(issue("Cannot publish this package into the add-on folder."));
         }
-        refresh();
-        return true;
+        return refresh() || fail(issue("The package was saved but its registry could not be updated. Refresh after correcting the problem.\n") + m_error);
     }
     QFile staged(stage.fileName());
     QSaveFile output(destination);
-    if (!staged.open(QIODevice::ReadOnly) || !output.open(QIODevice::WriteOnly))
+    if (!staged.open(QIODevice::ReadOnly) || !output.open(QIODevice::WriteOnly)
+        || !output.setPermissions(QFile::ReadOwner | QFile::WriteOwner))
         return fail(issue("Cannot write the installed package."));
-    output.setPermissions(QFile::ReadOwner | QFile::WriteOwner);
     while (!staged.atEnd()) {
         const auto bytes = staged.read(1024 * 1024);
         if ((bytes.isEmpty() && staged.error() != QFile::NoError) || output.write(bytes) != bytes.size())
@@ -1296,8 +1399,7 @@ bool AddonRegistry::installPackage(const QUrl &url, const QString &expected, con
     }
     if (!output.commit())
         return fail(issue("Cannot commit the installed package."));
-    refresh();
-    return true;
+    return refresh() || fail(issue("The package was saved but its registry could not be updated. Refresh after correcting the problem.\n") + m_error);
 }
 QString AddonRegistry::dataDirectory(const QString &id) {
     if (!find(id)) {
@@ -1305,11 +1407,11 @@ QString AddonRegistry::dataDirectory(const QString &id) {
         return {};
     }
     QString directoryError;
-    if (!privateDirectory(m_data, &directoryError)) {
+    if (!privateDirectory(QFileInfo(packagePath(id)).absolutePath(), &directoryError)) {
         fail(directoryError);
         return {};
     }
-    const auto path = QDir(m_data).absoluteFilePath(id);
+    const auto path = QDir(m_installed).absoluteFilePath(id + "/data");
     if (!privateDirectory(path, &directoryError)) {
         fail(directoryError);
         return {};
@@ -1375,7 +1477,23 @@ bool AddonRegistry::setSetting(const QString &id, const QString &key, const QVar
     const bool hadKey = settings.contains(key);
     const auto typeKey = "piconf-types/" + key;
     const auto oldType = settings.value(typeKey);
-    const bool portable = m_receipts.value(id).toMap().value("portableSettings").toStringList().contains(key);
+    auto portableKeys = m_receipts.value(id).toMap().value("portableSettings").toStringList();
+    if (id == "files") portableKeys << "appearance";
+    if (id == "ssh") portableKeys << "trustedX11Forwarding";
+    const bool portable = portableKeys.contains(key);
+    if (hadKey && QJsonValue::fromVariant(PiconfPreferences::scopedValue(settings, key)) == QJsonValue::fromVariant(stored)
+        && settings.status() == QSettings::NoError) {
+        if (!m_error.isEmpty()) { m_error.clear(); emit changed(); }
+        return true;
+    }
+    if (portable) {
+        QVariantMap exported;
+        for (const auto &name : portableKeys)
+            if (name == key || settings.contains(name))
+                exported[name] = name == key ? stored : PiconfPreferences::scopedValue(settings, name);
+        if (PiconfDocument::encode({{"format", 1}, {"settings", exported}}).size() > PiconfDocument::MaxFileBytes)
+            return fail(issue("Portable settings for an add-on must fit in a 1 MiB configuration file."));
+    }
     if (portable) PiconfPreferences::setScopedType(settings,key,stored);
     settings.setValue(key, stored);
     settings.sync();
@@ -1394,7 +1512,6 @@ bool AddonRegistry::setSetting(const QString &id, const QString &key, const QVar
             QFile::remove(path);
         return fail(issue("Cannot save add-on settings. Check the data folder permissions."));
     }
-    m_error.clear();
-    emit changed();
+    if (!m_error.isEmpty()) { m_error.clear(); emit changed(); }
     return true;
 }

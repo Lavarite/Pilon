@@ -1,0 +1,41 @@
+pkgbase = pilon-app
+	pkgdesc = Extensible workspace for Linux with Files, Notes, Calendar and SSH
+	pkgver = 1.0.0
+	pkgrel = 1
+	url = https://github.com/Lavarite/Pilon
+	arch = x86_64
+	license = GPL-3.0-only
+	license = MIT
+	license = MPL-2.0
+	makedepends = cmake
+	makedepends = ninja
+	makedepends = pkgconf
+	depends = glibc
+	depends = libgcc
+	depends = libstdc++
+	depends = icu
+	depends = libssh2
+	depends = qt6-base>=6.10
+	depends = qt6-declarative>=6.10
+	depends = qt6-multimedia>=6.10
+	depends = qt6-svg
+	depends = python
+	depends = hicolor-icon-theme
+	depends = shared-mime-info
+	optdepends = qt6-wayland: native Wayland support
+	optdepends = openssh: SSH sessions and SCP transfers
+	optdepends = libsecret: save credentials in the system keyring
+	optdepends = tailscale: connect to devices on a tailnet
+	optdepends = xdg-utils: open local files in desktop applications
+	optdepends = poppler: PDF previews
+	optdepends = libreoffice-fresh: Office document previews
+	optdepends = ffmpeg: media conversion and previews
+	options = !lto
+	source = https://github.com/Lavarite/Pilon/releases/download/v1.0.0/pilon-1.0.0-source.tar.gz
+	source = https://www.leonerd.org.uk/code/libvterm/libvterm-0.3.3.tar.gz
+	source = https://github.com/libical/libical/releases/download/v3.0.20/libical-3.0.20.tar.gz
+	sha256sums = 95bb9c1c201687549a2e0ed1e2a8f509587192d0a11e2d1c1448bafa155e9e6f
+	sha256sums = 09156f43dd2128bd347cbeebe50d9a571d32c64e0cf18d211197946aff7226e0
+	sha256sums = e73de92f5a6ce84c1b00306446b290a2b08cdf0a80988eca0a2c9d5c3510b4c2
+
+pkgname = pilon-app

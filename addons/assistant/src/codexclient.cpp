@@ -1,5 +1,6 @@
 #include "codexclient.h"
 #include <QJsonDocument>
+#include <utility>
 #ifdef Q_OS_ANDROID
 #include "../../../src/platform/android/androidplatformtrust.h"
 #include "../../../src/core/workspace/pilonworkspace.h"
@@ -17,8 +18,12 @@ CodexClient::CodexClient(QObject *parent) : QObject(parent)
         request("initialize", {{"clientInfo", QJsonObject{{"name", "pilon"}, {"title", "Pilon"}, {"version", "1.0"}}},
             {"capabilities", QJsonObject{{"experimentalApi", true}}}}, [this](QJsonObject, QString error) {
             m_startTimer.stop();
+            if (m_stopping || !running())
+                return;
             if (!error.isEmpty()) { shutdown(); emit failed(error); return; }
-            write({{"method", "initialized"}});
+            if (!write({{"method", "initialized"}})) {
+                shutdown(); emit failed(tr("Could not initialize the Codex app-server.")); return;
+            }
             m_ready = true;
             emit initialized();
         });
@@ -30,18 +35,23 @@ CodexClient::CodexClient(QObject *parent) : QObject(parent)
     connect(&m_process, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
         if (error == QProcess::FailedToStart && !m_stopping) {
             m_startTimer.stop();
-            emit failed(tr("Unable to start Codex: %1").arg(m_process.errorString()));
+            const auto message = tr("Unable to start Codex: %1").arg(m_process.errorString());
+            failPending(message);
+            emit failed(message);
         }
     });
     connect(&m_process, &QProcess::finished, this, [this] {
         m_ready = false;
         m_startTimer.stop();
-        m_requests.clear();
-        if (!m_stopping) emit failed(tr("Codex app-server stopped. %1").arg(QString::fromUtf8(m_log).trimmed()));
+        if (!m_stopping) {
+            const auto message = tr("Codex app-server stopped. %1").arg(QString::fromUtf8(m_log).trimmed()).trimmed();
+            failPending(message);
+            emit failed(message);
+        }
     });
 }
 
-CodexClient::~CodexClient() { shutdown(); }
+CodexClient::~CodexClient() { m_requests.clear(); shutdown(); }
 
 void CodexClient::start(const QString &executable, const QStringList &arguments, const QProcessEnvironment &environment)
 {
@@ -64,23 +74,48 @@ void CodexClient::start(const QString &executable, const QStringList &arguments,
 void CodexClient::shutdown()
 {
     m_stopping = true; m_ready = false;
-    m_startTimer.stop(); m_requests.clear();
-    if (!running()) return;
-    m_process.closeWriteChannel();
-    m_process.terminate();
-    if (!m_process.waitForFinished(1000)) { m_process.kill(); m_process.waitForFinished(1000); }
+    m_startTimer.stop();
+    if (running()) {
+        m_process.closeWriteChannel();
+        m_process.terminate();
+        if (!m_process.waitForFinished(1000)) { m_process.kill(); m_process.waitForFinished(1000); }
+    }
+    failPending(tr("The Codex request was cancelled."));
 }
 
-void CodexClient::write(const QJsonObject &message)
+bool CodexClient::write(const QJsonObject &message)
 {
-    m_process.write(QJsonDocument(message).toJson(QJsonDocument::Compact) + '\n');
+    if (m_stopping || m_process.state() != QProcess::Running)
+        return false;
+    const auto data = QJsonDocument(message).toJson(QJsonDocument::Compact) + '\n';
+    return m_process.write(data) == data.size();
+}
+
+void CodexClient::failPending(const QString &error)
+{
+    auto pending = std::exchange(m_requests, {});
+    for (auto &reply : pending)
+        reply({}, error);
 }
 
 void CodexClient::request(const QString &method, const QJsonObject &params, Reply reply)
 {
     const auto id = ++m_nextId;
+    if (!write({{"id", id}, {"method", method}, {"params", params}})) {
+        if (reply)
+            reply({}, tr("Could not send a request to the Codex app-server."));
+        return;
+    }
+    if (!reply)
+        return;
     m_requests.insert(id, std::move(reply));
-    write({{"id", id}, {"method", method}, {"params", params}});
+    if (method != "initialize") {
+        QTimer::singleShot(30000, this, [this, id] {
+            auto pending = m_requests.take(id);
+            if (pending)
+                pending({}, tr("The Codex app-server did not respond."));
+        });
+    }
 }
 
 void CodexClient::respond(const QJsonValue &id, const QJsonObject &result) { write({{"id", id}, {"result", result}}); }
@@ -92,8 +127,15 @@ void CodexClient::reject(const QJsonValue &id, const QString &message)
 void CodexClient::consume()
 {
     m_buffer += m_process.readAllStandardOutput();
-    while (m_buffer.contains('\n')) {
+    for (;;) {
         const auto end = m_buffer.indexOf('\n');
+        constexpr qsizetype maximumMessageSize = 16 * 1024 * 1024;
+        if ((end < 0 ? m_buffer.size() : end) > maximumMessageSize) {
+            m_buffer.clear();
+            shutdown(); emit failed(tr("The Codex app-server returned an oversized message.")); return;
+        }
+        if (end < 0)
+            return;
         const auto line = m_buffer.first(end); m_buffer.remove(0, end + 1);
         QJsonParseError error;
         const auto document = QJsonDocument::fromJson(line, &error);

@@ -35,18 +35,15 @@ public final class PilonNotifications {
         return new Notification.Builder(context, channel).setSmallIcon(R.drawable.pilon_foreground).setColor(accent);
     }
 
-    public static void requestPermission(Context context) {
-        if (Build.VERSION.SDK_INT >= 33 && context instanceof Activity
-                && context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
-                   != PackageManager.PERMISSION_GRANTED) {
-            Activity activity = (Activity) context;
-            activity.runOnUiThread(() -> activity.requestPermissions(
-                    new String[] { Manifest.permission.POST_NOTIFICATIONS }, 1041));
-        }
-    }
-
-    public static boolean show(Context context, int id, String title, String text) {
-        return show(context, null, id, title, text);
+    public static boolean requestPermission(Activity activity) {
+        if (Build.VERSION.SDK_INT < 33 || activity.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+                == PackageManager.PERMISSION_GRANTED) return false;
+        var preferences = activity.getSharedPreferences("pilon_permissions", Context.MODE_PRIVATE);
+        if (preferences.getBoolean("notificationsAsked", false)
+                && !activity.shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS)) return false;
+        preferences.edit().putBoolean("notificationsAsked", true).apply();
+        activity.requestPermissions(new String[] { Manifest.permission.POST_NOTIFICATIONS }, 1041);
+        return true;
     }
 
     public static boolean show(Context context, String key, String title, String text) {

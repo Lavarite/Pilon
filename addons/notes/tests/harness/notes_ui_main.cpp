@@ -11,7 +11,6 @@
 #include "../../../../src/core/documents/documentpreview.h"
 #include "../../../assistant/src/assistantmanager.h"
 #include "../../../calendar/src/calendarmanager.h"
-#include "../../../git/src/githubmanager.h"
 #include "../../../files/src/remotefilemanager.h"
 #include "../../../ssh/src/sshmanager.h"
 #include "../../../devices/src/tailscalemanager.h"
@@ -567,7 +566,6 @@ public slots:
         qmlRegisterType<DocumentPreview>("Pilon", 1, 0, "DocumentPreview");
         qmlRegisterType<AssistantManager>("Pilon", 1, 0, "AssistantManager");
         qmlRegisterType<CalendarManager>("Pilon", 1, 0, "CalendarManager");
-        qmlRegisterType<GitHubManager>("Pilon", 1, 0, "GitHubManager");
         qmlRegisterType<RemoteFileManager>("Pilon", 1, 0, "RemoteFileManager");
         qmlRegisterType<SshManager>("Pilon", 1, 0, "SshManager");
         qmlRegisterType<TailscaleManager>("Pilon", 1, 0, "TailscaleManager");

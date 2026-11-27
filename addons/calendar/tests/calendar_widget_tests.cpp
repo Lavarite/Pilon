@@ -200,7 +200,10 @@ private slots:
     void allDayDateIsIndependentOfOppositeSourceZone() {
         QTemporaryDir directory; CalendarManager manager(directory.path()); manager.setPreferences({{"timeZone", "Pacific/Kiritimati"}});
         QVERIFY(!add(manager, "Date only", "2026-11-09", "2026-11-10", true, "Pacific/Honolulu").isEmpty());
-        QVERIFY(manager.events("2026-11-09", "2026-11-10").isEmpty());
+        const auto desktop = manager.events("2026-11-09", "2026-11-10");
+        QCOMPARE(desktop.size(), 1);
+        QCOMPARE(desktop.first().toMap().value("displayDate").toString(), "2026-11-09");
+        QVERIFY(manager.events("2026-11-08", "2026-11-09").isEmpty());
         const auto snapshot = manager.widgetSnapshot("2026-11-08T11:00:00Z", 1, palette); checkBounds(snapshot);
         QCOMPARE(rows(snapshot).size(), 1); QCOMPARE(rows(snapshot)[0].toMap().value("title").toString(), "Date only");
         QVERIFY(at(snapshot, "2026-11-09T10:00:00Z").value("rows").toList().isEmpty());
@@ -250,8 +253,6 @@ private slots:
         for (const auto generation : {0.0, -1.0, 1.5, 9007199254740992.0, std::numeric_limits<double>::infinity()})
             QVERIFY(manager.widgetSnapshot("2026-11-09T08:00:00Z", generation, palette).isEmpty());
         manager.setActive(false); QVERIFY(manager.widgetSnapshot("2026-11-09T08:00:00Z", 1, palette).isEmpty());
-        manager.setActive(true); QVERIFY(manager.beginGitUpdate());
-        QVERIFY(manager.widgetSnapshot("2026-11-09T08:00:00Z", 1, palette).isEmpty()); QVERIFY(manager.finishGitUpdate());
     }
     void payloadBudgetShortensCoverageInsteadOfTruncatingRows() {
         QTemporaryDir directory; CalendarManager manager(directory.path() + "/calendar"); manager.setPreferences({{"timeZone", "UTC"}});

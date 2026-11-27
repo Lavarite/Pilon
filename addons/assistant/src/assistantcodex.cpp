@@ -3,11 +3,20 @@
 #include <QDirIterator>
 #include <QCryptographicHash>
 #include <QJsonDocument>
+#include <QRegularExpression>
 #include <QSaveFile>
+#include <QScopeGuard>
+#include <QSqlDatabase>
+#include <QSqlQuery>
 #include <QStandardPaths>
 #include <QUuid>
+#include <filesystem>
+#include <optional>
 
 namespace {
+constexpr char installedSkillFooter[] = "\nPilon execution: discover operation schemas with tool_search, then call the returned "
+    "pilon tools directly. Read supporting files with read_skill_file using this skill ID.\n";
+
 QString tomlString(const QString &value)
 {
     auto json = QJsonDocument(QJsonArray{value}).toJson(QJsonDocument::Compact);
@@ -20,6 +29,86 @@ bool writeChanged(const QString &path, const QByteArray &bytes)
     if (!QDir().mkpath(QFileInfo(path).absolutePath())) return false;
     QSaveFile file(path);
     return file.open(QIODevice::WriteOnly) && file.write(bytes) == bytes.size() && file.commit();
+}
+
+QString queuedThreadId(const QJsonValue &entry)
+{
+    return entry.isString() ? entry.toString() : entry.toObject().value("threadId").toString();
+}
+
+std::optional<QJsonArray> readCodexDeletionQueue(const QString &path)
+{
+    const QFileInfo info(path);
+    if (info.isSymLink()) return std::nullopt;
+    if (!info.exists()) return QJsonArray{};
+    QFile file(path);
+    if (!info.isFile() || !file.open(QIODevice::ReadOnly)) return std::nullopt;
+    const auto document = QJsonDocument::fromJson(file.readAll());
+    if (!document.isArray()) return std::nullopt;
+    const auto entries = document.array();
+    static const QRegularExpression chatId("^[a-f0-9]{32}$");
+    for (const auto &entry : entries)
+        if (queuedThreadId(entry).isEmpty()
+            || (!entry.isString() && !chatId.match(entry.toObject().value("chatId").toString()).hasMatch()))
+            return std::nullopt;
+    return entries;
+}
+
+bool chatDirectoryWasRemoved(const QString &path)
+{
+    std::error_code error;
+    const auto status = std::filesystem::symlink_status(QFile::encodeName(path).constData(), error);
+    return status.type() == std::filesystem::file_type::not_found;
+}
+
+bool repairMigratedRolloutPath(const QString &home, const QString &thread, const QString &error)
+{
+    static const QRegularExpression stalePath(
+        R"(^rollout path \x60(/.*?)(/(?:sessions/\d{4}/\d{2}/\d{2}|archived_sessions)/rollout-[^/]+\.jsonl(?:\.zst)?)\x60 must be in archived sessions directory$)");
+    const auto match = stalePath.match(error);
+    if (!match.hasMatch()) return false;
+
+    const auto root = QFileInfo(home).canonicalFilePath();
+    const auto previous = match.captured(1) + match.captured(2);
+    if (root.isEmpty() || QDir::cleanPath(previous) != previous || previous.startsWith(root + '/')) return false;
+    const auto plainPath = [](const QString &path) { return path.endsWith(".zst") ? path.chopped(4) : path; };
+    const auto plainCopy = root + plainPath(match.captured(2));
+    QString replacement;
+    for (const auto &candidate : {plainCopy, plainCopy + ".zst"}) {
+        const QFileInfo file(candidate);
+        if (file.isSymLink()) return false;
+        if (!file.exists()) continue;
+        if (!file.isFile() || file.canonicalFilePath() != candidate) return false;
+        if (replacement.isEmpty()) replacement = candidate;
+    }
+    if (replacement.isEmpty()) {
+        // Codex may have deleted the current copy before rejecting the old path.
+        QFileInfo parent(QFileInfo(plainCopy).absolutePath());
+        while (!parent.exists()) {
+            if (parent.isSymLink()) return false;
+            parent.setFile(parent.absolutePath());
+        }
+        if (!parent.isDir() || parent.canonicalFilePath() != parent.filePath()) return false;
+        replacement = root + match.captured(2);
+    }
+
+    // Workspace moves copy Codex's index, whose rollout paths are absolute.
+    const QFileInfo state(root + "/state_5.sqlite");
+    if (state.isSymLink() || !state.isFile()) return false;
+    const auto connection = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    const auto cleanup = qScopeGuard([&] { QSqlDatabase::removeDatabase(connection); });
+    auto database = QSqlDatabase::addDatabase("QSQLITE", connection);
+    database.setDatabaseName(state.filePath());
+    database.setConnectOptions("QSQLITE_BUSY_TIMEOUT=500");
+    if (!database.open()) return false;
+    QSqlQuery update(database);
+    if (!update.prepare("UPDATE threads SET rollout_path = :replacement "
+                        "WHERE id = :thread AND rollout_path IN (:plain, :compressed)")) return false;
+    update.bindValue(":replacement", replacement);
+    update.bindValue(":thread", thread);
+    update.bindValue(":plain", plainPath(previous));
+    update.bindValue(":compressed", plainPath(previous) + ".zst");
+    return update.exec() && update.numRowsAffected() == 1;
 }
 }
 
@@ -56,8 +145,7 @@ bool AssistantManager::installCodexSkills()
             if (relative == "SKILL.md") {
                 if (!content.startsWith("---\n"))
                     content.prepend(("---\nname: " + id + "\ndescription: " + tomlString(entry.value("description").toString()) + "\n---\n\n").toUtf8());
-                content += "\nPilon execution: discover operation schemas with tool_search, then call the returned "
-                    "pilon tools directly. Read supporting files with read_skill_file using this skill ID.\n";
+                content += installedSkillFooter;
             }
             if (!writeChanged(destination + '/' + relative, content)) return false;
         }
@@ -69,9 +157,21 @@ bool AssistantManager::installCodexSkills()
 QJsonObject AssistantManager::codexThreadOptions() const
 {
     QJsonArray disabledSkills;
-    const QString bundled = codexHome() + "/skills/.system";
+    const QDir installed(codexHome() + "/skills");
+    const QString bundled = installed.filePath(".system");
     for (const auto &directory : QDir(bundled).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot))
         disabledSkills.append(QJsonObject{{"path", directory.filePath() + "/SKILL.md"}, {"enabled", false}});
+    // An installed copy whose source went away can still be discovered by Codex.
+    constexpr qint64 footerSize = sizeof(installedSkillFooter) - 1;
+    for (const auto &directory : installed.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot | QDir::NoSymLinks)) {
+        if (!skill(directory.fileName(), false).isEmpty()) continue;
+        const QFileInfo instructions(QDir(directory.absoluteFilePath()).filePath("SKILL.md"));
+        if (!instructions.isFile() || instructions.isSymLink()) continue;
+        QFile file(instructions.filePath());
+        if (file.open(QIODevice::ReadOnly) && file.size() >= footerSize && file.seek(file.size() - footerSize)
+            && file.read(footerSize) == installedSkillFooter)
+            disabledSkills.append(QJsonObject{{"path", instructions.filePath()}, {"enabled", false}});
+    }
     const auto selected = selectedModel();
     const int context = qBound(512, selected.value("context", 8192).toInt(), 2097152);
     const auto provider = selected.value("provider").toString();
@@ -240,7 +340,7 @@ bool AssistantManager::startCodexProcess()
         environment.remove("PILON_CODEX_PROVIDER_KEY");
         if (provider == "chatgpt") arguments << "-c" << "model_provider=\"openai\"" << "-c" << "cli_auth_credentials_store=\"auto\"";
         else {
-            const auto key = m_connections.apiKey(selected.value("id").toString());
+            const auto key = m_connections.apiKey(selected.value("id").toString(), QUrl(selected.value("baseUrl").toString()));
             arguments << "-c" << "model_provider=\"pilon\"" << "-c"
                 << ("model_providers.pilon={name=\"Pilon API\",base_url=" + tomlString(selected.value("baseUrl").toString())
                     + ",wire_api=\"responses\",requires_openai_auth=false"
@@ -254,33 +354,78 @@ bool AssistantManager::startCodexProcess()
     return true;
 }
 
-void AssistantManager::deleteCodexThreads(const QStringList &threads)
+bool AssistantManager::queueCodexThreads(const QString &chatId, const QStringList &threads)
+{
+    if (threads.isEmpty()) return true;
+    const QString path = codexHome() + "/pending-deletions.json";
+    if (auto pending = readCodexDeletionQueue(path)) {
+        for (const auto &thread : threads) {
+            const QJsonObject entry{{"threadId", thread}, {"chatId", chatId}};
+            if (!thread.isEmpty() && !pending->contains(entry)) pending->append(entry);
+        }
+        if (writeChanged(path, QJsonDocument(*pending).toJson(QJsonDocument::Compact))) return true;
+    }
+    m_error = tr("Unable to save the request to delete the Codex chat history.");
+    emit stateChanged();
+    return false;
+}
+
+void AssistantManager::deleteCodexThreads()
 {
     const QString path = codexHome() + "/pending-deletions.json";
-    QFile input(path);
-    QJsonArray pending = input.open(QIODevice::ReadOnly) ? QJsonDocument::fromJson(input.readAll()).array() : QJsonArray{};
-    input.close();
-    for (const auto &thread : threads)
-        if (!thread.isEmpty() && !pending.contains(thread)) pending.append(thread);
-    if (pending.isEmpty()) return;
-    if (!writeChanged(path, QJsonDocument(pending).toJson(QJsonDocument::Compact))) {
-        m_error = tr("Unable to save the request to delete the Codex chat history."); emit stateChanged(); return;
+    const auto pending = readCodexDeletionQueue(path);
+    if (!pending) {
+        m_error = tr("Unable to read the Codex chat deletion queue.");
+        emit stateChanged();
+        return;
+    }
+
+    // A durable request can outlive a crash or a partial local deletion.
+    QSet<QString> waitingForRemoval, ready;
+    for (const auto &entry : *pending) {
+        const auto thread = queuedThreadId(entry);
+        const auto chat = entry.toObject().value("chatId").toString();
+        if (!chat.isEmpty() && !chatDirectoryWasRemoved(chatRoot() + '/' + chat)) waitingForRemoval.insert(thread);
+        else ready.insert(thread);
+    }
+    ready.subtract(waitingForRemoval);
+    ready.subtract(m_codexDeletesInFlight);
+    if (ready.isEmpty()) return;
+    const auto archive = QDir(codexHome()).filePath("archived_sessions");
+    if (QFileInfo(archive).isSymLink() || !QDir().mkpath(archive)) {
+        m_error = tr("Unable to open the Codex chat archive folder. Check its location and permissions.");
+        emit stateChanged();
+        return;
     }
     if (!m_codex.ready()) { startCodexProcess(); return; }
-    for (const auto &value : pending) {
-        const QString thread = value.toString();
-        m_codex.request("thread/delete", {{"threadId", thread}}, [this, path, thread](QJsonObject, QString error) {
-            if (!error.isEmpty() && !error.contains("not found", Qt::CaseInsensitive)
-                && !error.contains("no rollout found", Qt::CaseInsensitive)) {
-                m_error = tr("Unable to delete Codex chat history: %1").arg(error); emit stateChanged(); return;
+    for (const auto &thread : ready) {
+        m_codexDeletesInFlight.insert(thread);
+        const auto finish = [this, path, thread](QJsonObject, const QString &error) {
+            m_codexDeletesInFlight.remove(thread);
+            QString failure;
+            if (!error.isEmpty() && error != "thread not found: " + thread
+                && error != "no rollout found for thread id " + thread) {
+                failure = tr("Unable to delete Codex chat history: %1").arg(error);
+            } else {
+                const auto pending = readCodexDeletionQueue(path);
+                QJsonArray remaining;
+                if (pending)
+                    for (const auto &entry : *pending)
+                        if (queuedThreadId(entry) != thread) remaining.append(entry);
+                if (!pending || !writeChanged(path, QJsonDocument(remaining).toJson(QJsonDocument::Compact)))
+                    failure = tr("Unable to update the Codex chat deletion queue.");
+                if (m_codexLoadedThread == thread) m_codexLoadedThread.clear();
             }
-            QFile file(path);
-            if (!file.open(QIODevice::ReadOnly)) return;
-            const auto pending = QJsonDocument::fromJson(file.readAll()).array(); file.close();
-            QJsonArray remaining;
-            for (const auto &value : pending) if (value != thread) remaining.append(value);
-            writeChanged(path, QJsonDocument(remaining).toJson(QJsonDocument::Compact));
-            if (m_codexLoadedThread == thread) m_codexLoadedThread.clear();
+            if (!failure.isEmpty()) m_error = failure;
+            if (!failure.isEmpty() || (m_codexUpdatePending && m_codexDeletesInFlight.isEmpty()))
+                QTimer::singleShot(0, this, &AssistantManager::stateChanged);
+        };
+        m_codex.request("thread/delete", {{"threadId", thread}}, [this, thread, home = codexHome(), finish](QJsonObject result, QString error) {
+            if (repairMigratedRolloutPath(home, thread, error)) {
+                m_codex.request("thread/delete", {{"threadId", thread}}, finish);
+                return;
+            }
+            finish(result, error);
         });
     }
 }
@@ -297,7 +442,7 @@ void AssistantManager::requestCompletion()
     parameters.insert("temperature", 1.0); parameters.insert("top_p", 0.95);
     parameters.insert("top_k", model.value("architecture") == "gemma4" ? 64 : 20); parameters.insert("min_p", 0.0);
     if (model.value("provider") == "chat")
-        m_codexProvider.configureRemote(model, m_connections.apiKey(model.value("id").toString()));
+        m_codexProvider.configureRemote(model, m_connections.apiKey(model.value("id").toString(), QUrl(model.value("baseUrl").toString())));
     else m_codexProvider.configure(m_port, m_apiKey, parameters, AssistantModels::isLiteRt(model));
     if (!m_codexTurnId.isEmpty() && m_codexProvider.active()) { m_codexProvider.retry(); return; }
     if (!m_codex.ready()) { startCodexProcess(); return; }
@@ -426,6 +571,8 @@ void AssistantManager::startCodexTurn(bool contextRetry)
     QJsonObject turn{{"threadId", m_codexThreadId}, {"input", input}, {"cwd", workingDirectory()}};
     const auto provider = selectedModel().value("provider").toString();
     if (provider.isEmpty() || provider == "chatgpt") turn["effort"] = mode == "on" ? "medium" : mode;
+    if (provider == "chatgpt" && fastModeAvailable())
+        turn["serviceTierForTurn"] = fastMode() ? selectedModel().value("fastServiceTier").toString() : QStringLiteral("default");
     if (provider == "chatgpt" || provider == "responses") turn["summary"] = "auto";
     m_codex.request("turn/start", turn,
         [this, generation = m_generation](QJsonObject result, QString error) {
@@ -505,6 +652,7 @@ void AssistantManager::codexNotification(const QString &method, const QJsonObjec
     const auto item = params.value("item").toObject();
     const auto type = item.value("type").toString();
     const QString id = params.value("itemId").toString(item.value("id").toString());
+    if (id.isEmpty() && (type == "reasoning" || method.startsWith("item/reasoning/"))) return;
     if (method == "item/agentMessage/delta" || ((method == "item/started" || method == "item/completed") && type == "agentMessage")) {
         finishThinking(tr("Finished"));
         if (!m_codexItems.contains(id)) {
@@ -515,33 +663,61 @@ void AssistantManager::codexNotification(const QString &method, const QJsonObjec
         auto message = m_messages[m_assistantIndex].toMap();
         m_streamText = method.endsWith("/delta") ? message.value("text").toString() + params.value("delta").toString() : item.value("text").toString();
         message.insert("text", m_streamText); m_messages[m_assistantIndex] = message;
-        setStatus(tr("Responding…")); notifyStreamUpdate();
+        const auto responding = tr("Responding…");
+        if (m_status != responding) setStatus(responding);
+        notifyStreamUpdate();
         if (method == "item/completed" && !m_codexCompletedItems.contains(id)) {
             m_codexCompletedItems.insert(id);
             if (!m_streamText.isEmpty()) m_history.append(QJsonObject{{"role", "assistant"}, {"content", m_streamText}});
         }
     } else if (method == "item/reasoning/textDelta" || method == "item/reasoning/summaryTextDelta") {
-        if (m_thinkingIndex < 0) {
+        if (m_codexCompletedItems.contains(id)) return;
+        const auto index = m_codexItems.value(id, -1);
+        const auto delta = params.value("delta").toString();
+        if (index >= 0 && index != m_thinkingIndex) {
+            auto message = m_messages[index].toMap();
+            message["text"] = message.value("text").toString() + delta;
+            m_messages[index] = message;
+            notifyStreamUpdate();
+            return;
+        }
+        if (index < 0) {
+            finishThinking(tr("Finished"));
             m_streamReasoning.clear(); m_thinkingIndex = m_messages.size(); m_thinkingElapsed.start();
+            m_codexItems.insert(id, m_thinkingIndex);
             m_messages.append(QVariantMap{{"role", "thinking"}, {"id", id}, {"text", ""}, {"elapsedMs", 0}, {"state", tr("Thinking")}});
             m_thinkingTimer.start(); emit messagesChanged();
         }
-        m_streamReasoning += params.value("delta").toString(); updateThinking(); setStatus(tr("Thinking…"));
+        m_streamReasoning += delta; updateThinking();
+        const auto thinking = tr("Thinking…");
+        if (m_status != thinking) setStatus(thinking);
     } else if (method == "item/reasoning/summaryPartAdded") {
-        if (m_thinkingIndex >= 0 && !m_streamReasoning.isEmpty()) { m_streamReasoning += "\n\n"; updateThinking(); }
+        if (m_thinkingIndex >= 0 && m_codexItems.value(id, -1) == m_thinkingIndex && !m_streamReasoning.isEmpty()) {
+            m_streamReasoning += "\n\n";
+            updateThinking();
+        }
     } else if (method == "item/completed" && type == "reasoning") {
         QStringList parts;
         for (const auto &part : item.value("summary").toArray()) parts.append(part.toString());
         if (parts.isEmpty()) for (const auto &part : item.value("content").toArray()) parts.append(part.toString());
         const auto finalText = parts.join("\n\n");
-        if (!finalText.isEmpty()) {
-            if (m_thinkingIndex < 0) {
-                m_thinkingIndex = m_messages.size(); m_thinkingElapsed.start();
-                m_messages.append(QVariantMap{{"role", "thinking"}, {"id", id}, {"text", ""}, {"state", tr("Thinking")}});
+        m_codexCompletedItems.insert(id);
+        const auto index = m_codexItems.value(id, -1);
+        // Local streams can complete a reasoning item after answer text starts.
+        if (index >= 0 && index == m_thinkingIndex) {
+            if (!finalText.isEmpty()) m_streamReasoning = finalText;
+            finishThinking(tr("Finished"));
+        } else if (!finalText.isEmpty()) {
+            if (index >= 0) {
+                auto message = m_messages[index].toMap();
+                message["text"] = finalText;
+                m_messages[index] = message;
+            } else {
+                m_codexItems.insert(id, m_messages.size());
+                m_messages.append(QVariantMap{{"role", "thinking"}, {"id", id}, {"text", finalText}, {"state", tr("Finished")}});
             }
-            m_streamReasoning = finalText; updateThinking();
+            emit messagesChanged();
         }
-        finishThinking(tr("Finished"));
     } else if ((method == "item/started" || method == "item/completed") && type == "contextCompaction") {
         m_readFiles.clear();
         setStatus(method == "item/started" ? tr("Compacting conversation…") : tr("Continuing…"));
@@ -599,7 +775,7 @@ void AssistantManager::codexNotification(const QString &method, const QJsonObjec
         }
         emit messagesChanged();
         m_busy = false; setStatus({}); saveChat();
-        if (m_voiceMode && !m_streamText.trimmed().isEmpty()) speakReply(m_streamText);
+        if (voiceMode() && !m_streamText.trimmed().isEmpty()) speakReply(m_streamText);
     } else if (method == "error" && !params.value("willRetry").toBool()) {
         if (params.value("error").toObject().value("codexErrorInfo") == "contextWindowExceeded" && !m_contextRecoveryAttempted) return;
         fail(params.value("error").toObject().value("message").toString(tr("Codex failed.")));

@@ -34,6 +34,7 @@ private:
     QString key(const QString &addonId, const QString &widgetId) const;
     QString path(const QString &providerKey) const;
     QVariantMap read(const QString &providerKey) const;
+    QVariantMap readSnapshot(const QString &providerKey, const QString &owner, const QString &widget) const;
     bool currentCatalog() const;
     bool save(const QString &file, const QVariantMap &value);
     bool ready();

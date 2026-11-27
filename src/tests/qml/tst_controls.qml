@@ -228,6 +228,7 @@ TestCase {
         verify(waitForRendering(host.contentItem))
         const area = findChild(host.contentItem, "windowMoveArea")
         verify(area !== null)
+        compare(area.cursorShape, Qt.ArrowCursor)
         const startX = host.x, startY = host.y
         if (data.touch) {
             const touch = touchEvent(area)
@@ -236,9 +237,11 @@ TestCase {
             touch.release(0, area, 48, 38).commit()
         } else {
             mousePress(area, 8, 8)
+            compare(area.cursorShape, Qt.SizeAllCursor)
             mouseMove(area, 48, 38, 20)
             mouseRelease(area, 48, 38)
         }
+        compare(area.cursorShape, Qt.ArrowCursor)
         tryVerify(() => host.x !== startX && host.y !== startY)
         verify(host.x >= owner.x + 100 && host.y >= owner.y + 50
             && host.x + host.width <= owner.x + 1100 && host.y + host.height <= owner.y + 850)

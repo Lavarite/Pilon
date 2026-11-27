@@ -26,7 +26,8 @@ signals:
     void serverRequest(const QJsonValue &id, const QString &method, const QJsonObject &params);
     void failed(const QString &message);
 private:
-    void write(const QJsonObject &message);
+    bool write(const QJsonObject &message);
+    void failPending(const QString &error);
     void consume();
     QProcess m_process;
     QTimer m_startTimer;

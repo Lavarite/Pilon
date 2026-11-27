@@ -57,7 +57,7 @@ QString CalendarManager::widgetToday(const QString &nowISO) const {
 QVariantMap CalendarManager::widgetSnapshot(const QString &nowISO, double generation, const QVariantMap &palette) const {
     const auto now = widgetNow(nowISO);
     const QTimeZone zone(m_preferences.value("timeZone").toString().toUtf8());
-    if (!m_active || m_gitUpdating || !now.isValid() || !zone.isValid()
+    if (!m_active || !now.isValid() || !zone.isValid()
         || !std::isfinite(generation) || generation < 1 || generation > 9007199254740991.0 || std::floor(generation) != generation)
         return {};
     if (palette.size() != 3) return {};

@@ -60,7 +60,8 @@ QVariantMap deviceDetails(const QJsonObject &device, const QString &fallbackId, 
     if (id.isEmpty())
         id = fallbackId;
 
-    QString name = device.value(QStringLiteral("DNSName")).toString().section(QLatin1Char('.'), 0, 0);
+    const QString sshAlias = device.value(QStringLiteral("DNSName")).toString().section(QLatin1Char('.'), 0, 0);
+    QString name = sshAlias;
     if (name.isEmpty())
         name = device.value(QStringLiteral("HostName")).toString();
     if (name.isEmpty())
@@ -70,6 +71,7 @@ QVariantMap deviceDetails(const QJsonObject &device, const QString &fallbackId, 
         {QStringLiteral("id"), id},
         {QStringLiteral("name"), name},
         {QStringLiteral("ip"), deviceAddress(device)},
+        {QStringLiteral("sshAlias"), sshAlias},
         {QStringLiteral("online"), self || device.value(QStringLiteral("Online")).toBool()},
         {QStringLiteral("onlineKnown"), true},
         {QStringLiteral("self"), self},
@@ -108,6 +110,7 @@ TailscaleManager::TailscaleManager(QObject *parent)
         setStatusKnown(false);
         setServiceRunning(false);
         setLoggedIn(false);
+        setVpnDisconnected(true);
         showSavedPeers();
         setErrorMessage(tr("Unable to run Tailscale."));
         setBusy(false);
@@ -415,6 +418,7 @@ void TailscaleManager::refresh(bool clearError)
     }
     if (m_tailscaleExecutable.isEmpty()) {
         setStatusKnown(false); setServiceRunning(false); setLoggedIn(false); showSavedPeers();
+        setVpnDisconnected(true);
         setErrorMessage(tr("Tailscale is not installed."));
         return;
     }
@@ -547,6 +551,13 @@ void TailscaleManager::setServiceRunning(bool running)
     emit serviceRunningChanged();
 }
 
+void TailscaleManager::setVpnDisconnected(bool disconnected)
+{
+    if (m_vpnDisconnected == disconnected) return;
+    m_vpnDisconnected = disconnected;
+    emit vpnDisconnectedChanged();
+}
+
 void TailscaleManager::setLoggedIn(bool loggedIn)
 {
     if (m_loggedIn == loggedIn)
@@ -677,6 +688,9 @@ void TailscaleManager::applyStatus(const QByteArray &output, const QString &erro
         m_cleanupPending=false;
         setServiceRunning(false);
         setLoggedIn(false);
+#ifndef Q_OS_ANDROID
+        setVpnDisconnected(true);
+#endif
         showSavedPeers();
         if (!error.isEmpty()) setErrorMessage(error);
         else if (m_errorMessage.isEmpty()) setErrorMessage(tr("Unable to read the device account status. Check the service and try again."));
@@ -740,11 +754,17 @@ void TailscaleManager::applyStatus(const QByteArray &output, const QString &erro
     }
     setServiceRunning(serviceAvailable);
     setLoggedIn(!needsLogin);
+#ifndef Q_OS_ANDROID
+    if (!serviceAvailable || backendState != QLatin1String("Running")) setVpnDisconnected(true);
+#endif
     if (!needsLogin && settings.value("tailscale/usedIdentity").toString() == m_currentIdentity)
         NetworkSnapshot::write(NetworkSnapshot::path("tailscale-status", {m_currentIdentity}),
                                {{"devices", QJsonArray::fromVariantList(devices)}});
     else NetworkSnapshot::clear("tailscale-status");
     setDevices(std::move(devices));
+#ifndef Q_OS_ANDROID
+    if (serviceAvailable && backendState == QLatin1String("Running")) setVpnDisconnected(false);
+#endif
     setStatusKnown(true);
     setBusy(false);
     if (m_claimAfterLogin && m_loggedIn) {m_claimAfterLogin=false;useCurrentAccount();}
@@ -785,6 +805,7 @@ void TailscaleManager::refreshExternalApplication()
     if (!failure.isEmpty()) { setStatusKnown(false); setErrorMessage(failure); return; }
     const bool installed = status.value("installed").toBool();
     const bool vpn = status.value("vpnAvailable").toBool();
+    setVpnDisconnected(!installed || !status.value("enabled").toBool() || !vpn);
     const QString description = !installed ? tr("Tailscale is not installed.")
         : !status.value("enabled").toBool() ? tr("Tailscale is disabled. Open it to enable it in Android settings.")
         : status.value("pilonVpnActive").toBool() ? tr("Pilon's previous VPN is running. Connect to switch to the Tailscale app.")

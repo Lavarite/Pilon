@@ -1,5 +1,6 @@
 #include "assistantmanager.h"
 
+#include <QCryptographicHash>
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
@@ -8,12 +9,15 @@
 #include <QNetworkRequest>
 #include <QRegularExpression>
 #include <QSaveFile>
+#include <QScopeGuard>
+#include <QStringDecoder>
 #include <QTextDocumentFragment>
 #include <QUrlQuery>
-#include <limits>
 #include <cmath>
 
 namespace {
+constexpr qint64 MaxResearchBytes = 8 * 1024 * 1024;
+const QString InsufficientSummary = QStringLiteral("Summary budget too small; request more characters.");
 QJsonObject researchFunction(const QJsonObject &call)
 {
     auto function = call.value("function").toObject();
@@ -46,7 +50,7 @@ namespace {
 bool researchTool(const QString &name)
 {
     return name == "browser_search" || name == "browser_open" || name == "read_webpage"
-        || name == "search_wikipedia" || name == "search_papers" || name == "search_github";
+        || name == "search_wikipedia" || name == "search_papers";
 }
 
 QSet<QString> summaryWords(const QString &text)
@@ -78,17 +82,17 @@ QString researchSummary(const QString &content, const QString &focus, int budget
     static const QRegularExpression digits("\\p{N}");
     static const QRegularExpression conclusions("\\b(summary|conclusion|finding|found|result|total|overall|increased|decreased)\\b",
                                                QRegularExpression::CaseInsensitiveOption);
+    const int maximum = qBound(64, (budget - 80) / 2, 600);
     for (const QString &part : content.split(boundaries, Qt::SkipEmptyParts)) {
         const auto line = part.simplified();
         qsizetype position = 0;
         // Bound exceptionally long sentences and minified text, keeping word
         // boundaries where possible and marking incomplete source sentences.
         while (position < line.size()) {
-            const int maximum = qBound(64, (budget - 80) / 2, 600);
             int length = qMin<qsizetype>(line.size() - position, maximum);
             if (position + length < line.size()) {
-                const auto space = line.lastIndexOf(' ', position + length);
-                if (space > position + maximum / 2) length = space - position;
+                const auto space = QStringView(line).sliced(position, length).lastIndexOf(' ');
+                if (space > maximum / 2) length = space;
             }
             QString sentence = line.mid(position, length).trimmed();
             position += length;
@@ -148,7 +152,7 @@ QString researchSummary(const QString &content, const QString &focus, int budget
     std::reverse(sections.begin(), sections.end());
     if (!sections.isEmpty()) return sections.join("\n\n");
     // Tiny requested budgets cannot hold even one complete sentence.
-    return QStringLiteral("Summary budget too small; request more characters.").left(budget);
+    return InsufficientSummary.left(budget);
 }
 }
 
@@ -261,14 +265,22 @@ void AssistantManager::migrateResearchChats()
         if (data.value("version").toInt() != 1) continue;
         auto history = data.value("history").toArray();
         QHash<QString, QJsonObject> calls, results;
-        QStringList archives;
+        QHash<QString, QByteArray> archives;
+        QSet<QString> retained;
         const QString archiveDirectory = workspaceRoot() + "/research/" + directory.fileName();
         const auto validArchive = [&](const QString &archive) {
             static const QRegularExpression filename("^[a-f0-9]{24}-[a-f0-9]{16}\\.(json|txt)$");
             const QFileInfo file(archive);
             return !archive.isEmpty() && file.absolutePath() == archiveDirectory
-                && filename.match(file.fileName()).hasMatch() && !file.isSymLink()
+                && filename.match(file.fileName()).hasMatch() && file.isFile() && !file.isSymLink()
                 && QDir(archiveDirectory).canonicalPath() == QDir::cleanPath(archiveDirectory);
+        };
+        const auto readArchive = [&](const QString &archive, QByteArray &bytes) {
+            if (!validArchive(archive)) return false;
+            QFile file(archive);
+            if (!file.open(QIODevice::ReadOnly) || file.size() > MaxResearchBytes) return false;
+            bytes = file.read(MaxResearchBytes + 1);
+            return !bytes.isEmpty() && bytes.size() <= MaxResearchBytes && file.error() == QFile::NoError;
         };
         for (qsizetype index = 0; index < history.size(); ++index) {
             auto message = history[index].toObject();
@@ -282,20 +294,37 @@ void AssistantManager::migrateResearchChats()
             if (!researchTool(call.value("name").toString())) continue;
             auto source = QJsonDocument::fromJson(message.value("content").toString().toUtf8()).object();
             if (source.isEmpty() || source.value("summary_version").toInt() == 1) continue;
-            for (const auto &key : {"full_result_path", "full_text_path"}) {
-                const auto archive = source.value(key).toString();
-                if (validArchive(archive)) archives.append(archive);
-            }
             const QString originalPath = source.value("full_result_path").toString();
-            if (validArchive(originalPath)) {
-                QFile original(originalPath);
-                if (original.open(QIODevice::ReadOnly)) {
-                    const auto full = QJsonDocument::fromJson(original.readAll()).object();
-                    if (!full.isEmpty()) source = full;
-                }
+            const QString textPath = source.value("full_text_path").toString();
+            const QStringList references{originalPath, textPath};
+            auto keep = qScopeGuard([&] { for (const auto &archive : references) if (!archive.isEmpty()) retained.insert(archive); });
+            QByteArray original;
+            QByteArray text;
+            if (!originalPath.isEmpty()) {
+                if (!readArchive(originalPath, original)) continue;
+                const auto full = QJsonDocument::fromJson(original).object();
+                if (!full.value("content").isString() && !full.value("results").isArray()) continue;
+                source = full;
             }
-            const auto args = QJsonDocument::fromJson(call.value("arguments").toString().toUtf8()).object();
-            const auto result = presentResearchResult(call.value("name").toString(), args, id, source);
+            if (!textPath.isEmpty()) {
+                if (!readArchive(textPath, text)) continue;
+                QStringDecoder decoder(QStringDecoder::Utf8);
+                const QString content = decoder(text);
+                if (decoder.hasError()) continue;
+                if (!originalPath.isEmpty() && source.value("content").toString() != content) continue;
+                source.insert("content", content);
+            }
+            const auto args = QJsonDocument::fromJson(call.value("arguments").toString().toUtf8());
+            if (!args.isObject()) continue;
+            const auto result = presentResearchResult(call.value("name").toString(), args.object(), id, source);
+            const auto summary = result.value("content").toString();
+            if (result.contains("error") || result.value("summary_version").toInt() != 1
+                || (!source.value("content").toString().isEmpty() && (summary.isEmpty() ||
+                    (result.value("content_summarized").toBool() && InsufficientSummary.startsWith(summary))))
+                || (!source.value("results").toArray().isEmpty() && result.value("results").toArray().isEmpty())) continue;
+            if (!originalPath.isEmpty()) archives.insert(originalPath, QCryptographicHash::hash(original, QCryptographicHash::Sha256));
+            if (!textPath.isEmpty()) archives.insert(textPath, QCryptographicHash::hash(text, QCryptographicHash::Sha256));
+            keep.dismiss();
             results.insert(id, result);
             message.insert("content", QString::fromUtf8(QJsonDocument(result).toJson(QJsonDocument::Compact)));
             history[index] = message;
@@ -316,7 +345,11 @@ void AssistantManager::migrateResearchChats()
         output.setPermissions(QFile::ReadOwner | QFile::WriteOwner);
         const auto bytes = QJsonDocument(data).toJson(QJsonDocument::Compact);
         if (output.write(bytes) != bytes.size() || !output.commit()) continue;
-        for (const auto &archive : archives) QFile::remove(archive);
+        for (auto archive = archives.cbegin(); archive != archives.cend(); ++archive) {
+            QByteArray bytes;
+            if (!retained.contains(archive.key()) && readArchive(archive.key(), bytes)
+                && archive.value() == QCryptographicHash::hash(bytes, QCryptographicHash::Sha256)) QFile::remove(archive.key());
+        }
         QDir().rmdir(archiveDirectory); // Only removes an empty directory.
     }
 }
@@ -386,15 +419,6 @@ QJsonObject AssistantManager::researchResult(const QString &name, const QByteArr
                 {"abstract", plainText(item.value("abstract").toString())}});
         }
         result.insert("note", "Crossref provides publication metadata and some abstracts, not full papers. Read primary sources before citing their findings.");
-    } else {
-        if (!object.value("items").isArray())
-            return {{"error", "GitHub did not return search results."}, {"url", url.toString()}};
-        for (const auto &value : object.value("items").toArray()) {
-            const auto item = value.toObject();
-            items.append(QJsonObject{{"title", item.contains("full_name") ? item.value("full_name") : item.value("title")},
-                {"url", item.value("html_url")}, {"description", item.value("description").toString()},
-                {"body", item.value("body").toString()}, {"updated_at", item.value("updated_at")}});
-        }
     }
     result.insert("results", items);
     return result;
@@ -402,19 +426,19 @@ QJsonObject AssistantManager::researchResult(const QString &name, const QByteArr
 
 bool AssistantManager::runResearchTool(const QString &name, const QJsonObject &args)
 {
-    if (name != "search_wikipedia" && name != "search_papers" && name != "search_github" && name != "read_webpage")
+    if (name != "search_wikipedia" && name != "search_papers" && name != "read_webpage")
         return false;
     QUrl url;
     if (name == "read_webpage") {
         url = QUrl(args.value("url").toString());
-        if (!webUrl(url)) {
+        if (!webUrl(url) || url.toEncoded().size() > 4096) {
             finishTool({{"error", "Provide an HTTP or HTTPS URL without embedded credentials."}});
             return true;
         }
     } else {
         const QString query = args.value("query").toString().trimmed();
-        if (query.isEmpty()) {
-            finishTool({{"error", "Provide a search query."}});
+        if (query.isEmpty() || query.size() > 1024) {
+            finishTool({{"error", "Provide a search query of 1 to 1,024 characters."}});
             return true;
         }
         const QString limit = QString::number(args.value("limit").toInteger(10));
@@ -423,17 +447,9 @@ bool AssistantManager::runResearchTool(const QString &name, const QJsonObject &a
             url = QUrl("https://en.wikipedia.org/w/api.php");
             parameters = QUrlQuery{{"action", "query"}, {"list", "search"}, {"srsearch", query},
                 {"srlimit", limit}, {"sroffset", QString::number(args.value("offset").toInteger(0))}, {"format", "json"}};
-        } else if (name == "search_papers") {
+        } else {
             url = QUrl("https://api.crossref.org/works");
             parameters = QUrlQuery{{"query", query}, {"rows", limit}, {"offset", QString::number(args.value("offset").toInteger(0))}};
-        } else {
-            const QString kind = args.value("kind").toString("repositories");
-            if (kind != "repositories" && kind != "issues") {
-                finishTool({{"error", "kind must be repositories or issues."}});
-                return true;
-            }
-            url = QUrl("https://api.github.com/search/" + kind);
-            parameters = QUrlQuery{{"q", query}, {"per_page", limit}, {"page", QString::number(args.value("page").toInteger(1))}};
         }
         url.setQuery(parameters);
     }
@@ -441,29 +457,54 @@ bool AssistantManager::runResearchTool(const QString &name, const QJsonObject &a
     request.setRawHeader("User-Agent", "Pilon/1.0 (research; QtNetwork)");
     request.setRawHeader("Accept", name == "read_webpage" ? "text/html, text/plain, application/json" : "application/json");
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::UserVerifiedRedirectPolicy);
-    request.setMaximumRedirectsAllowed(std::numeric_limits<int>::max());
-    request.setTransferTimeout(0);
+    request.setMaximumRedirectsAllowed(5);
+    request.setTransferTimeout(10000);
     auto *reply = m_network.get(request);
     m_researchReply = reply;
     m_toolExecuting = true;
-    const auto body = std::make_shared<QByteArray>();
-    connect(reply, &QNetworkReply::redirected, this, [reply](const QUrl &destination) {
-        if (webUrl(destination) && !(reply->url().scheme() == "https" && destination.scheme() == "http"))
-            reply->redirectAllowed();
-        else reply->abort();
+    reply->setReadBufferSize(64 * 1024);
+    struct Transfer { QByteArray body; QString failure; };
+    const auto transfer = std::make_shared<Transfer>();
+    QTimer::singleShot(20000, reply, [reply, transfer] {
+        if (!reply->isRunning()) return;
+        transfer->failure = QStringLiteral("The source did not respond within 20 seconds. Try again or use a different source.");
+        reply->abort();
     });
-    const auto consume = [reply, body] { body->append(reply->readAll()); };
+    connect(reply, &QNetworkReply::redirected, this, [reply, transfer, from = url](const QUrl &destination) mutable {
+        const auto resolved = from.resolved(destination);
+        if (webUrl(resolved) && resolved.toEncoded().size() <= 4096
+            && !(from.scheme() == "https" && resolved.scheme() == "http")) {
+            from = resolved;
+            transfer->body.clear();
+            reply->redirectAllowed();
+        } else {
+            transfer->failure = QStringLiteral("The source redirected to an unsupported URL.");
+            reply->abort();
+        }
+    });
+    const auto consume = [reply, transfer] {
+        if (!transfer->failure.isEmpty()) return;
+        const auto remaining = MaxResearchBytes - transfer->body.size();
+        if (reply->bytesAvailable() > remaining) {
+            transfer->failure = QStringLiteral("The source response exceeds 8 MiB. Use a smaller source or a direct section link.");
+            if (reply->isRunning()) reply->abort();
+            return;
+        }
+        transfer->body.append(reply->readAll());
+    };
     connect(reply, &QNetworkReply::readyRead, this, consume);
-    connect(reply, &QNetworkReply::finished, this, [this, reply, body, name, consume] {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, transfer, name, consume] {
         if (m_researchReply != reply) { reply->deleteLater(); return; }
         consume();
         m_researchReply = nullptr;
         const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         QJsonObject result;
-        if (reply->error() != QNetworkReply::NoError || status < 200 || status >= 300)
+        if (!transfer->failure.isEmpty()) {
+            result = {{"error", transfer->failure}, {"http_status", status}};
+        } else if (reply->error() != QNetworkReply::NoError || status < 200 || status >= 300)
             result = {{"error", reply->errorString()}, {"http_status", status},
                 {"retry_after", QString::fromLatin1(reply->rawHeader("Retry-After"))}};
-        else result = researchResult(name, *body, reply->url(),
+        else result = researchResult(name, transfer->body, reply->url(),
             reply->header(QNetworkRequest::ContentTypeHeader).toString().section(';', 0, 0).trimmed().toLower());
         result.insert("url", reply->url().toString());
         reply->deleteLater();

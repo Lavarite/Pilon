@@ -9,12 +9,17 @@ def rect_values(rect):
     return [rect.x0, rect.y0, rect.width, rect.height]
 
 
-def page_text(page):
+def page_text(page, geometry=True):
     text, boxes = [], []
     matrix = page.rotation_matrix
-    for block in page.get_text("rawdict", sort=True)["blocks"]:
+    kind = "rawdict" if geometry else "dict"
+    flags = pymupdf.TEXTFLAGS_DICT & ~pymupdf.TEXT_PRESERVE_IMAGES
+    for block in page.get_text(kind, sort=True, flags=flags)["blocks"]:
         for line in block.get("lines", []):
             for span in line["spans"]:
+                if not geometry:
+                    text.append(span["text"])
+                    continue
                 for char in span["chars"]:
                     value = char["c"]
                     text.append(value)
@@ -22,7 +27,8 @@ def page_text(page):
                     box = rect_values(pymupdf.Rect(char["bbox"]) * matrix)
                     boxes.extend([box] * (len(value.encode("utf-16-le")) // 2))
             text.append("\n")
-            boxes.append([0, 0, 0, 0])
+            if geometry:
+                boxes.append([0, 0, 0, 0])
     return {"text": "".join(text), "characters": boxes}
 
 
@@ -67,26 +73,30 @@ def process(request):
             return result
         if command == "search":
             if request["all"]:
-                return {"pages": [page_text(page) for page in document], "all": True}
+                return {"pages": [page_text(page, geometry=False) for page in document], "all": True}
             backwards, needle = request["backwards"], request["text"]
             # Python regex preserves original string offsets for Unicode matches.
             import re
             pattern = re.compile(re.escape(needle), re.IGNORECASE)
             for offset in range(len(document) + 1):
                 number = (request["from"] + (-offset if backwards else offset)) % len(document)
-                result = page_text(document[number])
-                matches = list(pattern.finditer(result["text"]))
-                if backwards:
-                    matches.reverse()
-                for match in matches:
-                    start = len(result["text"][:match.start()].encode("utf-16-le")) // 2
-                    end = len(result["text"][:match.end()].encode("utf-16-le")) // 2
+                page = document[number]
+                text = page_text(page, geometry=False)["text"]
+                selected = None
+                for match in pattern.finditer(text):
                     if offset == 0 and request["continuation"]:
+                        start = len(text[:match.start()].encode("utf-16-le")) // 2
                         if backwards and start >= request["anchor"]:
-                            continue
+                            break
                         if not backwards and start < request["cursor"]:
                             continue
-                    return {"page": number, "offset": start, "length": end - start, "pages": [result]}
+                    selected = match
+                    if not backwards:
+                        break
+                if selected:
+                    start = len(text[:selected.start()].encode("utf-16-le")) // 2
+                    length = len(selected[0].encode("utf-16-le")) // 2
+                    return {"page": number, "offset": start, "length": length, "pages": [page_text(page)]}
             return {"page": -1}
         raise ValueError("Unknown document operation.")
 

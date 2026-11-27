@@ -5,7 +5,7 @@ pilon_root="$(cd -- "$(dirname -- "$0")/../.." && pwd)"
 if [[ "${PILON_ENV_LOADED:-0}" != 1 ]]; then
     exec python3 "$pilon_root/src/scripts/environment.py" bash "${BASH_SOURCE[0]}" "$@"
 fi
-pilon_runtime="$pilon_root/runtime/libreoffice"
+pilon_runtime="$PILON_RUNTIME_DIR/libreoffice"
 pilon_archive="LibreOffice_26.8.0_Linux_x86-64_deb.tar.gz"
 pilon_sha256="d0a6031a3837e48f9854e6d2da6489b9fadbd814afa4741fa32a197741663a22"
 if [[ -x "$pilon_runtime/program/soffice" ]]; then exit 0; fi

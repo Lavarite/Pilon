@@ -1,5 +1,5 @@
 {
-  "description": "Research current information with browser web search and rendered pages, plus scholarly, GitHub and Wikipedia sources. Verify primary evidence, dates and citations.",
+  "description": "Research current information with browser web search and rendered pages, plus scholarly and Wikipedia sources. Verify primary evidence, dates and citations.",
   "tools": [
     {
       "type": "function",
@@ -141,43 +141,6 @@
               "type": "integer",
               "minimum": 0,
               "description": "Source offset for pagination; default 0."
-            }
-          },
-          "required": [
-            "query"
-          ],
-          "additionalProperties": false
-        }
-      }
-    },
-    {
-      "type": "function",
-      "function": {
-        "name": "search_github",
-        "description": "Search public GitHub repositories or issues (including pull requests), without an account. Supports GitHub query qualifiers.",
-        "parameters": {
-          "type": "object",
-          "properties": {
-            "query": {
-              "type": "string",
-              "description": "Search terms; e.g. repo:owner/repo is:issue keywords."
-            },
-            "kind": {
-              "type": "string",
-              "enum": [
-                "repositories",
-                "issues"
-              ]
-            },
-            "limit": {
-              "type": "integer",
-              "minimum": 1,
-              "description": "Requested results per source page; default 10. Source service limits apply."
-            },
-            "page": {
-              "type": "integer",
-              "minimum": 1,
-              "description": "Source page number; default 1."
             }
           },
           "required": [

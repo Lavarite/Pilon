@@ -4,9 +4,10 @@ pilon_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 if [[ "${PILON_ENV_LOADED:-0}" != 1 ]]; then
     exec python3 "$pilon_root/src/scripts/environment.py" bash "${BASH_SOURCE[0]}" "$@"
 fi
-pilon_work="$pilon_root/build/android/ocr"
-pilon_output="$pilon_root/builds/android/runtime/arm64-v8a"
-pilon_licenses="$pilon_root/builds/android/licenses/ocr"
+pilon_dev="${PILON_DEV_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/pilon-dev}"
+pilon_work="$pilon_dev/dev-deps/android/ocr"
+pilon_output="$pilon_dev/builds/android/runtime/arm64-v8a"
+pilon_licenses="$pilon_dev/builds/android/licenses/ocr"
 pilon_ndk="${ANDROID_NDK_ROOT:-${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}/ndk/27.2.12479018}"
 pilon_qt="${PILON_ANDROID_QT:-$HOME/Qt/6.12.0/android_arm64_v8a}"
 pilon_host_qt="${QT_HOST_PATH:-$HOME/Qt/6.12.0/gcc_64}"

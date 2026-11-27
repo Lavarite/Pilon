@@ -48,17 +48,21 @@ inline QString prepareEnvironment(QProcessEnvironment &environment, const QStrin
 
 #ifdef Q_OS_ANDROID
 inline QMutex certificateMutex;
+inline QString certificatePath()
+{
+    return QDir::homePath() + "/.cache/pilon-platform/platform-ca.pem";
+}
 inline QString exportCertificates(QProcessEnvironment &environment)
 {
     QMutexLocker lock(&certificateMutex);
-    return exportCertificates(environment, QDir::homePath() + "/.cache/pilon-git/platform-ca.pem",
+    return exportCertificates(environment, certificatePath(),
                               QSslConfiguration::systemCaCertificates());
 }
 inline QString prepareEnvironment(QProcessEnvironment &environment)
 {
     QMutexLocker lock(&certificateMutex);
     // Qt obtains Android's trusted certificates through its platform certificate API.
-    return prepareEnvironment(environment, QDir::homePath() + "/.cache/pilon-git/platform-ca.pem",
+    return prepareEnvironment(environment, certificatePath(),
                               QSslConfiguration::systemCaCertificates());
 }
 #endif

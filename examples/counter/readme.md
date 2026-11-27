@@ -8,10 +8,10 @@ reset restores `step` while preserving the count.
 From the repository root:
 
 ```sh
-python3 src/scripts/compile-addon.py examples/counter --output build/counter.piext
+python3 src/scripts/compile-addon.py examples/counter --output builds/examples/counter.piext
 ```
 
-Import `build/counter.piext` in **Settings → Add-ons**, then enable Counter.
+Import `builds/examples/counter.piext` in **Settings → Add-ons**, then enable Counter.
 Use your own namespaced manifest ID when copying the example. The host supplies
 the page margin, and shared controls come from `import Pilon`.
 

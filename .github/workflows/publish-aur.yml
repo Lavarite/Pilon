@@ -1,0 +1,110 @@
+name: Publish to AUR
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Stable GitHub release tag (for example, v1.0.0)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-aur-pilon-app
+  cancel-in-progress: false
+
+jobs:
+  aur:
+    name: Update pilon-app
+    if: >-
+      github.repository == 'Lavarite/Pilon' &&
+      ((github.event_name == 'release' && vars.AUR_PUBLISH_ENABLED == 'true' &&
+        !github.event.release.draft && !github.event.release.prerelease) ||
+       (github.event_name == 'workflow_dispatch' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)))
+    runs-on: ubuntu-24.04
+    container: archlinux:base-devel
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Install Arch publishing tools
+        run: |
+          pacman -Syu --noconfirm --needed archlinux-keyring curl git jq openssh
+          useradd -m aur-builder
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify the release source and prepare the recipe
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+          RELEASE_ID: ${{ github.event.release.id }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            printf 'An AUR update requires a vMAJOR.MINOR.PATCH release tag.\n' >&2
+            exit 1
+          fi
+          release_commit=$(git rev-parse --verify "refs/tags/$RELEASE_TAG^{commit}")
+          if [[ "$GITHUB_EVENT_NAME" == release && "$release_commit" != "$GITHUB_SHA" ]]; then
+            printf 'The release tag moved since this workflow started.\n' >&2
+            exit 1
+          fi
+          git merge-base --is-ancestor "$release_commit" "refs/remotes/origin/$DEFAULT_BRANCH"
+          curl_args=(-q --fail --silent --show-error --location --retry 3 --proto '=https' --proto-redir '=https')
+          if ! curl "${curl_args[@]}" --header "Authorization: Bearer $GH_TOKEN" \
+              "https://api.github.com/repos/Lavarite/Pilon/releases/tags/$RELEASE_TAG" |
+              jq -e --arg tag "$RELEASE_TAG" --arg id "$RELEASE_ID" '
+                .tag_name == $tag and .draft == false and .prerelease == false and .published_at != null and
+                ($id == "" or (.id | tostring) == $id)
+              ' >/dev/null; then
+            printf '%s must be a published stable GitHub release.\n' "$RELEASE_TAG" >&2
+            exit 1
+          fi
+          version=${RELEASE_TAG#v}
+          git show "$release_commit:src/CMakeLists.txt" |
+            grep -Fx "project(Pilon VERSION $version LANGUAGES C CXX)" >/dev/null
+          stem="pilon-$version-source"
+          base="https://github.com/Lavarite/Pilon/releases/download/$RELEASE_TAG"
+          downloads="$RUNNER_TEMP/aur-source"
+          recipe="$RUNNER_TEMP/aur-recipe"
+          template="$RUNNER_TEMP/aur-template"
+          mkdir -p "$downloads" "$template"
+          curl "${curl_args[@]}" "$base/$stem.tar.gz" --output "$downloads/$stem.tar.gz"
+          curl "${curl_args[@]}" "$base/$stem-SHA256SUMS" --output "$downloads/$stem-SHA256SUMS"
+          read -r digest filename extra < "$downloads/$stem-SHA256SUMS"
+          if [[ ! "$digest" =~ ^[a-fA-F0-9]{64}$ || "$filename" != "$stem.tar.gz" || -n "$extra" ]]; then
+            printf 'The release checksum must identify %s.tar.gz.\n' "$stem" >&2
+            exit 1
+          fi
+          (cd -- "$downloads" && printf '%s  %s\n' "$digest" "$filename" | sha256sum --check --strict)
+          git archive "$release_commit" packaging/aur | tar -xf - -C "$template"
+          install -d -o aur-builder "$recipe"
+          runuser -u aur-builder -- bash "$template/packaging/aur/prepare.sh" "$downloads/$stem.tar.gz" "$recipe"
+          cp -- "$downloads/$stem.tar.gz" "$recipe/"
+          (cd -- "$recipe" && runuser -u aur-builder -- makepkg --verifysource)
+      - name: Push the recipe to AUR
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+        run: |
+          if [[ -z "$AUR_SSH_PRIVATE_KEY" ]]; then
+            printf 'Set the AUR_SSH_PRIVATE_KEY repository Actions secret, then rerun this job.\n' >&2
+            exit 1
+          fi
+          umask 077
+          ssh_dir=$(mktemp -d "$RUNNER_TEMP/aur-ssh.XXXXXX")
+          trap 'rm -rf -- "$ssh_dir"' EXIT
+          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > "$ssh_dir/key"
+          unset AUR_SSH_PRIVATE_KEY
+          # Ed25519 key verified against the published fingerprint at https://aur.archlinux.org/.
+          printf '%s\n' 'aur.archlinux.org ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEuBKrPzbawxA/k2g6NcyV5jmqwJ2s+zpgZGZ7tpLIcN' > "$ssh_dir/known_hosts"
+          export GIT_SSH_COMMAND="ssh -F /dev/null -i \"$ssh_dir/key\" -o UserKnownHostsFile=\"$ssh_dir/known_hosts\" -o GlobalKnownHostsFile=/dev/null -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes -o BatchMode=yes"
+          checkout="$ssh_dir/pilon-app"
+          git -c init.defaultBranch=master clone ssh://aur@aur.archlinux.org/pilon-app.git "$checkout"
+          bash .github/scripts/update-aur.sh "$RUNNER_TEMP/aur-recipe" "$checkout"

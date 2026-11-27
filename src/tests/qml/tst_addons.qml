@@ -16,14 +16,26 @@ TestCase {
         property bool setupRequired: false
         property bool backgroundEnabled: false
         property bool trayEnabled: false
+        readonly property bool canHideToTray: trayEnabled
         property bool offline: false
         property string error: ""
+        property bool quitCancelled: false
+        property bool quitDeferred: false
+        property int acceptedQuits: 0
         signal quitRequested()
         signal settingsRequested()
         signal syncRequested()
         signal filesRequested(var files)
         function hideWindow() {}
-        function cancelQuit() {}
+        function showWindow() { app.show() }
+        function cancelQuit() { quitCancelled = true; quitDeferred = false }
+        function deferQuit() { quitCancelled = true; quitDeferred = true }
+        function quit() {
+            quitCancelled = false; quitDeferred = false
+            quitRequested()
+            if (!quitCancelled) ++acceptedQuits
+            else if (!quitDeferred) showWindow()
+        }
         function setBackgroundEnabled(value) { backgroundEnabled = value; return true }
         function setTrayEnabled(value) { trayEnabled = value; return true }
     }
@@ -91,8 +103,7 @@ TestCase {
             {tag:"notes inside", id:"notes", width:676, shape:"loadingNoteCards"},
             {tag:"calendar cover", id:"calendar", width:320, shape:"loadingCalendarGrid"},
             {tag:"assistant desktop", id:"assistant", width:900, shape:"loadingChatCompose"},
-            {tag:"ssh cover", id:"ssh", width:320, shape:"loadingSshConnect"},
-            {tag:"git cover", id:"git", width:320, shape:"loadingRepositories"}
+            {tag:"ssh cover", id:"ssh", width:320, shape:"loadingSshConnect"}
         ]
     }
     function test_firstFrameLoadingFollowsEachAddonLayout(data) {
@@ -589,51 +600,6 @@ TestCase {
         verify(app.selectPage("files"))
         compare(app.pageInstance("ssh"),terminal,"Navigation retains page state")
     }
-    function test_integrationsAreConfiguredByTheirContributor() {
-        compare(change("git",true),true)
-        tryVerify(() => app.runtimeExports("git") && app.runtimeExports("git").coordinator.ready)
-        const settings = findChild(app,"settingsMenu")
-        try {
-            const git = app.addonHosts.git.settingsContext
-            compare(git.integrations().map(record => record.id).sort().join(","),"calendar,files")
-            compare(app.addonHosts.files.settingsContext.integrations().length,0)
-            compare(app.addonHosts.calendar.settingsContext.integrations().length,0)
-            verify(app.openSettings("files"))
-            verify(!findControl(app.addonHosts.files.settingsContent.entry,"integration-git-files"))
-            verify(app.openSettings("git"))
-            let action = findControl(app.addonHosts.git.settingsContent.entry,"integration-git-files")
-            verify(action)
-            settings.requestActivate(); tryCompare(settings,"active",true)
-            settings.update(); verify(waitForRendering(settings.contentItem))
-            reveal(action)
-            const position = action.mapToItem(settings.contentItem,0,0)
-            verify(position.y >= 0 && position.y + action.height <= settings.height)
-            compare(action.checked,true,"Git enables its Files integration by default")
-            verify(git.integrations().some(record => record.id === "calendar" && record.configuredEnabled))
-            verify(app.addonHosts.files.settingsContext.contributions("folder-actions").some(record => record.ownerId === "git" && record.enabled))
-            mouseClick(action)
-            tryVerify(() => git.integrations().some(record => record.id === "files" && !record.configuredEnabled))
-            action = findControl(app.addonHosts.git.settingsContent.entry,"integration-git-files")
-            tryCompare(action,"checked",false)
-            compare(change("git",false),true)
-            compare(change("git",true),true)
-            tryVerify(() => app.runtimeExports("git") && app.runtimeExports("git").coordinator.ready)
-            verify(git.integrations().some(record => record.id === "files" && !record.configuredEnabled),"An explicit opt-out survives re-enabling Git")
-            verify(app.openSettings("git"))
-            action = findControl(app.addonHosts.git.settingsContent.entry,"integration-git-files")
-            verify(!settings.categories.some(section => section.addonId === "calendar" && section.sectionId === "integrations"))
-            settings.update(); verify(waitForRendering(settings.contentItem))
-            reveal(action)
-            mouseClick(action)
-            tryVerify(() => git.integrations().some(record => record.id === "files" && record.configuredEnabled))
-            action = findControl(app.addonHosts.git.settingsContent.entry,"integration-git-files")
-            tryCompare(action,"checked",true)
-        } finally {
-            verify(app.addonRegistryObject.setIntegrationEnabled("git","files",false))
-            settings.close()
-            compare(change("git",false),true)
-        }
-    }
     function test_allPagesCanBeDisabledAndSettingsRemainReachable() {
         tryCompare(app.addonHosts.notes.context.notesManager,"loading",false)
         for (const id of ["assistant","notes","calendar","ssh","files"]) compare(change(id,false),true,id)
@@ -702,6 +668,30 @@ TestCase {
         const settings = findChild(app,"settingsMenu")
         verify(settings.visible); verify(host.settingsContent.visible && host.settingsContent.enabled)
         settings.close()
+    }
+    function test_trayQuitKeepsWindowHiddenUntilPreparationNeedsAttention_data() {
+        return [{tag:"success", rejected:false}, {tag:"rejected-work", rejected:true}]
+    }
+    function test_trayQuitKeepsWindowHiddenUntilPreparationNeedsAttention(data) {
+        const host = createTemporaryObject(hostFactory, app.contentItem, {enabled:true, selected:true})
+        verify(host.ensurePage())
+        app.addonHosts[host.descriptor.id] = host
+        host.page.dirty = data.rejected
+        service.acceptedQuits = 0
+        try {
+            app.hide()
+            service.quit()
+            verify(app.preparingWorkspace)
+            verify(!app.visible, "Preparing a quit must not reveal the hidden window")
+            service.quit()
+            verify(!app.visible, "A repeated quit must not reveal a preparing window")
+            tryCompare(app, "preparingWorkspace", false)
+            compare(service.acceptedQuits, data.rejected ? 0 : 1)
+            compare(app.visible, data.rejected)
+            if (data.rejected) verify(app.addonError.includes("Save"))
+        } finally {
+            delete app.addonHosts[host.descriptor.id]
+        }
     }
     function test_closingPreparesExternalEntriesAndPreservesRejectedWork() {
         const host = createTemporaryObject(hostFactory,app.contentItem,{enabled:true,selected:true})

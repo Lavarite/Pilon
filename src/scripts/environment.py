@@ -11,6 +11,18 @@ import sys
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def installation_root():
+    return Path(os.environ.get("PILON_INSTALL_ROOT") or Path.home() / "Pilon").expanduser().absolute()
+
+
+def development_root():
+    override = os.environ.get("PILON_DEV_DIR")
+    if override:
+        return Path(override).expanduser().absolute()
+    cache = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
+    return cache.expanduser().absolute() / "pilon-dev"
+
+
 def load_environment(root=ROOT):
     inherited = set(os.environ)
     def read_file(path):
@@ -40,6 +52,10 @@ def load_environment(root=ROOT):
         if path.stat().st_uid != os.getuid() or stat.S_IMODE(path.stat().st_mode) & 0o077:
             raise ValueError("PILON_RELEASE_ENV must be owned by this user with mode 0600 or stricter")
         read_file(path)
+    os.environ["PILON_DEV_DIR"] = str(development_root())
+    os.environ["PILON_INSTALL_ROOT"] = str(installation_root())
+    runtime = os.environ.get("PILON_RUNTIME_DIR") or installation_root() / ".runtime"
+    os.environ["PILON_RUNTIME_DIR"] = str(Path(runtime).expanduser().absolute())
     os.environ["PILON_ENV_LOADED"] = "1"
 
 

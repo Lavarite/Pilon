@@ -30,16 +30,17 @@ patch (expected pass). Preserve both APK/native-plugin hashes and result logs.
 Installation/execution waits for the root agent's explicit phone window. The
 test's host build is a compile check only; the Android-only case skips on Linux.
 
-The previously verified surface-only artifacts are retained under
-`build/android/qt-platform/surface-only-artifacts`. With that baseline present,
+The build uses the external [Android development root](../../../../../scripts/android/README.md).
+The previously verified surface-only artifacts are retained there under
+`dev-deps/android/qt-platform/surface-only-artifacts`. With that baseline present,
 rebuild/package both matching cohorts without accessing a device with:
 
 ```sh
-python3 src/tests/package_android_qt_activation.py
+python3 src/tests/platform/android/package_android_qt_activation.py
 ```
 
 The helper supplies JDK21 to Gradle, stages exactly one platform plugin and one
 merged Qt jar, and runs the APK coherence audit. APKs and hashes are saved under
-`build/android/qt-platform/accessibility-activation-{red,green}.apk` and
+`dev-deps/android/qt-platform/accessibility-activation-{red,green}.apk` and
 `activation-{red,green}-packaging.json`. `androidtestrunner` execution additionally
 needs `QT_QPA_PLATFORM=android` and no inherited host Qt plugin/import paths.

@@ -7,10 +7,10 @@ with no runtime, network activity or external dependencies.
 From the repository root:
 
 ```sh
-python3 src/scripts/compile-addon.py examples/checklist --output build/checklist.piext
+python3 src/scripts/compile-addon.py examples/checklist --output builds/examples/checklist.piext
 ```
 
-Install `build/checklist.piext` through Settings → Add-ons, then enable Checklist.
+Install `builds/examples/checklist.piext` through Settings → Add-ons, then enable Checklist.
 The host supplies the 16px page margin; the page does not add another one.
 
 `addon.setting`/`addon.setSetting` store `items` (an array of `{title, done}`)

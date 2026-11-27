@@ -31,7 +31,6 @@ class NotesManager : public QObject {
     Q_OBJECT
     QML_ELEMENT
     Q_PROPERTY(bool active READ active WRITE setActive NOTIFY activeChanged)
-    Q_PROPERTY(bool gitUpdating READ gitUpdating NOTIFY gitUpdatingChanged)
     Q_PROPERTY(QString storageDirectory READ storageDirectory NOTIFY storageDirectoryChanged)
     Q_PROPERTY(QString searchQuery READ searchQuery WRITE setSearchQuery NOTIFY searchQueryChanged)
     Q_PROPERTY(QVariantList searchMatches READ searchMatches NOTIFY searchMatchesChanged)
@@ -68,11 +67,6 @@ public:
     AssistantModels *handwritingModels();
     bool active() const { return m_active; }
     void setActive(bool active);
-    bool gitUpdating() const { return m_gitUpdating; }
-    Q_INVOKABLE bool beginGitUpdate();
-    Q_INVOKABLE bool finishGitUpdate();
-    Q_INVOKABLE bool validateGitSnapshot(const QString &directory);
-    Q_INVOKABLE bool adoptGitDirectory(const QString &directory);
     Q_INVOKABLE QString disableBlockedReason() const;
     Q_INVOKABLE bool prepareDisable();
     Q_INVOKABLE bool resetPreferences(bool apply = true);
@@ -147,7 +141,6 @@ public:
     Q_INVOKABLE void cancelImport();
 signals:
     void activeChanged();
-    void gitUpdatingChanged();
     void storageDirectoryChanging();
     void storageDirectoryChanged();
     void clipboardChanged();
@@ -190,9 +183,8 @@ private:
     };
     static LoadedLibrary readSettings(const QString &directory);
     static LoadedLibrary decodeSettings(const QVariantMap &object);
-    static LoadedLibrary readGitSnapshot(const QString &directory, const QString &assetRoot);
-    static LoadedLibrary readLibrary(const QString &directory, const QString &assetRoot, bool strict = false);
-    void applySettings(const LoadedLibrary &data);
+    static LoadedLibrary readLibrary(const QString &directory, const QString &assetRoot);
+    void applySettings(const LoadedLibrary &data, bool persistImported = true);
     void loadLibrary(bool asynchronous = true);
     void applyLibrary(const LoadedLibrary &data);
     void updateSearchMatches();
@@ -231,9 +223,10 @@ private:
     QFutureWatcher<LoadedLibrary> m_loadWatcher;
     QFutureWatcher<QString> m_saveWatcher;
     QMap<QString, QVariantMap> m_pendingSaves;
+    QSet<QString> m_failedSaves;
     QString m_savingId;
     QVariantMap m_savingSnapshot;
-    bool m_active = true, m_requestedActive = true, m_gitUpdating = false, m_useDefaultDirectory = false;
+    bool m_active = true, m_useDefaultDirectory = false;
     bool m_loading = false, m_writing = false, m_flushing = false;
     QTemporaryDir m_exportDirectory;
     NoteElements m_elementsModel{this};

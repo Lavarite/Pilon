@@ -1,5 +1,6 @@
 #include "piconfpreferences.h"
 #include "piconftransaction.h"
+#include "pilonworkspace.h"
 
 #include <QColor>
 #include <QDir>
@@ -25,7 +26,8 @@ using Files = PiconfDocument::Files;
 const QString hostStore = QStringLiteral(".pilon/settings.ini");
 const QString baselineFile = QStringLiteral(".pilon/piconf-baseline.json");
 const QString receiptsFile = QStringLiteral(".pilon/addons/registry.json");
-const QStringList builtins{"assistant", "calendar", "devices", "files", "git", "notes", "ssh"};
+const QStringList builtins{"assistant", "calendar", "devices", "files", "notes", "ssh"};
+constexpr qint64 maxStoreBytes = 30 * 1024 * 1024;
 
 bool validId(const QString &id) {
     static const QRegularExpression external(R"(\A[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)+\z)");
@@ -41,25 +43,46 @@ QString addonFile(const QString &id) {
 QString addonStore(const QString &id) {
     return "addon-data/" + id + "/settings.ini";
 }
+bool packagePresent(const QString &root, const QString &id, const QVariantMap &receipt) {
+    if (receipt.value("removed").toBool()) return false;
+    const auto folder = root + "/addons/";
+    return QFileInfo(folder + id + '/' + id + ".piext").isFile() ||
+           QFileInfo(folder + receipt.value("file").toString()).isFile();
+}
 
 bool readExisting(const QString &root, const QString &name, Files &files, QString &error) {
-    const QString path = root + '/' + name;
-    for (QString part = path; part != root; part = QFileInfo(part).absolutePath()) {
+    const QDir workspace(root);
+    const QString path = QDir::cleanPath(workspace.filePath(PiconfDocument::storagePath(name)));
+    const QString relative = workspace.relativeFilePath(path);
+    if (relative == "." || relative == ".." || relative.startsWith("../") || QDir::isAbsolutePath(relative)) {
+        error = QObject::tr("Configuration store is outside the workspace: %1").arg(name);
+        return false;
+    }
+    for (QString part = path; part != root;) {
         if (QFileInfo(part).isSymLink()) {
             error = QObject::tr("Configuration path contains a symbolic link: %1").arg(name);
             return false;
         }
+        const auto parent = QFileInfo(part).absolutePath();
+        if (part == parent) {
+            error = QObject::tr("Configuration store is outside the workspace: %1").arg(name);
+            return false;
+        }
+        part = parent;
     }
     QFile f(path);
     if (!f.exists()) return true;
-    if (!QFileInfo(f).isFile() || f.size() > 30 * 1024 * 1024 || !f.open(QIODevice::ReadOnly)) {
+    if (!QFileInfo(f).isFile() || f.size() > maxStoreBytes || !f.open(QIODevice::ReadOnly)) {
         error = QObject::tr("Cannot read configuration store %1.").arg(name);
         return false;
     }
-    files[name] = f.readAll();
-    if (f.error() == QFileDevice::NoError) return true;
-    error = f.errorString();
-    return false;
+    const auto bytes = f.read(maxStoreBytes + 1);
+    if (f.error() != QFileDevice::NoError || bytes.size() > maxStoreBytes) {
+        error = QObject::tr("Cannot read configuration store %1.").arg(name);
+        return false;
+    }
+    files[name] = bytes;
+    return true;
 }
 
 bool jsonObject(const QByteArray &bytes, QVariantMap &out, const QString &label, QString &error) {
@@ -75,7 +98,7 @@ QVariant normalized(const QVariant &value) {
     return QJsonValue::fromVariant(value).toVariant();
 }
 
-enum class Codec { Plain, Colour, JsonText, JsonBytes, Path, Bookmarks, Appearance, Providers, Servers };
+enum class Codec { Plain, Colour, JsonText, JsonBytes, Path, Bookmarks, Appearance, Servers };
 struct Field {
     QString store, native, file;
     QStringList keys;
@@ -94,7 +117,8 @@ QString portablePath(const QString &root, const QString &path) {
 }
 
 QString nativePath(const QString &root, const QString &path) {
-    return path == "@workspace" || path.startsWith("@workspace/") ? root + path.mid(10) : path;
+    const auto absolute = path == "@workspace" || path.startsWith("@workspace/") ? root + path.mid(10) : path;
+    return PilonWorkspace::currentPublicPath(root, absolute);
 }
 QVariant remapPaths(Codec codec, const QVariant &value, const QString &root, bool toNative) {
     const auto mapPath = [&](const QString &path) { return toNative ? nativePath(root, path) : portablePath(root, path); };
@@ -125,18 +149,17 @@ QVariant remapPaths(Codec codec, const QVariant &value, const QString &root, boo
     rules["paths"] = mapped;
     return rules;
 }
-const QStringList &providerKeys(Codec codec) {
-    static const QStringList git{"id", "type", "name", "host", "sshKey", "credentialUrl", "credentialUsername"};
+const QStringList &serverKeys() {
     static const QStringList assistant{"id",      "name",   "baseUrl", "remoteModel", "protocol",
                                        "context", "vision", "audio",   "video",       "modalityOverrides"};
-    return codec == Codec::Providers ? git : assistant;
+    return assistant;
 }
-QVariantList selectProviders(const QVariantList &rows, Codec codec) {
+QVariantList selectServers(const QVariantList &rows) {
     QVariantList result;
     for (const auto &row : rows) {
         QVariantMap selected;
         const auto input = row.toMap();
-        for (const auto &key : providerKeys(codec))
+        for (const auto &key : serverKeys())
             if (input.contains(key)) selected.insert(key, input[key]);
         result.append(selected);
     }
@@ -156,9 +179,8 @@ QVariant asPortable(const Field &field, QVariant raw, const QString &root) {
         return normalized(remapPaths(field.codec, raw, root, false));
     case Codec::Appearance:
         return remapPaths(field.codec, QJsonDocument::fromJson(raw.toByteArray()).toVariant(), root, false);
-    case Codec::Providers:
     case Codec::Servers:
-        return normalized(selectProviders(raw.toList(), field.codec));
+        return normalized(selectServers(raw.toList()));
     case Codec::Plain:
         break;
     }
@@ -184,20 +206,19 @@ QVariant asNative(const Field &field, const QVariant &value, const QVariant &bef
     case Codec::Appearance:
         return QString::fromUtf8(
             QJsonDocument::fromVariant(remapPaths(field.codec, value, root, true)).toJson(QJsonDocument::Compact));
-    case Codec::Providers:
     case Codec::Servers: {
         QVariantList result;
-        const QString endpoint = field.codec == Codec::Servers ? "baseUrl" : "host";
+        const QString endpoint = QStringLiteral("baseUrl");
         for (const auto &row : value.toList()) {
             auto item = row.toMap();
             // Keyring entries belong to a local server. A restored ID alone cannot grant an API key.
-            if (field.codec == Codec::Servers) item.insert("hasKey", false);
+            item.insert("hasKey", false);
             for (const auto &oldRow : before.toList()) {
                 const auto old = oldRow.toMap();
                 if (old.value("id") != item.value("id") || old.value(endpoint) != item.value(endpoint)) continue;
-                if (field.codec == Codec::Servers) item.remove("hasKey");
+                item.remove("hasKey");
                 for (auto it = old.cbegin(); it != old.cend(); ++it)
-                    if (!providerKeys(field.codec).contains(it.key())) item.insert(it.key(), it.value());
+                    if (!serverKeys().contains(it.key())) item.insert(it.key(), it.value());
                 break;
             }
             result.append(item);
@@ -259,7 +280,12 @@ struct Stores {
                 error = QObject::tr("Cannot stage %1.").arg(id);
                 return false;
             }
-            updated[id] = f.readAll();
+            const auto bytes = f.read(maxStoreBytes + 1);
+            if (f.error() != QFileDevice::NoError || bytes.size() > maxStoreBytes) {
+                error = QObject::tr("Cannot read staged preferences for %1.").arg(id);
+                return false;
+            }
+            updated[id] = bytes;
         }
         const auto bytes = QJsonDocument::fromVariant(baseline).toJson(QJsonDocument::Compact);
         if (before.value(baselineFile) != bytes) updated[baselineFile] = bytes;
@@ -277,7 +303,7 @@ bool seedLegacyOptions(Stores &stores, QSet<QString> &changed, QString &error) {
         if (host->contains(key)) continue;
         QVariantMap options;
         if (id == "notes") {
-            const QString library = host->value("notes/directory", stores.root + "/Notes").toString();
+            const QString library = host->value("notes/directory", stores.root + "/notes").toString();
             QFile source(QDir(library).filePath(".settings.json"));
             if (!source.exists()) continue;
             if (QFileInfo(source).isSymLink() || source.size() > PiconfDocument::MaxFileBytes ||
@@ -344,15 +370,16 @@ QList<Field> fields(const PiconfDocument &doc, Stores &stores, QString &error) {
     host("keybindings/stylus", "shortcuts", "stylus", QVariantMap{});
     host("addons/sidebarOrder", "sidebar", "order", QVariantList{});
     host("addons/hiddenPages", "sidebar", "hidden", QVariantList{});
-    const auto declarations = doc.values().value("addons").toMap();
+    const auto declarations = PiconfPreferences::supportedAddons(doc.values().value("addons").toMap());
+    const auto hostKeys = stores.settings.value(hostStore)->allKeys();
     for (auto it = declarations.cbegin(); it != declarations.cend(); ++it) {
         const QString id = it.key(), file = doc.addonFile(id), store = addonStore(id);
-        if (!stores.open(store, error)) return {};
         result.append({hostStore,
                        "addons/enabled/" + id,
                        main,
                        {"addons", id, "enabled"},
-                       builtins.contains(id) && id != "git" && id != "devices"});
+                       builtins.contains(id) && id != "devices"});
+        if (file.isEmpty()) continue;
         const auto pref = [&](const QString &key, const QString &name, const QVariant &fallback = {},
                               Codec codec = Codec::Plain) {
             result.append({hostStore, key, file, {"preferences", name}, fallback, codec});
@@ -367,12 +394,6 @@ QList<Field> fields(const PiconfDocument &doc, Stores &stores, QString &error) {
         } else if (id == "devices") {
             pref("tailscale/includedDevices", "includedDevices", QVariantList{});
             pref("tailscale/deviceSelectionInitialized", "selectionInitialized", false);
-        } else if (id == "git") {
-            pref("GitHub/commitName", "commitName", QString{});
-            pref("GitHub/commitEmail", "commitEmail", QString{});
-            pref("GitHub/cloneDirectory", "cloneDirectory", {}, Codec::Path);
-            pref("Git/providers", "providers", {}, Codec::Providers);
-            pref("Git/activeProvider", "activeProvider");
         } else if (id == "notes" || id == "calendar") {
             pref(id + "/directory", "directory", {}, Codec::Path);
             pref(id + "/portablePreferences", "options");
@@ -385,18 +406,23 @@ QList<Field> fields(const PiconfDocument &doc, Stores &stores, QString &error) {
             pref("assistant/voiceMode", "voiceMode", false);
             pref("assistant/voicePrompt", "voicePrompt");
             pref("assistant/voiceSpeed", "voiceSpeed", 5);
+            pref("assistant/speechInput", "speechInput");
+            pref("assistant/speechOutput", "speechOutput");
+            pref("assistant/speechPreset", "speechPreset");
             pref("assistantSidebar/width", "sidebarWidth");
-            auto reasoning = doc.values(file).value("reasoning").toMap().keys();
-            for (const auto &key : stores.settings[hostStore]->allKeys())
-                if (key.startsWith("assistant/reasoning/"))
-                    reasoning << key.sliced(QStringLiteral("assistant/reasoning/").size());
-            reasoning.removeDuplicates();
-            for (const auto &key : reasoning)
-                result.append({hostStore, "assistant/reasoning/" + key, file, {"reasoning", key}, {}});
+            for (const auto &group : {QStringLiteral("reasoning"), QStringLiteral("fastMode")}) {
+                const auto prefix = "assistant/" + group + '/';
+                auto modelIds = doc.values(file).value(group).toMap().keys();
+                for (const auto &key : hostKeys)
+                    if (key.startsWith(prefix)) modelIds << key.sliced(prefix.size());
+                modelIds.removeDuplicates();
+                for (const auto &model : modelIds)
+                    result.append({hostStore, prefix + model, file, {group, model}, {}});
+            }
         }
         const QString prefix = "addons/integrations/" + id + '/';
         auto integrations = doc.values(file).value("integrations").toMap().keys();
-        for (const auto &key : stores.settings[hostStore]->allKeys())
+        for (const auto &key : hostKeys)
             if (key.startsWith(prefix)) integrations << key.mid(prefix.size());
         integrations.removeDuplicates();
         for (const auto &name : integrations)
@@ -405,6 +431,7 @@ QList<Field> fields(const PiconfDocument &doc, Stores &stores, QString &error) {
         if (id == "files") keys << "appearance";
         if (id == "ssh") keys << "trustedX11Forwarding";
         keys.removeDuplicates();
+        if (!keys.isEmpty() && !stores.open(store, error)) return {};
         for (const auto &key : keys) {
             if (!validKey(key)) continue;
             const auto codec = id == "files" && key == "appearance" ? Codec::Appearance : Codec::Plain;
@@ -433,22 +460,24 @@ bool ensureDeclarations(PiconfDocument &doc, Stores &stores, QString &error) {
         const QString sourceMarker = "$source/" + id;
         if (declarations.contains(id)) {
             const auto old = stores.baseline.value(sourceMarker);
-            if (!old.isValid()) continue;
             const auto declared = declarations.value(id).toMap().value("source");
-            if (old != declared)
+            if (old.isValid() && old != declared)
                 stores.baseline.remove(sourceMarker);
-            else if (info.contains("source") && declared != source) {
+            else if (old.isValid() && info.contains("source") && declared != source) {
                 edits.append({PiconfDocument::MainPath, {"addons", id, "source"}, source});
                 stores.baseline.insert(sourceMarker, source);
             }
-            continue;
+        } else {
+            edits.append({PiconfDocument::MainPath, {"addons", id, "source"}, source});
+            stores.baseline.insert(sourceMarker, source);
         }
+        if (!doc.addonFile(id).isEmpty()) continue;
+        if (!info.isEmpty() && !packagePresent(stores.root, id, info) &&
+                !QFileInfo(stores.root + "/addons/" + id + "/data").isDir()) continue;
         const QString path = addonFile(id);
         if (!readExisting(stores.root, path, additions, error)) return false;
         if (!additions.contains(path)) additions[path] = PiconfDocument::encode({{"format", 1}});
-        stores.baseline.insert(sourceMarker, source);
-        for (const auto &[key, value] : QVariantMap{{"source", source}, {"config", "../" + path}}.asKeyValueRange())
-            edits.append({PiconfDocument::MainPath, {"addons", id, key}, value});
+        edits.append({PiconfDocument::MainPath, {"addons", id, "config"}, "../" + path});
     }
     return edits.isEmpty() || doc.apply(edits, additions, error);
 }
@@ -464,7 +493,7 @@ bool supported(const Field &field, const QVariant &value) {
         return type == QJsonValue::String && (path.isEmpty() || QDir::isAbsolutePath(path) || path == "@workspace" ||
                                               (path.startsWith("@workspace/") && QDir::cleanPath(path) == path));
     }
-    if (field.codec == Codec::Servers || field.codec == Codec::Providers) {
+    if (field.codec == Codec::Servers) {
         if (type != QJsonValue::Array) return false;
         QSet<QString> ids;
         for (const auto &row : value.toList()) {
@@ -477,9 +506,9 @@ bool supported(const Field &field, const QVariant &value) {
                 if (!QStringList{"vision", "audio", "video"}.contains(it.key()) ||
                     QJsonValue::fromVariant(it.value()).type() != QJsonValue::Double)
                     return false;
-            if (field.codec == Codec::Servers && !entry.contains("baseUrl")) return false;
+            if (!entry.contains("baseUrl")) return false;
             for (const auto &key : entry.keys())
-                if (!providerKeys(field.codec).contains(key)) return false;
+                if (!serverKeys().contains(key)) return false;
             for (const auto &key : {"baseUrl", "credentialUrl"}) {
                 const QUrl url(entry.value(key).toString());
                 if (!url.userInfo().isEmpty() || url.hasQuery() || url.hasFragment()) return false;
@@ -493,10 +522,15 @@ bool supported(const Field &field, const QVariant &value) {
     if (field.native == "Pilon/glassFrostiness")
         return value.toDouble() == value.toInt() && value.toInt() >= 0 && value.toInt() <= 100;
     if (field.native == "Pilon/colourModeIndex")
-        return value.toDouble() == value.toInt() && value.toInt() >= 0 && value.toInt() <= 3;
-    if (field.keys.first() == "integrations" || field.native.startsWith("addons/enabled/")) return type == QJsonValue::Bool;
-    if (field.native == "assistant/effort" || field.keys.first() == "reasoning")
-        return type == QJsonValue::Double && value.toInt() >= 0 && value.toInt() <= 3 && value.toDouble() == value.toInt();
+        return type == QJsonValue::Double && value.toDouble() == value.toInt() && value.toInt() >= 0 && value.toInt() <= 1;
+    if (field.keys.first() == "integrations" || field.keys.first() == "fastMode" || field.native.startsWith("addons/enabled/"))
+        return type == QJsonValue::Bool;
+    if (field.native == "assistant/effort" || field.keys.first() == "reasoning") {
+        const int index = value.toInt();
+        // The Assistant bounds per-model indices against the provider's current list when loading them.
+        return type == QJsonValue::Double && index >= 0 && value.toDouble() == index &&
+               (field.native != "assistant/effort" || index <= 3);
+    }
     if (field.native == "calendar/portablePreferences") {
         if (type != QJsonValue::Object) return false;
         const auto options = value.toMap();
@@ -523,11 +557,14 @@ bool supported(const Field &field, const QVariant &value) {
         return type == QJsonValue::Object || type == QJsonValue::Array;
     return true;
 }
-bool validateFields(const PiconfDocument &doc, const QList<Field> &catalog, QString &error) {
+bool validateDeclarations(const PiconfDocument &doc, QString &error) {
     const auto addons = doc.values().value("addons").toMap();
+    static const QRegularExpression builtinName(R"(\A[a-z][a-z0-9-]{0,63}\z)");
     for (auto it = addons.cbegin(); it != addons.cend(); ++it) {
         const auto entry = it.value().toMap();
         const auto source = entry.value("source", builtins.contains(it.key()) ? "builtin" : "local").toString();
+        if (!validId(it.key()) && source == "builtin" && builtinName.match(it.key()).hasMatch())
+            continue;
         const QUrl link(source);
         if (!validId(it.key()) || (source != "local" && source != "builtin" &&
                                    (link.scheme() != "https" || link.host().isEmpty() || !link.isValid() ||
@@ -548,6 +585,9 @@ bool validateFields(const PiconfDocument &doc, const QList<Field> &catalog, QStr
             return false;
         }
     }
+    return true;
+}
+bool validateFields(const PiconfDocument &doc, const QList<Field> &catalog, QString &error) {
     for (const auto &field : catalog) {
         const QVariant value = nested(doc.values(field.file), field.keys);
         if (!supported(field, value)) {
@@ -561,6 +601,7 @@ bool validateFields(const PiconfDocument &doc, const QList<Field> &catalog, QStr
 enum class Direction { Startup, Running, Imported };
 bool synchronize(PiconfDocument &doc, Stores &stores, Direction direction, bool newWorkspace, Files &updated, QString &error,
                  const QString &onlyAddon = {}) {
+    if (!validateDeclarations(doc, error)) return false;
     const auto catalog = fields(doc, stores, error);
     if (!error.isEmpty() || !validateFields(doc, catalog, error)) return false;
     QSet<QString> changed;
@@ -571,7 +612,7 @@ bool synchronize(PiconfDocument &doc, Stores &stores, Direction direction, bool 
         const auto store = stores.settings.value(field.store);
         auto raw =
             field.store == hostStore ? store->value(field.native) : PiconfPreferences::scopedValue(*store, field.native);
-        if (raw.isValid() && field.keys.first() == "integrations") raw = raw.toBool();
+        if (raw.isValid() && (field.keys.first() == "integrations" || field.keys.first() == "fastMode")) raw = raw.toBool();
         if (raw.isValid() && field.keys.first() == "reasoning") raw = raw.toInt();
         const auto oldRoot = stores.baseline.value("$workspace", stores.root).toString();
         const bool movedAppearance = field.codec == Codec::Appearance && oldRoot != stores.root;
@@ -581,10 +622,7 @@ bool synchronize(PiconfDocument &doc, Stores &stores, Direction direction, bool 
         if (field.native.startsWith("addons/enabled/")) {
             const auto id = field.keys.at(1);
             const auto receipt = stores.receipts.value(id).toMap();
-            const bool missing = receipt.isEmpty()
-                                     ? !builtins.contains(id)
-                                     : receipt.value("removed").toBool() ||
-                                           !QFileInfo::exists(stores.root + "/addons/" + receipt.value("file").toString());
+            const bool missing = receipt.isEmpty() ? !builtins.contains(id) : !packagePresent(stores.root, id, receipt);
             if (missing) {
                 // Keep the requested state in the declaration. Installation explicitly enables it after dependency checks.
                 if (native.toBool()) {
@@ -665,6 +703,11 @@ void PiconfPreferences::setScopedType(QSettings &store, const QString &key, cons
         store.remove(metadata);
 }
 
+QVariantMap PiconfPreferences::supportedAddons(QVariantMap declarations) {
+    declarations.removeIf([](auto it) { return !validId(it.key()); });
+    return declarations;
+}
+
 PiconfPreferences::PiconfPreferences() {
     m_timer.setSingleShot(true);
     m_timer.setInterval(150);
@@ -682,7 +725,7 @@ PiconfPreferences &PiconfPreferences::instance() {
 void PiconfPreferences::watch(const QStringList &names) {
     QSet<QString> desired;
     for (const auto &name : names) {
-        const auto path = m_root + '/' + name;
+        const auto path = m_root + '/' + PiconfDocument::storagePath(name);
         if (QFileInfo::exists(path)) desired.insert(path);
         auto parent = QFileInfo(path).absolutePath();
         while (parent.startsWith(m_root + '/') && !QFileInfo(parent).isDir()) parent = QFileInfo(parent).absolutePath();
@@ -727,8 +770,11 @@ bool PiconfPreferences::prepareInstalled(const QString &id, QString &error) {
         return false;
     }
     PiconfDocument doc;
+    if (!doc.load(m_root, error)) return false;
+    if (doc.addonFile(id).isEmpty() && doc.values().value("addons").toMap().contains(id) &&
+        (!flush(error) || !doc.load(m_root, error))) return false;
     Stores stores{m_root};
-    if (!doc.load(m_root, error) || !stores.initialize(error)) return false;
+    if (!stores.initialize(error)) return false;
     if (doc.addonFile(id).isEmpty()) {
         error = tr("The configuration does not declare %1.").arg(id);
         return false;
@@ -748,7 +794,7 @@ bool PiconfPreferences::validate(const PiconfDocument &document, QString &error)
         error = tr("Open a workspace before importing a configuration.");
         return false;
     }
-    if (!stores.initialize(error)) return false;
+    if (!validateDeclarations(document, error) || !stores.initialize(error)) return false;
     const auto catalog = fields(document, stores, error);
     return error.isEmpty() && validateFields(document, catalog, error);
 }
@@ -781,10 +827,15 @@ bool PiconfPreferences::reconcile(bool starting, QString &error) {
     } else if (!doc.load(m_root, error))
         return false;
     auto original = creating ? Files{} : doc.files();
-    const auto existing = doc.values().value("addons").toMap();
+    if (!validateDeclarations(doc, error)) return false;
+    QList<PiconfDocument::Edit> removedConfigs;
+    for (const auto &id : doc.missingAddonConfigs())
+        removedConfigs.append({PiconfDocument::MainPath, {"addons", id, "config"}, {}});
+    if (!removedConfigs.isEmpty() && !doc.apply(removedConfigs, {}, error)) return false;
     if (!ensureDeclarations(doc, stores, error)) return false;
     for (const auto &id : doc.values().value("addons").toMap().keys()) {
-        if (!existing.contains(id) && !readExisting(m_root, doc.addonFile(id), original, error)) return false;
+        const auto file = doc.addonFile(id);
+        if (!file.isEmpty() && !original.contains(file) && !readExisting(m_root, file, original, error)) return false;
     }
     Files updated;
     if (!synchronize(doc, stores, starting ? Direction::Startup : Direction::Running, creating, updated, error))

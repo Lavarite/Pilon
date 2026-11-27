@@ -1,44 +1,48 @@
-# Pilon
+# ![Pilon](docs/pilon-banner.svg)
 
-Pilon is a workspace you can extend with your own add-ons. Enable the features
-you want, or build pages, settings and integrations in QML and JavaScript.
-Package and share them as `.piext` files that install without rebuilding Pilon.
+Pilon is an open-source workspace for Linux and Android. Browse files, write
+and draw notes, manage calendars, and connect over SSH. Extend it with your own
+QML and JavaScript add-ons.
 
-[![CI](https://github.com/Lavarite/Pilon/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Lavarite/Pilon/actions/workflows/ci.yml)
+[Install](#install) · [Build an add-on](#build-an-add-on) · [Documentation](docs/index.md)
 
 ## Install
 
-On a compatible Linux x86_64 system:
+**Linux x86‑64**
 
 ```sh
-curl -fsSL https://github.com/Lavarite/Pilon/releases/download/v1.0.0/install-linux.sh | sh
+curl -fsSL https://pilon.vasylevskyi.net/download | sh
 ```
 
-See [Linux requirements and manual installation](docs/install.md#linux) or
-[install the Android ARM64 preview](docs/install.md#android).
+See [GitHub Releases](https://github.com/Lavarite/Pilon/releases) for platform downloads.
+The [install guide](docs/install.md) covers Linux requirements and Android installation.
 
-## Create an add-on
+## Build an add-on
 
-Start with [Counter](examples/counter/readme.md) for a page and settings, or
-[Checklist](examples/checklist/readme.md) for state that persists. Follow the
-[add-on guide](docs/addons/index.md) to build your `.piext`, then import it from
-**Settings → Add-ons**.
+Describe the tool you need and give a coding agent the
+[add-on instructions](docs/addons/AGENTS.md). Start from
+[Counter](examples/counter/readme.md) or [Checklist](examples/checklist/readme.md),
+then import the resulting `.piext` in **Settings → Add-ons**.
 
-## Built-in add-ons
+## Screenshots
 
-Notes and Calendar are two of the [built-in add-ons](docs/index.md#add-ons).
+| Notes | Calendar |
+| --- | --- |
+| ![A note with typed text and a hand-drawn map](docs/screenshots/notes.png) | ![Pilon Calendar in month view](docs/screenshots/calendar.png) |
+| **Files** | **Add-ons** |
+| ![Files showing folders and documents on this device](docs/screenshots/files.png) | ![Settings showing the installed add-ons and an add-on import tile](docs/screenshots/add-ons.png) |
 
-![Pilon Notes with typed field notes and a hand-drawn trail map](docs/screenshots/notes.png)
+[Contribute](CONTRIBUTING.md) · [Report a bug](https://github.com/Lavarite/Pilon/issues) · [GPL-3.0-only](LICENSE)
 
-![Pilon Calendar month view with colour-coded events](docs/screenshots/calendar.png)
+## Acknowledgements
 
-## Documentation
+Thanks to the maintainers of these projects.
 
-- [Installation and first run](docs/install.md)
-- [Edit, export and import workspace configuration](docs/configuration.md)
-- [Feature guides and add-ons](docs/index.md#add-ons)
-- [Build from source and contribute](docs/CONTRIBUTING.md)
-- [Report an issue](https://github.com/Lavarite/Pilon/issues)
+- Interface icons from [Phosphor Icons](https://phosphoricons.com/).
+- Application framework from [Qt](https://www.qt.io/).
+- Assistant runtime built on [Codex](https://github.com/openai/codex).
+- Local model inference with [llama.cpp](https://github.com/ggml-org/llama.cpp).
+- Device discovery on a tailnet through [Tailscale](https://github.com/tailscale/tailscale).
+- Office document conversion with [LibreOffice](https://www.libreoffice.org/).
 
-Pilon is licensed under [GPL-3.0-only](LICENSE). Bundled components retain their
-own notices.
+[Full third-party notices](docs/third-party.md)

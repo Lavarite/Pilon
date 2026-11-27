@@ -12,10 +12,50 @@ ColumnLayout {
     property var calendar
     property var weekdays: []
     property bool loading: false
+    property bool editableRule: true
+    enabled: editableRule
     readonly property var dayCodes: ["MO","TU","WE","TH","FR","SA","SU"]
+    readonly property var frequencies: ["", "DAILY", "WEEKLY", "MONTHLY", "YEARLY"]
+    readonly property bool requiresEndDate: editableRule && frequency.currentIndex > 0
+        && ending.currentIndex === 2 && !until
+    readonly property string until: ending.currentIndex === 2 && endDate.value && calendar
+        ? calendar.recurrenceEnd(endDate.value, timeZone, allDay) : ""
+
+    function canEdit(parts) {
+        const fields = ["FREQ", "INTERVAL", "BYDAY", "BYMONTHDAY", "BYSETPOS", "BYMONTH", "COUNT", "UNTIL"]
+        if (Object.keys(parts).some(field => !fields.includes(field)) || !frequencies.slice(1).includes(parts.FREQ))
+            return false
+        const inRange = (value, max) => !value || (/^\d+$/.test(value) && Number(value) >= 1 && Number(value) <= max)
+        if (!inRange(parts.INTERVAL, 999) || !inRange(parts.COUNT, 99999)
+                || !inRange(parts.BYMONTHDAY, 31) || !inRange(parts.BYMONTH, 12)
+                || (parts.COUNT && parts.UNTIL) || (parts.BYMONTH && parts.FREQ !== "YEARLY"))
+            return false
+        if (parts.FREQ === "WEEKLY" || parts.FREQ === "DAILY")
+            return !parts.BYMONTHDAY && !parts.BYSETPOS
+                && (!parts.BYDAY || (parts.FREQ === "WEEKLY" && parts.BYDAY.split(",").every(day => dayCodes.includes(day))))
+        if (!parts.BYDAY)
+            return !parts.BYSETPOS
+        const weekday = /^(?:([1-4]|-1))?(?:MO|TU|WE|TH|FR|SA|SU)$/.exec(parts.BYDAY)
+        return !parts.BYMONTHDAY && !!weekday
+            && (parts.BYSETPOS ? !weekday[1] && /^([1-4]|-1)$/.test(parts.BYSETPOS) : !!weekday[1])
+    }
+
     function load(value) {
-        loading=true;rule=value;let parts={};for(let part of value.split(";")){let pair=part.split("=");parts[pair[0]]=pair[1]}
-        frequency.currentIndex=Math.max(0,["","DAILY","WEEKLY","MONTHLY","YEARLY"].indexOf(parts.FREQ||""))
+        loading = true
+        rule = value
+        const parts = Object.create(null)
+        let validFields = true
+        for (const part of value.split(";").filter(field => field.length)) {
+            const pair = part.split("=")
+            if (pair.length !== 2 || pair[0] in parts) validFields = false
+            else parts[pair[0]] = pair[1]
+        }
+        editableRule = !value || (validFields && canEdit(parts))
+        if (!editableRule) {
+            loading = false
+            return
+        }
+        frequency.currentIndex = Math.max(0, frequencies.indexOf(parts.FREQ || ""))
         interval.value=Number(parts.INTERVAL||1)
         weekdays=(parts.BYDAY||"").split(",").filter(x=>dayCodes.indexOf(x)>=0)
         pattern.currentIndex=parts.BYDAY&&parts.FREQ!=="WEEKLY"?1:0
@@ -30,9 +70,9 @@ ColumnLayout {
         loading=false
     }
     function update() {
-        if(loading)return
+        if (loading || !editableRule) return
         if(frequency.currentIndex===0){rule="";return}
-        let value="FREQ="+["","DAILY","WEEKLY","MONTHLY","YEARLY"][frequency.currentIndex]+";INTERVAL="+interval.value
+        let value="FREQ="+frequencies[frequency.currentIndex]+";INTERVAL="+interval.value
         if(frequency.currentIndex===2&&weekdays.length)value+=";BYDAY="+weekdays.join(",")
         if(frequency.currentIndex>=3){
             if(pattern.currentIndex===0)value+=";BYMONTHDAY="+monthDay.value
@@ -40,7 +80,7 @@ ColumnLayout {
         }
         if(frequency.currentIndex===4)value+=";BYMONTH="+(month.currentIndex+1)
         if(ending.currentIndex===1)value+=";COUNT="+count.value
-        if(ending.currentIndex===2&&endDate.value.length===10)value+=";UNTIL="+calendar.recurrenceEnd(endDate.value,timeZone,allDay)
+        if (until) value += ";UNTIL=" + until
         rule=value
     }
     spacing: 8

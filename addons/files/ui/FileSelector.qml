@@ -29,12 +29,15 @@ FilePickerWindow {
     signal selectionChanged()
     closeOnOutside: false
     color: workspace.mainColour
-    onOpenedChanged: if (opened) Qt.callLater(() => {
-        if (!selector.opened) return
-        if (browser.item) browser.item.focusBrowser()
-        browserViewport.cancelFlick()
-        browserViewport.contentY = 0
-    })
+    onOpenedChanged: if (opened) {
+        browser.hasOpened = true
+        Qt.callLater(() => {
+            if (!selector.opened) return
+            if (browser.item) browser.item.focusBrowser()
+            browserViewport.cancelFlick()
+            browserViewport.contentY = 0
+        })
+    }
     onActiveFocusItemChanged: Qt.callLater(browserViewport.revealFocusedControl)
     onClosed: if (remoteFiles) remoteFiles.cancel()
     // Ordinary pickers keep their actions aligned with the bookmark column.
@@ -71,8 +74,9 @@ FilePickerWindow {
             Loader {
                 id: browser
                 objectName: selector.pickerLoaderName
+                property bool hasOpened: false
                 width: browserViewport.width; height: browserViewport.contentHeight
-                active: selector.remoteFiles !== null
+                active: hasOpened && selector.remoteFiles !== null
                 sourceComponent: FileTile {
                     objectName: selector.pickerName
                     workspace: selector.workspace

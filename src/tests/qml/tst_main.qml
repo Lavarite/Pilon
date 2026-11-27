@@ -23,6 +23,7 @@ TestCase {
         function completeSetup() { setupRequired = false; return true }
         property bool backgroundEnabled: false
         property bool trayEnabled: false
+        readonly property bool canHideToTray: trayEnabled
         property bool offline: false
         property bool hardwareKeyboardAvailable: true
         property string error: ""
@@ -35,7 +36,8 @@ TestCase {
             configurationActions.push(exporting ? "save dialog" : "open dialog")
             return nextConfigurationFile
         }
-        function exportConfiguration(file) {
+        function configurationExportTargetExists(file) { return false }
+        function exportConfiguration(file, replace) {
             test.compare(file.toString(), nextConfigurationFile.toString())
             configurationActions.push("export")
             return true
@@ -59,9 +61,16 @@ TestCase {
         signal settingsRequested()
         signal syncRequested()
         signal suspendRequested()
+        signal filesRequested(var files)
+        function fileOpenKind(url) {
+            const match = /^file:.*\.(pin|pical|piext)$/i.exec(url.toString())
+            return match ? match[1].toLowerCase() : ""
+        }
         function setBackgroundEnabled(enabled) { backgroundEnabled = enabled; return true }
         function setTrayEnabled(enabled) { trayEnabled = enabled; return true }
         function hideWindow() {}
+        function showWindow() { appWindow.show() }
+        function deferQuit() { quitCancelled = true }
         function cancelQuit() { quitCancelled = true }
     }
     Component { id: mainComponent; App.Main { appService: service } }
@@ -101,11 +110,6 @@ TestCase {
         appWindow.show(); appWindow.requestActivate()
         waitForRendering(appWindow.contentItem)
         tryVerify(() => appWindow.setupActive || appWindow.extensionsReady)
-    }
-    function enableGit() {
-        verify(appWindow.setAddonEnabled("git",true) === true)
-        tryVerify(() => !!appWindow.runtimeExports("git") && appWindow.runtimeExports("git").coordinator.ready)
-        return appWindow.runtimeExports("git")
     }
     function test_widgetsRemainScopedWhenThePageIsHiddenOrDisabled() {
         const backend = createTemporaryObject(widgetBackendFixture, test)
@@ -208,35 +212,27 @@ TestCase {
         compare(context.device, device)
         compare(settingsContext.device, settingsDevice)
     }
-    function test_sharedGitWindowWorksWithoutFiles() {
-        const api=enableGit()
-        let disabled=false
-        Promise.resolve(appWindow.setAddonEnabled("files",false)).then(result => disabled=result===true)
-        tryVerify(() => disabled)
-        try {
-            verify(api.openGit("/nonexistent-pilon-git-test",appWindow))
-            tryVerify(() => !!api.workspace.gitWindow && api.workspace.gitWindow.opened)
-            verify(appWindow.pageInstance("files")===null)
-        } finally {
-            if (api.workspace.gitWindow) api.workspace.gitWindow.close()
-            appWindow.setAddonEnabled("files",true)
-        }
+    function test_invalidDesktopPackageReportsTheInstallFailure_data() {
+        return [{tag:"launch", startup:true, setup:false},
+            {tag:"secondary", startup:false, setup:false}, {tag:"setup", startup:true, setup:true}]
     }
-    function test_noteOpenWaitsForRecoveryScanAndLibraryLoad() {
-        const coordinator=enableGit().coordinator
-        const notes=appWindow.addonHosts.notes.context.notesManager
-        tryVerify(()=>notes.active && !notes.loading)
-        const id=notes.createNote(); verify(!!id)
-        notes.title="Queued note"; verify(notes.save())
-        const file="file://"+notes.storageDirectory+"/Queued note.pin"
-        coordinator.ready=false
-        appWindow.openFile(file)
-        compare(appWindow.pendingFiles.length,1)
-        coordinator.ready=true
-        tryCompare(appWindow,"pendingFiles",[])
-        tryVerify(()=>notes.active && !notes.loading)
-        compare(appWindow.selectedPage,"notes"); compare(notes.currentId,id)
-        verify(notes.removeNote(id))
+    function test_invalidDesktopPackageReportsTheInstallFailure(data) {
+        const file = Qt.resolvedUrl("fixtures/invalid-package.piext")
+        service.setupRequired = data.setup
+        const target = data.startup ? createTemporaryObject(mainComponent, test, {startupFiles: [file]}) : appWindow
+        verify(target)
+        try {
+            if (!data.startup) service.filesRequested([file])
+            const surface = findControl(target, data.setup ? "firstRunSetup" : "settingsMenu")
+            tryCompare(surface, "visible", true)
+            const popup = findControl(surface, data.setup ? "setupError" : "addonOperationError")
+            tryCompare(popup, "opened", true)
+            verify(popup.message.includes("invalid-package.piext"), popup.message)
+        } finally {
+            if (data.setup) findControl(target, "firstRunSetup").close()
+            else findControl(target, "settingsMenu").close()
+            service.setupRequired = false
+        }
     }
     function cleanup() {
         if (appWindow) {
@@ -302,7 +298,7 @@ TestCase {
         tryVerify(()=>host.contentItem.width === host.width && host.contentItem.height === host.height)
     }
     function waitForWorkspaceIdle() {
-        tryVerify(()=>appWindow.extensionsReady && !appWindow.operationBusy)
+        tryVerify(()=>appWindow.extensionsReady)
         const context=appWindow.addonHosts.notes.context
         tryCompare(context.notesManager,"loading",false)
         tryCompare(context.tailscaleManager,"busy",false)
@@ -876,7 +872,6 @@ TestCase {
         const font = data.fontSize ? tabletInput.applicationFont() : null
         try {
             if(data.tag === "320_touch") {
-                enableGit()
                 verify(appWindow.setAddonEnabled("devices",true) === true)
                 tryVerify(()=>appWindow.extensionsReady)
             }
@@ -1091,16 +1086,24 @@ TestCase {
             settings.width = data.width; settings.height = data.height
             renderWindow(settings)
             const review = findControl(settings, "configurationImportReview")
-            service.nextConfigurationFile = service.settingsLocation
+            service.nextConfigurationFile = "file://" + service.workspaceRoot + "/Pilon.piconfpack"
             tap(findControl(settings, "exportConfiguration"), null, false)
-            compare(service.configurationActions.join(","), "save dialog,export")
+            const destination = findControl(appWindow, "connectedFileDestination")
+            tryCompare(destination, "opened", true)
+            compare(destination.transientParent, settings)
+            tryVerify(() => findControl(destination, "confirmConnectedFileDestination").enabled)
+            const save = findControl(destination, "confirmConnectedFileDestination")
+            revealControl(save)
+            mouseClick(save)
+            tryCompare(destination, "opened", false)
+            compare(service.configurationActions.join(","), "export")
             const chooser = findControl(appWindow, "connectedFileSelection")
             tap(findControl(settings, "importConfiguration"), null, false)
             tryCompare(chooser, "opened", true)
             compare(chooser.transientParent, settings)
             compare(chooser.suffix, ".piconfpack")
             chooser.close()
-            compare(service.configurationActions.join(","), "save dialog,export")
+            compare(service.configurationActions.join(","), "export")
             verify(!review.opened)
             service.nextConfigurationFile = tabletInput.configurationBundleFixture()
             for (const decision of ["cancel", "import"]) {
@@ -1126,6 +1129,31 @@ TestCase {
             }
         } finally {
             tabletInput.setScreenGeometry(screen)
+        }
+    }
+    function test_configurationUsesPlatformPickerWhenFilesDisabled() {
+        waitForWorkspaceIdle()
+        let disabled = false
+        Promise.resolve(appWindow.setAddonEnabled("files", false)).then(result => disabled = result === true)
+        tryVerify(() => disabled)
+        try {
+            service.configurationActions = []
+            service.nextConfigurationFile = tabletInput.configurationBundleFixture()
+            verify(appWindow.openSettings("application"))
+            const settings = findControl(appWindow, "settingsMenu")
+            renderWindow(settings)
+            tap(findControl(settings, "exportConfiguration"), null, false)
+            tap(findControl(settings, "importConfiguration"), null, false)
+            compare(service.configurationActions.join(","), "save dialog,export,open dialog,preview")
+            const review = findControl(settings, "configurationImportReview")
+            tryCompare(review, "opened", true)
+            verify(!findControl(appWindow, "connectedFileDestination").opened)
+            verify(!findControl(appWindow, "connectedFileSelection").opened)
+            review.close()
+        } finally {
+            let enabled = false
+            Promise.resolve(appWindow.setAddonEnabled("files", true)).then(result => enabled = result === true)
+            tryVerify(() => enabled)
         }
     }
     function test_workspaceErrorPreservesPageAndEmptyStateGeometry(data) {
@@ -1300,38 +1328,6 @@ TestCase {
         setup.close(); tryCompare(setup, "visible", false)
         tryCompare(appWindow,"visibility",appWindow.mobilePlatform ? Window.Maximized : Window.Windowed)
         compare(appWindow.touchMode, touch)
-    }
-    function test_recoveryErrorClearsWithoutReplacingUnrelatedErrors() {
-        waitForWorkspaceIdle()
-        const coordinator=enableGit().coordinator
-        const recovery="Recover the interrupted Git update."
-        const unrelated="Save the current add-on edit first."
-        const serviceError=service.error
-        try {
-            service.error=""; appWindow.addonError=""
-            coordinator.error=recovery
-            compare(appWindow.addonError,"","Recovery status must retain its single owner")
-            const workspaceStatus=findControl(appWindow,"workspaceErrorStatus")
-            verify(workspaceStatus)
-            compare(workspaceStatus.message,recovery); verify(workspaceStatus.visible)
-            verify(appWindow.openSettings("application"))
-            const applicationStatus=findControl(appWindow,"applicationErrorStatus")
-            verify(applicationStatus)
-            compare(applicationStatus.message,recovery); verify(applicationStatus.visible)
-            coordinator.error=""
-            compare(workspaceStatus.message,""); verify(!workspaceStatus.visible)
-            compare(applicationStatus.message,""); verify(!applicationStatus.visible)
-            appWindow.addonError=unrelated
-            coordinator.error=recovery; coordinator.error=""
-            compare(appWindow.addonError,unrelated)
-            compare(workspaceStatus.opened,false); compare(applicationStatus.message,unrelated)
-            service.error="Unable to save application settings."
-            compare(applicationStatus.message,service.error)
-            compare(workspaceStatus.opened,false)
-        } finally {
-            coordinator.error=""; appWindow.addonError=""; service.error=serviceError
-            findControl(appWindow,"settingsMenu").close()
-        }
     }
     function test_cleanupQuiescesOwnersAndBlocksConcurrentActions() {
         waitForWorkspaceIdle()

@@ -7,8 +7,40 @@ export const addDays = (d, n) => dateAt(d.getFullYear(), d.getMonth(), d.getDate
 export const startOfWeek = (d, first = 1) => addDays(d, -(((d.getDay() + 6) % 7 - (first - 1) + 7) % 7));
 export const rangeStart = (d, mode, first) => mode === 0 ? d : mode === 1 ? startOfWeek(d, first) : startOfWeek(dateAt(d.getFullYear(), d.getMonth(), 1), first);
 export const timeLabel = minute => `${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}`;
-export const eventTime = event => event.allDay ? 'All day' : `${timeLabel(event.segmentStart ?? event.startMinute)}–${timeLabel(event.segmentEnd ?? event.endMinute)}`;
+const utcOffset = timestamp => timestamp?.match(/(?:[+-]\d{2}:\d{2}(?::\d{2})?|Z)$/)?.[0].replace('Z', '+00:00');
+export function eventClockTimes(event) {
+  const start = timeLabel(event.segmentStart ?? event.startMinute);
+  const end = timeLabel(event.segmentEnd ?? event.endMinute);
+  const startOffset = utcOffset(event.start), endOffset = utcOffset(event.end);
+  if (!startOffset || !endOffset || startOffset === endOffset) return [start, end];
+  return [
+    !event.segmentDate || event.segmentDate === event.displayDate ? `${start} UTC${startOffset}` : start,
+    !event.segmentDate || event.segmentDate === event.displayEndDate ? `${end} UTC${endOffset}` : end
+  ];
+}
+export const eventTime = event => event.allDay ? 'All day' : eventClockTimes(event).join('–');
 export const eventAccessibleName = (event, fields) => `${fields.includes('title') && event.title ? `${event.title}, ` : ''}${event.displayDate} ${eventTime(event)}`;
+export const eventKey = event => `${event.id}/${event.occurrence}`;
+export const currentEvent = (events, key) => key === null ? null : events.find(event => eventKey(event) === key) || null;
+export function refreshCalendar(load, signal) {
+  let timer;
+  async function refresh() {
+    if (signal.aborted) return;
+    const request = new AbortController();
+    const cancel = () => request.abort(signal.reason);
+    signal.addEventListener('abort', cancel, {once: true});
+    const deadline = setTimeout(() => request.abort(new DOMException('Shared calendar request timed out.', 'TimeoutError')), 15000);
+    try {
+      await load(request.signal);
+    } finally {
+      clearTimeout(deadline);
+      signal.removeEventListener('abort', cancel);
+    }
+    if (!signal.aborted) timer = setTimeout(refresh, 60000);
+  }
+  refresh();
+  return () => clearTimeout(timer);
+}
 export function publicationStatus(value) {
   const published = value ? new Date(value) : null;
   return published && Number.isFinite(published.getTime())
@@ -18,7 +50,7 @@ export function publicationStatus(value) {
 export const dayEvents = (events, date) => events.filter(e => e.displayDate <= date && (e.displayEndDate > date || (e.displayEndDate === date && e.endMinute > 0)));
 export function timelineEvents(events, date) {
   const items = dayEvents(events, date).map(event => {
-    const e = {...event};
+    const e = {...event, segmentDate: date};
     e.segmentStart = e.allDay || e.displayDate < date ? 0 : e.startMinute;
     e.segmentEnd = e.allDay || e.displayEndDate > date ? 1440 : e.endMinute;
     e.topMinute = Math.min(e.segmentStart, 1418);
@@ -28,18 +60,20 @@ export function timelineEvents(events, date) {
   let group = [], groupEnd = -1;
   const intersects = (a, b) => a.topMinute < b.bottomMinute && b.topMinute < a.bottomMinute;
   function assign() {
-    const ends = [];
+    const ends = [], occupants = [];
     for (const event of group) {
       let lane = ends.findIndex(end => end <= event.topMinute);
       if (lane < 0) lane = ends.length;
       ends[lane] = event.bottomMinute;
+      if (!occupants[lane]) occupants[lane] = [];
+      occupants[lane].push(event);
       event.lane = lane;
     }
     for (const event of group) {
       event.lanes = ends.length;
       event.span = 1;
       for (let lane = event.lane + 1; lane < ends.length; lane++) {
-        if (group.some(other => other.lane === lane && intersects(event, other))) break;
+        if (occupants[lane].some(other => intersects(event, other))) break;
         event.span++;
       }
     }

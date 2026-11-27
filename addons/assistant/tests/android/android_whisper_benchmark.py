@@ -7,21 +7,26 @@ from pathlib import Path
 import re
 import shlex
 import subprocess
+import sys
 import time
 import uuid
 
 ROOT = Path(__file__).resolve().parents[4]
+sys.path.insert(0, str(ROOT / "src/scripts"))
+from environment import development_root
+
+DEV = development_root()
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--adb', default=str(Path.home()/'Android/Sdk/platform-tools/adb'))
     parser.add_argument('--model', default='/storage/emulated/0/Documents/Pilon/Models/whisper-large-v3-turbo/ggml-large-v3-turbo-q8_0.bin')
-    parser.add_argument('--variants', type=Path, default=ROOT/'build/android/media-runtime/whisper-variants-build/bin')
+    parser.add_argument('--variants', type=Path, default=DEV / 'dev-deps/android/media-runtime/whisper-variants-build/bin')
     parser.add_argument('--candidate-first', action='store_true')
     args = parser.parse_args()
     remote = '/data/local/tmp/pilon-whisper-bench-'+uuid.uuid4().hex
-    proof = ROOT/'build/android/media-runtime/benchmark'/Path(remote).name
+    proof = DEV / 'dev-deps/android/media-runtime/benchmark'/Path(remote).name
     proof.mkdir(parents=True)
     adb = [args.adb,'-d']
     active = []
@@ -41,10 +46,10 @@ def main():
         original = shell('stat','-c','%s %Y',args.model).strip()
         shell('mkdir','-p',remote+'/variants')
         shell('cp',args.model,remote+'/model.bin')
-        sample = ROOT/'build/android/media-runtime/whisper.cpp-b4938/samples/jfk.wav'
+        sample = DEV / 'dev-deps/android/media-runtime/whisper.cpp-b4938/samples/jfk.wav'
         results['sampleSha256'] = hashlib.sha256(sample.read_bytes()).hexdigest()
         command('push',str(sample),remote+'/speech.wav')
-        baseline = ROOT/'builds/android/runtime/arm64-v8a/libpilon_whisper-cli.so'
+        baseline = DEV / 'builds/android/runtime/arm64-v8a/libpilon_whisper-cli.so'
         results['baselineSha256'] = hashlib.sha256(baseline.read_bytes()).hexdigest()
         command('push',str(baseline),remote+'/baseline')
         for source in args.variants.iterdir():

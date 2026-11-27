@@ -8,26 +8,35 @@ from pathlib import Path
 import queue
 import shlex
 import subprocess
+import sys
 import threading
 import time
+import tomllib
 import uuid
 
 ROOT = Path(__file__).resolve().parents[4]
+sys.path.insert(0, str(ROOT / "src/scripts"))
+from environment import development_root
+
+DEV = development_root()
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--adb', default=str(Path.home()/'Android/Sdk/platform-tools/adb'))
+    parser.add_argument('--device', help='ADB serial. Defaults to the USB device.')
     args = parser.parse_args()
+    release = ROOT / "addons/assistant/scripts/android/codex-release.toml"
+    expected_version = tomllib.loads(release.read_text())["version"]
     identity = uuid.uuid4().hex
     remote = '/data/local/tmp/pilon-codex-shell-'+identity
-    proof = ROOT/'build/android/codex/proof'/identity
+    proof = DEV / 'dev-deps/android/codex/proof'/identity
     proof.mkdir(parents=True)
     marker = 'PILON_NATIVE_DEFAULT_SHELL'
     requests = []
     outputs = []
     token = uuid.uuid4().hex
-    adb = [args.adb,'-d']
+    adb = [args.adb, '-s', args.device] if args.device else [args.adb, '-d']
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self,*values): pass
@@ -88,7 +97,7 @@ def main():
         assert 'error' not in result,result
         return result['result']
 
-    helper = ROOT/'builds/android/runtime/arm64-v8a/libpilon_codex.so'
+    helper = DEV / 'builds/android/runtime/arm64-v8a/libpilon_codex.so'
     try:
         command('shell','mkdir','-p',remote+'/codex',remote+'/tmp')
         command('push',str(helper),remote+'/codex-helper')
@@ -97,7 +106,7 @@ def main():
         reverse = 'tcp:'+str(remote_port)
         environment = ['HOME='+remote,'CODEX_HOME='+remote+'/codex','TMPDIR='+remote+'/tmp','PILON_FIXTURE_TOKEN='+token]
         version = command('shell',shlex.join(['env',*environment,remote+'/codex-helper','--version']))
-        assert '0.167.0' in version,version
+        assert version.endswith(' ' + expected_version), version
         configuration = 'model_providers.fixture={name="Pilon shell fixture",base_url="http://127.0.0.1:'+str(remote_port)+'/v1",wire_api="responses",env_key="PILON_FIXTURE_TOKEN",requires_openai_auth=false}'
         invocation = ['env',*environment,remote+'/codex-helper','app-server','--listen','stdio://',
                       '-c','model_provider="fixture"','-c',configuration,'-c','experimental_use_unified_exec_tool=true']

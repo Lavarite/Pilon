@@ -91,7 +91,7 @@ PilonScrollView {
         Label {
             Layout.fillWidth: true
             visible: !x11.enabled || x11.checked
-            text: (x11.enabled ? qsTr("Remote programs can access your X11 display and input.")
+            text: (x11.enabled ? qsTr("Remote X11 programs open separate windows on this computer and can access your X11 display and input.")
                 : qsTr("No local X11 display is available."))
             color: page.addon.selectedTextColour
             wrapMode: Text.Wrap

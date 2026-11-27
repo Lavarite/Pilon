@@ -1,6 +1,7 @@
 #include "sshmanager.h"
 #include "sshcredentials.h"
 #include "../../../src/core/network/networksnapshot.h"
+#include <QCryptographicHash>
 #include <QFile>
 #include <QSettings>
 #include <QScopeGuard>
@@ -31,12 +32,74 @@ private slots:
         qputenv("PATH", m_fixture.path().toUtf8() + ':' + m_oldPath);
     }
     void cleanupTestCase() { qputenv("PATH", m_oldPath); qunsetenv("PILON_TEST_SSH_MODE"); }
+    void deviceAliasUsesOnlyTheDiscoveredPeer_data() {
+        QTest::addColumn<QByteArray>("configuration");
+        QTest::addColumn<QString>("alias");
+        QTest::addColumn<QByteArray>("destination");
+        QTest::newRow("same-peer") << QByteArray("hostname 192.0.2.10\n")
+            << QString("peer-alias") << QByteArray("peer-alias");
+        QTest::newRow("different-peer") << QByteArray("hostname 192.0.2.20\n")
+            << QString("peer-alias") << QByteArray("192.0.2.10");
+        QTest::newRow("proxy") << QByteArray("hostname 192.0.2.10\nproxyjump bastion\n")
+            << QString("peer-alias") << QByteArray("192.0.2.10");
+        QTest::newRow("invalid-alias") << QByteArray("hostname 192.0.2.10\n")
+            << QString("-F") << QByteArray("192.0.2.10");
+    }
+    void deviceAliasUsesOnlyTheDiscoveredPeer() {
+        QFETCH(QByteArray, configuration);
+        QFETCH(QString, alias);
+        QFETCH(QByteArray, destination);
+        qputenv("PILON_TEST_SSH_MODE", "device-alias");
+        qputenv("PILON_TEST_SSH_CONFIG", configuration);
+        const QString log = m_fixture.filePath("device-ssh-arguments");
+        QFile::remove(log);
+        qputenv("PILON_TEST_SSH_ARGUMENTS", log.toUtf8());
+        auto restore = qScopeGuard([] {
+            qunsetenv("PILON_TEST_SSH_CONFIG");
+            qunsetenv("PILON_TEST_SSH_ARGUMENTS");
+        });
+        SshManager manager;
+        QVERIFY(QMetaObject::invokeMethod(&manager, "connectToDevice",
+            QString("tester"), QString("192.0.2.10"), alias, QString("/reports")));
+        QTRY_VERIFY_WITH_TIMEOUT(manager.authenticated(), 3000);
+        QFile file(log);
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        const auto arguments = file.readAll().split('\n');
+        QVERIFY(arguments.contains("StrictHostKeyChecking=ask"));
+        QCOMPARE(arguments.last(3), QList<QByteArray>({"tester", destination,
+            "cd -- '/reports' && printf '\\033[3J\\033[2J\\033[H' && exec \"${SHELL:-/bin/sh}\" -l"}));
+        QVERIFY(manager.savedConnections().contains(QVariantMap{{"host", "192.0.2.10"},
+                                                                 {"username", "tester"}}));
+        manager.disconnectFromHost();
+        QTRY_VERIFY_WITH_TIMEOUT(!manager.running(), 3000);
+    }
+    void deviceAliasRetryRechecksTheSelectedPeer() {
+        qputenv("PILON_TEST_SSH_MODE", "device-alias-retry");
+        qputenv("PILON_TEST_SSH_CONFIG", "hostname 192.0.2.20\n");
+        const auto log = m_fixture.filePath("device-ssh-retry-arguments");
+        qputenv("PILON_TEST_SSH_ARGUMENTS", log.toUtf8());
+        auto restore = qScopeGuard([] {
+            qunsetenv("PILON_TEST_SSH_CONFIG");
+            qunsetenv("PILON_TEST_SSH_ARGUMENTS");
+        });
+        SshManager manager;
+        manager.connectToDevice("tester", "192.0.2.10", "peer-alias", {});
+        QTRY_VERIFY_WITH_TIMEOUT(manager.canRetry() && !manager.running(), 3000);
+        qputenv("PILON_TEST_SSH_CONFIG", "hostname 192.0.2.10\n");
+        manager.retryConnection();
+        QTRY_VERIFY_WITH_TIMEOUT(manager.authenticated(), 3000);
+        QFile file(log);
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        QCOMPARE(file.readAll().split('\n').last(), "peer-alias");
+        manager.disconnectFromHost();
+        QTRY_VERIFY_WITH_TIMEOUT(!manager.running(), 3000);
+    }
     void x11ForwardingIsOptInAndOnlyForTerminals() {
         qputenv("PILON_TEST_SSH_MODE", "x11-options");
         const QString log = m_fixture.filePath("ssh-arguments");
         qputenv("PILON_TEST_SSH_ARGUMENTS", log.toUtf8());
         const auto oldDisplay = qgetenv("DISPLAY");
-        qputenv("DISPLAY", ":73");
+        qputenv("DISPLAY", "localhost:73");
         auto restore = qScopeGuard([&] {
             oldDisplay.isNull() ? qunsetenv("DISPLAY") : qputenv("DISPLAY", oldDisplay);
             qunsetenv("PILON_TEST_SSH_ARGUMENTS");
@@ -62,6 +125,26 @@ private slots:
         QVERIFY(!manager.x11DisplayAvailable());
         capture(terminal, "-x");
     }
+#ifdef Q_OS_LINUX
+    void x11ForwardingReportsAMissingLocalSocket() {
+        qputenv("PILON_TEST_SSH_MODE", "x11-options");
+        const auto log = m_fixture.filePath("missing-x11-ssh-arguments");
+        QFile::remove(log);
+        qputenv("PILON_TEST_SSH_ARGUMENTS", log.toUtf8());
+        const auto oldDisplay = qgetenv("DISPLAY");
+        qputenv("DISPLAY", "unix:4294967294.0");
+        const auto restore = qScopeGuard([&] {
+            oldDisplay.isNull() ? qunsetenv("DISPLAY") : qputenv("DISPLAY", oldDisplay);
+            qunsetenv("PILON_TEST_SSH_ARGUMENTS");
+        });
+        SshManager manager;
+        QVERIFY(manager.setProperty("trustedX11Forwarding", true));
+        manager.connectToHost("tester", "host.fixture.invalid");
+        QVERIFY(!manager.running());
+        QVERIFY(manager.errorDetails().contains("/tmp/.X11-unix/X4294967294"));
+        QVERIFY(!QFileInfo::exists(log));
+    }
+#endif
     void forgettingPasswordsKeepsSecretsOnFailureAndWaitsForPendingStores() {
         const auto tool=m_fixture.filePath("secret-tool");
         const auto write=[&](const QByteArray &script) {QFile file(tool);if(!file.open(QIODevice::WriteOnly))return false;file.write(script);file.close();return file.setPermissions(QFile::ReadOwner|QFile::WriteOwner|QFile::ExeOwner);};
@@ -169,6 +252,47 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(!manager.running(), 3000);
         QVERIFY(authenticated.size() >= 1);
         QVERIFY(manager.errorMessage().isEmpty());
+    }
+    void slowTerminalReceivesAllPastedInput() {
+        qputenv("PILON_TEST_SSH_MODE", "terminal-input");
+        SshManager manager;
+        QSignalSpy output(&manager, &SshManager::terminalData);
+        manager.connectToHost("tester", "host.fixture.invalid");
+        QTRY_VERIFY_WITH_TIMEOUT(manager.authenticated(), 3000);
+        const QByteArray text = QByteArray("abcDEF_1234").repeated(256 * 1024 / 11 + 1)
+                                    .left(256 * 1024);
+        manager.writeTerminalData(text);
+        QTRY_VERIFY_WITH_TIMEOUT(!manager.running(), 3000);
+        QByteArray received;
+        for (const auto &data : output)
+            received += data.first().toByteArray();
+        QCOMPARE(received.trimmed(), QCryptographicHash::hash(text, QCryptographicHash::Sha256).toHex());
+    }
+    void terminalCanResizeToOneRow() {
+        qputenv("PILON_TEST_SSH_MODE", "terminal-size");
+        SshManager manager;
+        QSignalSpy output(&manager, &SshManager::terminalData);
+        manager.connectToHost("tester", "host.fixture.invalid");
+        QTRY_VERIFY_WITH_TIMEOUT(manager.authenticated(), 3000);
+        manager.resizeTerminal(1, 80);
+        manager.writeTerminalData("\n");
+        QTRY_VERIFY_WITH_TIMEOUT(!manager.running(), 3000);
+        QByteArray received;
+        for (const auto &data : output)
+            received += data.first().toByteArray();
+        QCOMPARE(received.trimmed(), QByteArray("1 80"));
+    }
+    void taskOutputReportsWhenItReachesTheLimit() {
+        qputenv("PILON_TEST_SSH_MODE", "long-task");
+        SshManager manager;
+        QSignalSpy finished(&manager, &SshManager::taskFinished);
+        manager.runCommand("tester", "host.fixture.invalid", "fixture");
+        QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 1, 3000);
+        QCOMPARE(finished.first().at(0).toInt(), 0);
+        const QString output = finished.first().at(1).toString();
+        QVERIFY(output.startsWith("START\n"));
+        QVERIFY(output.size() < 2 * 1024 * 1024);
+        QVERIFY(output.endsWith("SSH command output was truncated."));
     }
     void firstHostConfirmationIncludesIdentityAndFingerprint() {
         qputenv("PILON_TEST_SSH_MODE", "host");

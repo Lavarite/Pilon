@@ -8,6 +8,7 @@
 #include "codexruntime.h"
 #include "codexprovider.h"
 
+#include <QAudioSink>
 #include <QAudioSource>
 #include <QElapsedTimer>
 #include <QFile>
@@ -20,6 +21,7 @@
 #include <QQueue>
 #include <QSet>
 #include <QTemporaryDir>
+#include <QThreadPool>
 #include <QTimer>
 #include <QtQml/qqmlregistration.h>
 #include <atomic>
@@ -43,8 +45,11 @@ class AssistantManager : public QObject
     Q_PROPERTY(QString username MEMBER m_username NOTIFY devicesChanged)
     Q_PROPERTY(QVariantMap currentLocation MEMBER m_currentLocation NOTIFY devicesChanged)
     Q_PROPERTY(int effort READ effort WRITE setEffort NOTIFY effortChanged)
+    Q_PROPERTY(bool fastModeAvailable READ fastModeAvailable NOTIFY modelChanged)
+    Q_PROPERTY(bool fastMode READ fastMode WRITE setFastMode NOTIFY fastModeChanged)
     Q_PROPERTY(AssistantModels *models READ models CONSTANT)
     Q_PROPERTY(AssistantConnections *connections READ connections CONSTANT)
+    Q_PROPERTY(CodexRuntime *codexRuntime READ codexRuntime CONSTANT)
     Q_PROPERTY(QVariantList availableModels READ availableModels NOTIFY availableModelsChanged)
     Q_PROPERTY(int modelIndex READ modelIndex WRITE setModelIndex NOTIFY modelChanged)
     Q_PROPERTY(QString modelName READ modelName NOTIFY modelChanged)
@@ -61,6 +66,11 @@ class AssistantManager : public QObject
     Q_PROPERTY(QVariantList questions MEMBER m_questions NOTIFY stateChanged)
     Q_PROPERTY(bool yolo READ yolo WRITE setYolo NOTIFY optionsChanged)
     Q_PROPERTY(bool recording READ recording NOTIFY recordingChanged)
+    Q_PROPERTY(bool nativeAudioInput READ nativeAudioInput NOTIFY modelChanged)
+    Q_PROPERTY(bool transcribing READ transcribing NOTIFY stateChanged)
+    Q_PROPERTY(bool transcribingEarlierAudio READ transcribingEarlierAudio NOTIFY stateChanged)
+    Q_PROPERTY(bool mediaCancelling READ mediaCancelling NOTIFY stateChanged)
+    Q_PROPERTY(QStringList transcribingAttachments READ transcribingAttachments NOTIFY audioTranscriptionChanged)
     Q_PROPERTY(QVariantList chats READ chats NOTIFY chatsChanged)
     Q_PROPERTY(QString currentChatId READ currentChatId NOTIFY chatsChanged)
     Q_PROPERTY(QString draftText READ draftText WRITE setDraftText NOTIFY draftTextChanged)
@@ -72,7 +82,15 @@ class AssistantManager : public QObject
     Q_PROPERTY(QString styleInstructions READ styleInstructions WRITE setStyleInstructions NOTIFY styleInstructionsChanged)
     Q_PROPERTY(QString voicePrompt READ voicePrompt WRITE setVoicePrompt NOTIFY voiceSettingsChanged)
     Q_PROPERTY(int voiceSpeed READ voiceSpeed WRITE setVoiceSpeed NOTIFY voiceSettingsChanged)
+    Q_PROPERTY(QVariantList audioModels READ audioModels NOTIFY audioModelsChanged)
+    Q_PROPERTY(QString speechInputModel READ speechInputModel NOTIFY audioModelsChanged)
+    Q_PROPERTY(QString speechOutputModel READ speechOutputModel NOTIFY audioModelsChanged)
+    Q_PROPERTY(bool speechInputAvailable READ speechInputAvailable NOTIFY audioModelsChanged)
+    Q_PROPERTY(bool speechOutputAvailable READ speechOutputAvailable NOTIFY audioModelsChanged)
+    Q_PROPERTY(QVariantMap speechPreset READ speechPreset NOTIFY voiceSettingsChanged)
+    Q_PROPERTY(QVariantMap phononVoice READ phononVoice NOTIFY voiceSettingsChanged)
     Q_PROPERTY(bool previewingVoice READ previewingVoice NOTIFY optionsChanged)
+    Q_PROPERTY(bool generatingSpeech READ generatingSpeech NOTIFY optionsChanged)
     Q_PROPERTY(bool speaking READ speaking NOTIFY optionsChanged)
     Q_PROPERTY(SshManager *connection READ connection CONSTANT)
 
@@ -90,9 +108,13 @@ public:
     QVariantList attachments() const;
     int effort() const { return m_effort; }
     void setEffort(int effort);
+    bool fastModeAvailable() const { return !m_selectedModel.value("fastServiceTier").toString().isEmpty(); }
+    bool fastMode() const { return fastModeAvailable() && m_fastMode; }
+    void setFastMode(bool enabled);
     QString modelName() const;
     AssistantModels *models() { return &m_models; }
     AssistantConnections *connections() { return &m_connections; }
+    CodexRuntime *codexRuntime() { return &m_codexRuntime; }
     QVariantList availableModels() const { return m_models.installed() + m_connections.models(); }
     int modelIndex() const { return m_modelIndex; }
     void setModelIndex(int index);
@@ -115,6 +137,11 @@ public:
     bool yolo() const { return m_yolo; }
     void setYolo(bool enabled);
     bool recording() const { return m_audioSource != nullptr; }
+    bool nativeAudioInput() const { return selectedModel().value("audio").toBool(); }
+    bool transcribing() const { return m_viewChatId.isEmpty() && m_transcribingRequest; }
+    bool transcribingEarlierAudio() const { return transcribing() && m_transcribingEarlierAudio; }
+    bool mediaCancelling() const { return m_cancelMedia && m_cancelMedia->load(); }
+    QStringList transcribingAttachments() const { return m_audioTranscripts.keys(); }
     SshManager *connection() { return &m_connection; }
     QVariantList chats() const { return m_chats; }
     QString currentChatId() const;
@@ -130,8 +157,7 @@ public:
     Q_INVOKABLE bool selectProject(const QString &id);
     Q_INVOKABLE bool setProjectInstructions(const QString &text, const QString &projectId = {});
     Q_INVOKABLE QStringList searchChats(const QString &query) const;
-    Q_INVOKABLE bool moveChatToProject(const QString &chatId, const QString &projectId);
-    bool voiceMode() const { return m_voiceMode; }
+    bool voiceMode() const { return m_voiceMode && speechOutputAvailable(); }
     void setVoiceMode(bool enabled);
     QString styleInstructions() const { return m_styleInstructions; }
     void setStyleInstructions(const QString &instructions);
@@ -140,9 +166,23 @@ public:
     int voiceSpeed() const { return m_voiceSpeed; }
     void setVoiceSpeed(int speed);
     bool previewingVoice() const { return m_speechPreview; }
+    bool generatingSpeech() const { return m_speaking && !m_speechRequest.isEmpty(); }
     bool speaking() const { return m_speaking; }
+    QVariantList audioModels() const { return m_models.supportModels(); }
+    QString speechInputModel() const;
+    QString speechOutputModel() const;
+    bool speechInputAvailable() const;
+    bool speechOutputAvailable() const;
+    QVariantMap speechPreset() const { return m_speechPreset; }
+    QVariantMap phononVoice() const { return m_phononVoice; }
+    Q_INVOKABLE bool selectAudioModel(const QString &id);
+    Q_INVOKABLE bool saveSpeechPreset(const QString &preset, const QString &language, int speed);
+    Q_INVOKABLE void previewSpeechPreset(const QString &preset, const QString &language, int speed);
+    Q_INVOKABLE bool savePhononVoiceSettings(const QString &voiceEmbedding, double temperature);
+    Q_INVOKABLE void previewPhononVoice(const QString &voiceEmbedding, double temperature);
 
     Q_INVOKABLE void prepareRuntime();
+    Q_INVOKABLE void checkForCodexUpdate();
     Q_INVOKABLE bool send(const QString &text);
     Q_INVOKABLE bool saveChat();
     Q_INVOKABLE void stop();
@@ -172,16 +212,19 @@ signals:
     void attachmentsChanged();
     void devicesChanged();
     void effortChanged();
+    void fastModeChanged();
     void modelChanged();
     void modelWarningChanged();
     void availableModelsChanged();
     void stateChanged();
     void recordingChanged();
+    void audioTranscriptionChanged();
     void chatsChanged();
     void draftTextChanged();
     void readingPositionChanged();
     void optionsChanged();
     void voiceSettingsChanged();
+    void audioModelsChanged();
     void styleInstructionsChanged();
     void speechReady(const QUrl &url);
     void voicePreviewReady(const QUrl &url);
@@ -206,7 +249,8 @@ private:
     void requestCompletion();
     void initializeCodex();
     bool startCodexProcess();
-    void deleteCodexThreads(const QStringList &threads = {});
+    bool queueCodexThreads(const QString &chatId, const QStringList &threads);
+    void deleteCodexThreads();
     void startCodexTurn(bool contextRetry = false);
     void codexNotification(const QString &method, const QJsonObject &params);
     void reconcileCodexTools(const QJsonArray &history);
@@ -246,6 +290,7 @@ private:
     QJsonObject skillFile(const QString &id, const QString &path) const;
     QJsonArray skillCatalog() const;
     QString runtimePath(const QString &name) const;
+    QString codexRuntimeRoot() const;
     QString modelRoot() const;
     QString chatRoot() const;
     QString attachmentDirectory() const;
@@ -254,10 +299,19 @@ private:
     void activateChatStore();
     bool activateViewedChat();
     void initializeSpeech();
+    QVariantMap activeAudioModel(const QString &kind, const QString &preferred) const;
+    QString selectedSpeechInputPath() const;
+    QString nativeSpeechWorker() const;
+    QVariantMap validSpeechPreset(const QString &preset, const QString &language, int speed) const;
+    void stopSpeechProcess();
     void generateSpeech();
     void speakReply(const QString &text);
     void startSpeechRequest();
     void speechFailed(const QString &error);
+    static QByteArray stereoSpeechPcm(const QByteArray &mono);
+    void receiveSpeechPcm(const QJsonObject &packet);
+    void writeSpeechPcm();
+    void resetSpeechPlayback();
     QJsonObject voiceReference(const QString &prompt) const;
     void prepareVoiceReference(const QJsonObject &reference);
     bool persistVoice(const QString &prompt, int speed, const QJsonObject &reference);
@@ -284,13 +338,19 @@ private:
     QString m_codexWorkingDirectory;
     QString workspaceRoot() const;
     QString toolsRoot() const;
-    bool initializeWorkspace();
+    bool initializeWorkspace(const QString &legacyWorkspace = {});
     QProcessEnvironment toolEnvironment() const;
     bool runBrowserTool(const QString &name, const QJsonObject &args);
+#ifndef Q_OS_ANDROID
+    void sendBrowserRequest();
+    void failBrowserRequest(const QString &error);
+#endif
     void initializeBrowser();
     void stopBrowser();
     QJsonObject toolTarget(const QJsonObject &args) const;
     void appendAttachmentFiles(const QList<QUrl> &urls, QVariantList &attachments, const QString &directory, QString &error);
+    void startAudioTranscriptions(const QVariantMap &inputs, const QString &whisperModel,
+                                  const QString &chatId, const QString &messageId);
 
     QVariantList m_messages;
     QVariantList m_attachments;
@@ -300,6 +360,7 @@ private:
     QVariantMap m_currentLocation;
     QString m_username;
     int m_effort = 0;
+    bool m_fastMode = false;
     AssistantModels m_models;
     AssistantConnections m_connections;
     int m_modelIndex = -1;
@@ -347,6 +408,7 @@ private:
     QString m_codexThreadId;
     QStringList m_codexThreads;
     QString m_codexLoadedThread;
+    QSet<QString> m_codexDeletesInFlight;
     QString m_codexModelId;
     QString m_codexInstructions;
     QString m_codexTurnId;
@@ -397,10 +459,17 @@ private:
 #ifdef Q_OS_ANDROID
     qint64 m_browserRequestId = 0;
     quint64 m_browserGeneration = 0;
+#else
+    QTimer m_browserDeadline;
 #endif
     QTemporaryDir m_sessionDirectory;
     QFutureWatcher<QVariantMap> m_mediaWatcher;
     std::shared_ptr<std::atomic_bool> m_cancelMedia;
+    QThreadPool m_audioTranscriptPool;
+    std::shared_ptr<std::atomic_bool> m_cancelAudioTranscripts = std::make_shared<std::atomic_bool>(false);
+    QHash<QString, QFuture<QString>> m_audioTranscripts;
+    bool m_transcribingRequest = false;
+    bool m_transcribingEarlierAudio = false;
     SshManager m_connection;
     QAudioSource *m_audioSource = nullptr;
     QFile m_recordingFile;
@@ -409,6 +478,7 @@ private:
     bool m_recordingAfterPermission = false;
     bool acceptRecordingPermission(quint64 request, bool granted, Qt::ApplicationState state);
     QVariantList m_chats;
+    QHash<QString, QStringList> m_unsentDrafts;
     QString m_chatId, m_chatUpdated;
     QString m_draftText, m_viewDraftText;
     QVariantMap m_readingPosition, m_viewReadingPosition;
@@ -417,6 +487,8 @@ private:
     bool m_openingChat = false;
     bool m_chatSavePending = false;
     quint64 m_chatOpenRevision = 0;
+    bool hasCurrentConversation() const;
+    void resetChat(const QString &projectId);
     void restoreChat(const QString &id, const QJsonObject &data);
     QString m_chatTitle;
     QString m_viewChatId;
@@ -424,6 +496,9 @@ private:
     QVariantList m_viewMessages, m_viewAttachments;
     bool m_voiceMode = false;
     QString m_voicePrompt;
+    QString m_speechInputModel, m_speechOutputModel, m_speechProcessModel;
+    QVariantMap m_speechPreset;
+    QVariantMap m_phononVoice;
     QString m_styleInstructions;
     int m_voiceSpeed = 5;
     QJsonObject m_voiceReference;
@@ -432,10 +507,20 @@ private:
     int m_pendingVoiceSpeed = 5;
     QTimer m_saveTimer;
     QProcess m_speechProcess;
+    QTimer m_speechPlaybackTimer;
+    std::unique_ptr<QAudioSink> m_speechAudio;
+    QIODevice *m_speechAudioWriter = nullptr;
+    QByteArray m_speechPcm;
+    bool m_speechPcmFinished = false;
+    bool m_speechPcmPlayed = false;
+    bool m_speechPcmUnavailable = false;
+    int m_speechPcmSourceChannels = 0;
     QByteArray m_speechBuffer;
     QByteArray m_speechLog;
     QJsonObject m_speechRequest;
+    QJsonObject m_cancelledSpeechRequest;
     bool m_speechReady = false;
+    bool m_speechStopping = false;
     bool m_speaking = false;
     bool m_speechPreview = false;
     int m_speechMessageIndex = -1;

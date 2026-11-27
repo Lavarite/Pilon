@@ -4,11 +4,12 @@ pilon_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 if [[ "${PILON_ENV_LOADED:-0}" != 1 ]]; then
     exec python3 "$pilon_root/src/scripts/environment.py" bash "${BASH_SOURCE[0]}" "$@"
 fi
-pilon_work="$pilon_root/build/android/agent-runtime"
+pilon_dev="${PILON_DEV_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/pilon-dev}"
+pilon_work="$pilon_dev/dev-deps/android/agent-runtime"
 pilon_recipe="$pilon_root/addons/assistant/platform/android/agent-runtime"
 pilon_sdk="${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}"
 pilon_ndk="${ANDROID_NDK_ROOT:-$pilon_sdk/ndk/27.2.12479018}"
-pilon_output="$pilon_root/builds/android/agent-runtime"
+pilon_output="$pilon_dev/builds/android/agent-runtime"
 pilon_python_sha=423c80b957330cf0ebb92b9b20f2294c292144a441bdb0ceb8c69d14928e569b
 pilon_node_sha=7b9adc82d612d0a2a863d96c46de2292552e250cee51956ebbe0146c42aacae9
 mkdir -p "$pilon_work/downloads" "$pilon_work/react" "$pilon_output/runtime/arm64-v8a" "$pilon_output/assets/agent-runtime"
@@ -79,11 +80,11 @@ PY
 )
 cp "$pilon_recipe/package.json" "$pilon_recipe/package-lock.json" "$pilon_work/react/"
 npm ci --prefix "$pilon_work/react" --ignore-scripts --omit=optional --no-audit --no-fund
-python3 - "$pilon_root" "$pilon_ndk" "$pilon_inputs" <<'PY'
+python3 - "$pilon_root" "$pilon_ndk" "$pilon_inputs" "$pilon_dev" <<'PY'
 from pathlib import Path
 import base64,hashlib,io,json,os,shutil,struct,subprocess,sys,tarfile,urllib.request,zipfile
-root,ndk=map(Path,sys.argv[1:3]);work=root/'build/android/agent-runtime';recipe=root/'addons/assistant/platform/android/agent-runtime';out=root/'builds/android/agent-runtime';native=out/'runtime/arm64-v8a';assets=out/'assets/agent-runtime';prefix=work/'python/prefix';tools=ndk/'toolchains/llvm/prebuilt/linux-x86_64/bin'
-licenses=root/'builds/android/licenses/agent-runtime';licenses.mkdir(parents=True,exist_ok=True)
+root,ndk=map(Path,sys.argv[1:3]);dev=Path(sys.argv[4]);work=dev/'dev-deps/android/agent-runtime';recipe=root/'addons/assistant/platform/android/agent-runtime';out=dev/'builds/android/agent-runtime';native=out/'runtime/arm64-v8a';assets=out/'assets/agent-runtime';prefix=work/'python/prefix';tools=ndk/'toolchains/llvm/prebuilt/linux-x86_64/bin'
+licenses=dev/'builds/android/licenses/agent-runtime';licenses.mkdir(parents=True,exist_ok=True)
 source=work/'node-source/node-v22.23.4';stage=work/'native-stage'
 if stage.exists():
  assert stage.name=='native-stage' and stage.parent.name=='agent-runtime'

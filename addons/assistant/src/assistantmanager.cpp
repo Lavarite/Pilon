@@ -274,36 +274,59 @@ AssistantManager::AssistantManager(QObject *parent) : QObject(parent)
             fail(reason);
         } else m_loadedModel = -1;
     });
+    m_audioTranscriptPool.setMaxThreadCount(1);
     connect(&m_mediaWatcher, &QFutureWatcher<QVariantMap>::finished, this, [this] {
-        if (!m_busy) return;
         const QVariantMap result = m_mediaWatcher.result();
+        const auto inputs = result.value("transcriptionInputs").toMap();
+        const auto transcripts = result.value("completedTranscripts").toMap();
+        const auto cancel = std::exchange(m_cancelMedia, {});
+        if (!m_busy || (cancel && cancel->load())) {
+            for (const auto &input : inputs) QFile::remove(input.toString());
+            if (m_active && result.value("transcriptChatId").toString() == m_chatId
+                && applyAssistantAttachmentTranscripts(m_attachments, transcripts))
+                emit attachmentsChanged();
+            if (cancel && cancel->load()) emit stateChanged();
+            return;
+        }
+        if (std::exchange(m_transcribingRequest, false)) emit stateChanged();
+        bool messagesChangedByMedia = applyAssistantAudioTranscripts(m_messages, transcripts);
         if (result.contains("error")) {
+            if (applyAssistantAttachmentTranscripts(m_attachments, transcripts)) emit attachmentsChanged();
             fail(result.value("error").toString());
             return;
         }
         m_history = QJsonArray::fromVariantList(result.value("history").toList());
+        const auto preparedAttachments = result.value("attachments").toList();
+        QString messageId;
         if (m_userMessageIndex >= 0 && m_userMessageIndex < m_messages.size()) {
             auto message = m_messages[m_userMessageIndex].toMap();
-            message.insert("attachments", result.value("attachments"));
+            messageId = message.value("messageId").toString();
+            message.insert("attachments", preparedAttachments);
             m_messages[m_userMessageIndex] = message;
-            emit messagesChanged();
+            messagesChangedByMedia = true;
         }
-        m_userSources.insert(m_history.size(), {{"text", m_pendingUserText}, {"attachments", m_attachments}});
+        if (messagesChangedByMedia) emit messagesChanged();
+        m_userSources.insert(m_history.size(), {{"text", m_pendingUserText}, {"attachments", preparedAttachments}});
         m_history.append(QJsonObject{{"role", "user"},
             {"content", QJsonArray::fromVariantList(result.value("content").toList())}});
         m_mediaModel = m_modelId;
         m_refreshMedia = false;
         m_attachments.clear();
         emit attachmentsChanged();
+        const auto chatId = m_chatId;
         startServer();
+        startAudioTranscriptions(inputs, result.value("speechInputModel").toString(), chatId, messageId);
     });
     initializeCodex();
     connect(&m_codexRuntime, &CodexRuntime::updated, this, [this] { m_codexUpdatePending = true; emit stateChanged(); });
     connect(this, &AssistantManager::stateChanged, this, [this] {
-        if (!m_codexUpdatePending || busy() || recording() || m_mediaWatcher.isRunning() || m_connections.signingIn()) return;
+        if (!m_codexUpdatePending || busy() || recording() || m_mediaWatcher.isRunning()
+            || m_connections.signingIn() || m_connections.signingOut()
+            || !m_codexDeletesInFlight.isEmpty()) return;
         m_codexUpdatePending = false;
         m_codex.shutdown(); m_codexLoadedThread.clear();
         m_connections.configure(qEnvironmentVariable("PILON_CODEX", runtimePath("codex")), codexHome(), false);
+        deleteCodexThreads();
     });
     connect(&m_connections, &AssistantConnections::stateChanged, this, [this] { if (m_codexUpdatePending) emit stateChanged(); });
     m_connections.configure(qEnvironmentVariable("PILON_CODEX", runtimePath("codex")), codexHome(), false);
@@ -348,7 +371,13 @@ AssistantManager::AssistantManager(QObject *parent) : QObject(parent)
         if (state == Qt::ApplicationActive) {
             if (m_recordingAfterPermission && acceptRecordingPermission(m_recordingRequestRevision, true, state))
                 toggleRecording();
-        } else if (recording() || state == Qt::ApplicationHidden || state == Qt::ApplicationSuspended) stopRecording();
+        } else if (state == Qt::ApplicationHidden || state == Qt::ApplicationSuspended) {
+            stopRecording();
+            if (m_active && (m_saveTimer.isActive() || m_chatSavePending || m_viewDraftChanged))
+                saveChat();
+        } else if (recording()) {
+            stopRecording();
+        }
     });
 #endif
     initializeChatStore();
@@ -360,7 +389,8 @@ QString AssistantManager::disableBlockedReason() const
     if (recording()) return tr("Stop microphone recording before disabling Assistant.");
     if (m_busy || m_toolExecuting || m_mediaWatcher.isRunning()) return tr("Wait for the assistant task to finish or stop it first.");
     if (m_speaking) return tr("Stop speech playback before disabling Assistant.");
-    if (m_connections.signingIn() || m_connections.signingOut()) return tr("Wait for the account operation to finish.");
+    if (m_connections.signingIn() || m_connections.signingOut() || m_models.hubAuthBusy())
+        return tr("Wait for the account operation to finish.");
     return {};
 }
 bool AssistantManager::prepareDisable()
@@ -376,6 +406,7 @@ bool AssistantManager::prepareCleanup()
     if (m_active) return reject(tr("Wait for Assistant to pause before continuing."));
     if (!blocked.isEmpty()) return reject(blocked);
     if (busy() || m_models.downloading() || m_codex.running() || m_codexProvider.active() || m_codexRuntime.running()
+        || !m_audioTranscripts.isEmpty()
         || m_localTool.state() != QProcess::NotRunning || m_browserProcess.state() != QProcess::NotRunning || !m_browserRequest.isEmpty()
         || m_server.state() != QProcess::NotRunning || m_speechProcess.state() != QProcess::NotRunning || m_connection.running())
         return reject(tr("Wait for Assistant processes to stop before continuing."));
@@ -406,8 +437,12 @@ void AssistantManager::setActive(bool active)
     if (m_active == active) return;
     if (!active && !prepareDisable()) return;
     m_active = active;
-    if (active) activateChatStore();
+    if (active) {
+        m_cancelAudioTranscripts = std::make_shared<std::atomic_bool>(false);
+        activateChatStore();
+    }
     else {
+        m_cancelAudioTranscripts->store(true);
         stopRecording();
         if (m_chatOpenRevision) ++m_chatOpenRevision;
         m_preloadQueue.clear(); m_preparationTimer.stop();
@@ -423,13 +458,23 @@ void AssistantManager::prepareRuntime()
 {
     if (!m_active) return;
     if (!m_workspaceInitialized) m_workspaceInitialized = initializeWorkspace();
-    m_connections.configure(qEnvironmentVariable("PILON_CODEX", runtimePath("codex")), codexHome(), false);
+    if (!m_codexUpdatePending)
+        m_connections.configure(qEnvironmentVariable("PILON_CODEX", runtimePath("codex")), codexHome(), false);
     if (m_connections.hasChatGptSession()) m_connections.refreshAccount();
-    m_codexRuntime.start(QDir(PilonWorkspace::runtimeDirectory()).filePath("codex"), runtimePath("codex"));
+    m_codexRuntime.start(codexRuntimeRoot(), runtimePath("codex"));
+}
+
+void AssistantManager::checkForCodexUpdate()
+{
+    if (!m_active) return;
+    m_codexRuntime.start(codexRuntimeRoot(), runtimePath("codex"));
+    m_codexRuntime.checkNow();
 }
 
 AssistantManager::~AssistantManager()
 {
+    m_cancelAudioTranscripts->store(true);
+    m_audioTranscriptPool.waitForDone();
     stop();
     saveChat();
     m_speechProcess.kill();
@@ -468,6 +513,14 @@ void AssistantManager::setEffort(int effort)
     emit effortChanged();
 }
 
+void AssistantManager::setFastMode(bool enabled)
+{
+    if (!fastModeAvailable() || busy() || recording() || m_fastMode == enabled) return;
+    m_fastMode = enabled;
+    PilonSettings().setValue("assistant/fastMode/" + m_modelId, enabled);
+    emit fastModeChanged();
+}
+
 QVariantMap AssistantManager::selectedModel() const
 {
     return m_selectedModel;
@@ -504,6 +557,8 @@ void AssistantManager::setModelIndex(int index)
     else PilonSettings().remove("assistant/model");
     m_effort = qBound(0, PilonSettings().value("assistant/reasoning/" + m_modelId, m_effort).toInt(),
                      qMax(0, int(reasoningOptions().size()) - 1));
+    m_fastMode = fastModeAvailable() && PilonSettings().value("assistant/fastMode/" + m_modelId,
+        model.value("fastServiceTier") == model.value("defaultServiceTier")).toBool();
     m_refreshMedia = true;
     m_codexLoadedThread.clear();
     if (m_server.state() != QProcess::NotRunning) {
@@ -513,11 +568,27 @@ void AssistantManager::setModelIndex(int index)
     }
     emit modelChanged();
     emit effortChanged();
+    emit fastModeChanged();
 }
 
 bool AssistantManager::removeModel(const QString &id)
 {
-    if (busy() || recording()) return false;
+    if (busy() || recording() || m_models.downloading()) return false;
+    if ((!m_audioTranscripts.isEmpty() || mediaCancelling()) && activeAudioModel("input", id).value("id") == id) {
+        fail(tr("Wait for transcription to finish before removing the speech recognition model."));
+        return false;
+    }
+    if (id == m_speechProcessModel && m_speechProcess.state() != QProcess::NotRunning) {
+        if (!m_speechStopping) {
+            stopSpeech();
+            stopSpeechProcess();
+        }
+        if (!m_speechProcess.waitForFinished(1000) && id == m_speechProcessModel
+            && m_speechProcess.state() != QProcess::NotRunning) {
+            fail(tr("Unable to stop the speech runtime before removing the model."));
+            return false;
+        }
+    }
     const auto loadedId = m_models.installed().value(m_loadedModel).toMap().value("id").toString();
     const bool removed = m_models.removeModel(id);
     if (removed) {
@@ -554,6 +625,12 @@ QString AssistantManager::modelRoot() const
     return AssistantModels::root();
 }
 
+QString AssistantManager::codexRuntimeRoot() const
+{
+    const auto override = qEnvironmentVariable("PILON_RUNTIME_DIR");
+    return QDir(override.isEmpty() ? PilonWorkspace::appDataDirectory() + "/runtime" : override).filePath("codex");
+}
+
 QString AssistantManager::runtimePath(const QString &name) const
 {
 #ifdef Q_OS_ANDROID
@@ -561,6 +638,8 @@ QString AssistantManager::runtimePath(const QString &name) const
 #endif
     const QDir root(PilonWorkspace::runtimeDirectory());
     if (name == "codex") {
+        const auto managed = CodexRuntime::executable(codexRuntimeRoot());
+        if (!managed.isEmpty()) return managed;
         const auto installed = CodexRuntime::executable(root.filePath("codex"));
         if (!installed.isEmpty()) return installed;
     }
@@ -737,19 +816,58 @@ QString AssistantManager::attachmentWarning(const QVariantMap &attachment) const
 #else
         if (QStandardPaths::findExecutable("ffmpeg").isEmpty()) return tr("Audio conversion is unavailable on this device.");
 #endif
-        if (!model.value("audio").toBool()
-            && (!QFileInfo::exists(modelRoot() + "/whisper-large-v3-turbo/ggml-large-v3-turbo-q8_0.bin")
-                || !QFileInfo(runtimePath("whisper-cli")).isExecutable()))
-            return tr("This model does not accept audio and speech recognition is not installed. Download Speech recognition in Models or choose an audio-capable model.");
+        if (!model.value("audio").toBool() && attachment.value("transcript").toString().isEmpty()
+            && !speechInputAvailable())
+            return tr("Download a speech recognition model in Audio models or choose a model that accepts audio.");
     }
     return {};
+}
+
+void AssistantManager::startAudioTranscriptions(const QVariantMap &inputs, const QString &whisperModel,
+                                                const QString &chatId, const QString &messageId)
+{
+    if (inputs.isEmpty()) return;
+    const auto directory = chatRoot() + '/' + chatId + "/attachments";
+    const auto executable = runtimePath("whisper-cli");
+    const auto cancel = m_cancelAudioTranscripts;
+    bool started = false;
+    for (auto it = inputs.cbegin(); it != inputs.cend(); ++it) {
+        const auto id = it.key(), wav = it.value().toString();
+        if (!m_active || messageId.isEmpty() || m_audioTranscripts.size() >= 8 || m_audioTranscripts.contains(id)) {
+            QFile::remove(wav);
+            continue;
+        }
+        auto *watcher = new QFutureWatcher<QString>(this);
+        connect(watcher, &QFutureWatcher<QString>::finished, this, [this, watcher, id, chatId, messageId] {
+            const auto speech = watcher->result();
+            watcher->deleteLater();
+            m_audioTranscripts.remove(id);
+            auto *messages = chatId == m_chatId ? &m_messages : chatId == m_viewChatId ? &m_viewMessages : nullptr;
+            if (m_active && messages && !speech.isEmpty()
+                && applyAssistantAudioTranscripts(*messages, {{id, speech}}, messageId))
+                emit messagesChanged();
+            emit audioTranscriptionChanged();
+        });
+        auto future = QtConcurrent::run(&m_audioTranscriptPool, [id, wav, directory, executable, whisperModel, cancel] {
+            const auto result = transcribeAssistantAudio(wav, executable, whisperModel, cancel);
+            QFile::remove(wav);
+            const auto speech = result.value("text").toString();
+            if (speech.isEmpty() || cancel->load()) return QString{};
+            saveAssistantAudioTranscript(directory, id, speech, cancel);
+            return speech;
+        });
+        m_audioTranscripts.insert(id, future);
+        watcher->setFuture(future);
+        started = true;
+    }
+    if (started) emit audioTranscriptionChanged();
 }
 
 bool AssistantManager::send(const QString &text)
 {
     if (!m_active) { fail(tr("Assistant is disabled.")); return false; }
     m_readFiles.clear();
-    if (busy() || recording() || m_mediaWatcher.isRunning()
+    if (busy() || recording() || m_cancelMedia
         || m_connection.running()
         || (text.trimmed().isEmpty() && attachments().isEmpty()))
         return false;
@@ -766,64 +884,141 @@ bool AssistantManager::send(const QString &text)
         fail(tr("Unable to create private attachment storage."));
         return false;
     }
-    stopRecording();
-    prepareRuntime();
-    stopSpeech();
+    const auto previousDraft = m_draftText;
+    const auto previousTitle = m_chatTitle;
+    const auto previousUpdated = m_chatUpdated;
+    const auto previousAttachmentCount = m_turnAttachments.size();
+    const auto userText = text.trimmed();
+    const auto userMessageIndex = m_messages.size();
     m_draftText.clear();
-    emit draftTextChanged();
     m_error.clear();
-    ++m_generation;
     m_busy = true;
-    m_streamText.clear(); m_streamReasoning.clear(); m_streamCalls = {};
-    m_assistantIndex = -1;
-    m_pendingUserText = text.trimmed();
     m_turnAttachments.append(m_attachments);
     if (m_chatTitle.isEmpty())
-        m_chatTitle = text.trimmed().isEmpty() ? tr("Voice or attachment") : text.simplified().left(64);
-    m_userMessageIndex = m_messages.size();
-    m_messages.append(QVariantMap{{"role", "user"}, {"text", m_pendingUserText}, {"attachments", m_attachments},
+        m_chatTitle = userText.isEmpty() ? tr("Voice or attachment") : text.simplified().left(64);
+    m_chatUpdated = QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs);
+    m_messages.append(QVariantMap{{"role", "user"}, {"text", userText}, {"attachments", m_attachments},
         {"messageId",QUuid::createUuid().toString(QUuid::Id128)}});
+    if (!saveChat()) {
+        m_messages.removeLast();
+        m_turnAttachments.resize(previousAttachmentCount);
+        m_chatTitle = previousTitle;
+        m_chatUpdated = previousUpdated;
+        m_draftText = previousDraft;
+        m_busy = false;
+        m_saveTimer.start();
+        emit stateChanged();
+        return false;
+    }
+    prepareRuntime();
+    stopSpeech();
+    emit draftTextChanged();
+    ++m_generation;
+    m_streamText.clear(); m_streamReasoning.clear(); m_streamCalls = {};
+    m_assistantIndex = -1;
+    m_pendingUserText = userText;
+    m_userMessageIndex = userMessageIndex;
+    const bool nativeAudio = nativeAudioInput();
+    const auto needsTranscription = [nativeAudio](const QVariantList &entries) {
+        return !nativeAudio && std::any_of(entries.cbegin(), entries.cend(), [](const QVariant &value) {
+            const auto attachment = value.toMap();
+            return attachment.value("mime").toString().startsWith("audio/") && attachment.value("transcript").toString().isEmpty();
+        });
+    };
+    m_transcribingRequest = needsTranscription(m_attachments);
+    m_transcribingEarlierAudio = false;
     emit messagesChanged();
     setStatus(m_attachments.isEmpty() ? tr("Loading model…") : tr("Preparing attachments…"));
-    saveChat();
     m_cancelMedia = std::make_shared<std::atomic_bool>(false);
     const auto attachments = m_attachments;
     const auto history = m_history;
     const auto sources = m_userSources;
     const bool changedModel = m_refreshMedia
         || (!m_mediaModel.isEmpty() && m_mediaModel != m_modelId);
-    const bool nativeAudio = selectedModel().value("audio").toBool();
     const bool vision = selectedModel().value("vision").toBool();
     const bool video = selectedModel().value("video").toBool();
     const QString directory = m_sessionDirectory.path();
+    const auto transcriptChatId = m_chatId;
+    const QString transcriptDirectory = chatRoot() + '/' + transcriptChatId + "/attachments";
     const QString whisper = runtimePath("whisper-cli");
-    const QString whisperModel = modelRoot() + "/whisper-large-v3-turbo/ggml-large-v3-turbo-q8_0.bin";
+    const QString whisperModel = selectedSpeechInputPath();
+    const auto pendingTranscripts = m_audioTranscripts;
     const auto cancel = m_cancelMedia;
-    const QString userText = m_pendingUserText;
+    const auto reportTranscribingEarlierAudio = [this, cancel] {
+        QMetaObject::invokeMethod(this, [this, cancel] {
+            if (m_cancelMedia != cancel || cancel->load() || m_transcribingRequest) return;
+            m_transcribingEarlierAudio = true;
+            m_transcribingRequest = true;
+            emit stateChanged();
+        }, Qt::QueuedConnection);
+    };
     m_mediaWatcher.setFuture(QtConcurrent::run([=] {
         QJsonArray updatedHistory = history;
+        QVariantMap completedTranscripts;
+        const auto withTranscripts = [&](QVariantMap result) {
+            if (!completedTranscripts.isEmpty()) {
+                result.insert("completedTranscripts", completedTranscripts);
+                result.insert("transcriptChatId", transcriptChatId);
+            }
+            return result;
+        };
+        const auto transcriptReady = [&](const QString &id, const QString &speech) {
+            if (id.isEmpty() || cancel->load()) return;
+            completedTranscripts.insert(id, speech);
+            saveAssistantAudioTranscript(transcriptDirectory, id, speech, cancel);
+        };
         if (changedModel) {
+            bool reported = false;
             for (auto it = sources.cbegin(); it != sources.cend(); ++it) {
-                const QVariantList previousAttachments = it.value().value("attachments").toList();
+                auto previousAttachments = it.value().value("attachments").toList();
                 if (previousAttachments.isEmpty())
                     continue;
                 for (const auto &value : previousAttachments) {
                     const auto mime = value.toMap().value("mime").toString();
                     if ((!vision && (mime.startsWith("image/") || mime == "application/pdf")) || (!video && mime.startsWith("video/")))
-                        return QVariantMap{{"error", "This chat contains media the selected model cannot read. Choose a compatible model or start a new chat."}};
+                        return withTranscripts({{"error", "This chat contains media the selected model cannot read. Choose a compatible model or start a new chat."}});
+                }
+                if (!nativeAudio) {
+                    loadAssistantAttachmentTranscripts(previousAttachments, transcriptDirectory);
+                    for (auto &entry : previousAttachments) {
+                        auto attachment = entry.toMap();
+                        const auto id = attachment.value("id").toString();
+                        const auto cached = attachment.value("transcript").toString();
+                        if (!cached.isEmpty()) {
+                            if (!id.isEmpty()) completedTranscripts.insert(id, cached);
+                            continue;
+                        }
+                        const auto running = pendingTranscripts.constFind(id);
+                        if (running == pendingTranscripts.cend()) continue;
+                        if (!reported && !running->isFinished()) { reportTranscribingEarlierAudio(); reported = true; }
+                        // This wait runs off the UI thread and can be interrupted by Stop.
+                        while (!running->isFinished() && !cancel->load()) QThread::msleep(25);
+                        if (cancel->load()) return withTranscripts({{"error", "Cancelled"}});
+                        const auto speech = running->result();
+                        if (speech.isEmpty()) continue;
+                        attachment.insert("transcript", speech);
+                        completedTranscripts.insert(id, speech);
+                        entry = attachment;
+                    }
+                }
+                const bool transcribe = needsTranscription(previousAttachments);
+                if (!reported && !whisper.isEmpty() && !whisperModel.isEmpty() && transcribe) {
+                    reportTranscribingEarlierAudio();
+                    reported = true;
                 }
                 const auto previous = prepareAssistantMedia(previousAttachments,
-                    it.value().value("text").toString(), nativeAudio, directory, whisper, whisperModel, cancel);
+                    it.value().value("text").toString(), nativeAudio, directory, whisper, whisperModel, cancel, false, transcriptReady);
                 if (previous.contains("error"))
-                    return previous;
+                    return withTranscripts(previous);
                 updatedHistory[it.key()] = QJsonObject{{"role", "user"},
                     {"content", QJsonArray::fromVariantList(previous.value("content").toList())}};
             }
         }
         auto result = prepareAssistantMedia(attachments, userText, nativeAudio,
-                                            directory, whisper, whisperModel, cancel);
+                                            directory, whisper, whisperModel, cancel, true, transcriptReady);
+        if (result.contains("transcriptionInputs")) result.insert("speechInputModel", whisperModel);
         result.insert("history", updatedHistory.toVariantList());
-        return result;
+        return withTranscripts(result);
     }));
     return true;
 }
@@ -1019,10 +1214,6 @@ void AssistantManager::startServer()
     if (smallGpuBatches && !m_cpuFallback && !environment.contains("LLAMA_ARG_UBATCH"))
         arguments << "--ubatch-size" << "128";
     if (!projector.isEmpty()) arguments << "--mmproj" << modelRoot() + '/' + projector;
-    // Leave generation headroom even when speech weights are already resident.
-    // A fresh Breeze worker peaks above its idle weight allocation.
-    if (!m_cpuFallback && QFileInfo::exists(modelRoot() + "/breeze-tts-2/config.json"))
-        arguments << "--fit-target" << (m_speechProcess.state() == QProcess::NotRunning ? "12288" : "4096");
     // Qwen's pinned GGUF contains its MTP head. Gemma uses a separate, pinned drafter.
     const QString drafter = selected.value("drafter").toString();
     if (!m_cpuFallback && (selected.value("mtp").toBool() || (!drafter.isEmpty() && QFileInfo::exists(modelRoot() + '/' + drafter)))) {
@@ -1056,9 +1247,10 @@ void AssistantManager::startLiteRtServer()
 #else
     const QDir root(PilonWorkspace::runtimeDirectory());
     const QString python = root.filePath("litert/bin/python");
-    const QString worker = root.absoluteFilePath("../addons/assistant/workers/litert_worker.py");
+    auto worker = root.filePath("litert/workers/litert_worker.py");
+    if (!QFileInfo(worker).isFile()) worker = root.absoluteFilePath("../addons/assistant/workers/litert_worker.py");
     if (!QFileInfo(python).isExecutable() || !QFileInfo(worker).isFile()) {
-        fail(tr("LiteRT-LM runtime is missing. Run addons/assistant/scripts/setup_litert.sh in the Pilon project.")); return;
+        fail(tr("The LiteRT-LM runtime or its worker is missing from this installation.")); return;
     }
 #endif
     QTcpServer reservation;
@@ -1166,7 +1358,7 @@ QString AssistantManager::instructionPrefix(const QVariantMap &selected) const
     const auto projectData = project(m_projectId);
     if (!projectData.value("instructions").toString().isEmpty())
         instructions += "\nProject instructions:\n" + projectData.value("instructions").toString();
-    if (m_voiceMode)
+    if (voiceMode())
         instructions += " Spoken mode: use conversational sentences without Markdown formatting.";
     return instructions;
 }
@@ -1362,7 +1554,7 @@ QJsonObject AssistantManager::appContext() const
     }
     return {{"current_location", current}, {"locations", locations()}, {"devices", agentDevices},
         {"calendar", QJsonObject{{"available", !m_calendar.isNull()}, {"timeZone", m_calendar ? m_calendar->preferences().value("timeZone").toString() : QString{}}, {"rangeFrom", m_calendar ? m_calendar->preferences().value("rangeFrom").toString() : QString{}}, {"rangeTo", m_calendar ? m_calendar->preferences().value("rangeTo").toString() : QString{}}, {"instructions", "Load the calendar skill to query events and propose changes. Changes require user review in Pilon, even in YOLO mode."}}},
-        {"notes", QJsonObject{{"path", PilonSettings().value("notes/directory", PilonWorkspace::publicDirectory("Notes")).toString()},
+        {"notes", QJsonObject{{"path", PilonSettings().value("notes/directory", PilonWorkspace::publicDirectory("notes")).toString()},
             {"format", "Pilon .pin JSON: elements, handwriting transcription, embedded assets and PNG previews. Use read_file for the note contents and extracted page image paths, then view_image to inspect those images."}}},
         {"attachments", attachments}, {"execution_mode", m_yolo ? "automatic" : "approval"},
         {"approval_mode", m_yolo ? "YOLO" : "Approve"},
@@ -1994,6 +2186,7 @@ void AssistantManager::stop()
     finishThinking(tr("Cancelled"));
     stopSpeech();
     m_busy = false;
+    m_transcribingRequest = false;
     if (m_cancelMedia)
         m_cancelMedia->store(true);
     m_healthTimer.stop();
@@ -2058,6 +2251,11 @@ void AssistantManager::clear()
     const auto selectedProject = currentProjectId();
     stop();
     if (!saveChat()) return;
+    resetChat(selectedProject);
+}
+
+void AssistantManager::resetChat(const QString &projectId)
+{
     const QJsonValue system = m_history.first();
     m_history = QJsonArray{system};
     m_codexThreadId.clear(); m_codexModelId.clear();
@@ -2074,8 +2272,7 @@ void AssistantManager::clear()
     m_loadedSkills.clear(); m_readFiles.clear();
     m_chatId = QUuid::createUuid().toString(QUuid::Id128);
     m_chatTitle.clear();
-    m_projectId = selectedProject;
-    if (m_projectId.isEmpty()) QDir().mkpath(workingDirectory());
+    m_projectId = projectId;
     m_viewChatId.clear();
     m_viewError.clear();
     m_viewMessages.clear();

@@ -14,9 +14,13 @@ import org.json.JSONObject;
 
 /** No provider account, consent, network call or real token is used by this fixture. */
 public final class CalendarAuthProbeInstrumentation extends Instrumentation {
+    private static final class CheckFailure extends AssertionError {
+        CheckFailure(String label) { super(label); }
+    }
+
     private int checks;
     private void check(boolean value, String label) {
-        if (!value) throw new AssertionError(label);
+        if (!value) throw new CheckFailure(label);
         ++checks;
     }
     @Override public void onCreate(Bundle arguments) { super.onCreate(arguments); start(); }
@@ -128,7 +132,8 @@ public final class CalendarAuthProbeInstrumentation extends Instrumentation {
             finish(Activity.RESULT_OK, output);
         } catch (Throwable failure) {
             // Assertion labels only; no provider response, credential or authorization code is printed.
-            output.putString("stream", "Calendar authorization fixture failed after " + checks + " checks: " + failure.getClass().getSimpleName() + "\n");
+            String label = failure instanceof CheckFailure ? failure.getMessage() : failure.getClass().getSimpleName();
+            output.putString("stream", "Calendar authorization fixture failed after " + checks + " checks: " + label + "\n");
             finish(Activity.RESULT_CANCELED, output);
         }
     }

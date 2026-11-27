@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Window
 import QtQuick.Controls
 import QtCore
+import QtMultimedia
 import Pilon 1.0 as Native
 import QtTest
 import ".." as App
@@ -23,6 +24,10 @@ TestCase {
 
     QtObject {
         id: tailscale
+        readonly property bool usesTailscale: true
+        property bool vpnDisconnected: false
+        property bool loggedIn: true
+        property var savedDevices: []
         readonly property var devices: includedDevices.map(device => Object.assign({included:true}, device))
         property var includedDevices: [{id: "fixture", name: "Fixture", ip: "127.0.0.1", online: true}]
     }
@@ -41,50 +46,12 @@ TestCase {
         function exportToFolder(folder, filename, options) { exported = {folder: folder, filename: filename, options: options}; return true }
         function preparePdf(filename, options) { exported = {filename: filename, options: options}; return "file:///tmp/" + filename }
     }
-    QtObject {
-        id: fakeGithub
-        property bool busy: false
-        property string account: "tester"
-        property string error: ""
-        property int errorRevision: 0
-        onErrorChanged: if (error) ++errorRevision
-        property string notice: ""
-        property string provider: "GitHub"
-        property string activeProvider: "github"
-        property var providers: [{id: "github", type: "GitHub", host: "github.com", account: "tester"}]
-        property string host: "github.com"
-        property string sshKey: ""
-        property bool available: true
-        property bool providerAvailable: true
-        property bool authenticating: false
-        property string loginCode: ""
-        property string credentialUrl: ""
-        property string credentialUsername: ""
-        property string cloneDirectory: "/fixture"
-        property string commitName: "Test"
-        property string commitEmail: "test@example.com"
-        property var repositories: []
-        property var repository: ({})
-        property var changes: []
-        property string openedPath: ""
-        signal changed()
-        signal credentialsSaved()
-        signal managedPolicyApplied()
-        signal conflictVersionExported(string path, string side, string destination)
-        property var conflictPreview: ({})
-        property var changePreview: ({})
-        function refreshAccount() { changed() }
-        function openFolder(path) {
-            openedPath = path
-            repository = {name: "tester/sample", localPath: "/fixture", branch: "main"}
-            changed()
-        }
-    }
     Native.RemoteFileManager { id: iconResolver }
     component MockFiles: QtObject {
         property var previewEntry: ({})
         property bool previewLoading: false
         property url previewDocumentUrl: ""
+        property url previewImageUrl: ""
         property bool previewCanImport: true
         property string previewKind: ""
         property string previewText: ""
@@ -99,9 +66,34 @@ TestCase {
         function openPreviewExternally() {}
         property bool showHidden: true
         property var localDevice: ({id: "local", name: "This device", online: true, local: true, username: "local-user"})
+        property string sharedStorageRoot: ""
+        function localRootPath(path) {
+            return sharedStorageRoot && (path === sharedStorageRoot || path.startsWith(sharedStorageRoot + "/"))
+                ? sharedStorageRoot : "/"
+        }
         property var entries: []
+        property bool hasMoreEntries: false
+        property bool loadingMoreEntries: false
+        property int pageRequests: 0
+        function loadMoreEntries() {
+            if (busy || !hasMoreEntries) return
+            pageRequests++
+            loadingMoreEntries = true
+            refreshing = true
+            busy = true
+        }
+        function localEntryExists(name) { return entries.some(entry => entry.name === name) }
         property var bookmarks: []
         property bool busy: false
+        property bool cachedListing: false
+        property bool markedOffline: false
+        function markListingUnavailable() {
+            if (cachedListing || currentDeviceId !== "fixture") return
+            cachedListing = true
+            markedOffline = true
+            locationChanged()
+        }
+        property bool refreshing: false
         property var transfer: ({})
         signal selectionReady(var files)
         property var preparedSelection: []
@@ -110,7 +102,8 @@ TestCase {
         property bool shareSucceeds: true
         property var shared: ({})
         signal shareFinished(bool opened)
-        function discardPreparedSelection(file) {}
+        property var discardedSelections: []
+        function discardPreparedSelection(file) { discardedSelections = discardedSelections.concat([file.toString()]) }
         function shareFile(file, pdf) {
             if (busy) return
             shared = {file: file, pdf: pdf}
@@ -120,8 +113,11 @@ TestCase {
         property bool searching: false
         property bool searchMode: false
         property bool clipboardAvailable: clipboard.entries.length > 0
+        readonly property var clipboardRemoteDeviceIds: clipboard.entries
+            .filter(entry => entry.deviceId && entry.deviceId !== "local").map(entry => entry.deviceId)
         property string currentUsername: "fixture"
         property bool canUndo: false
+        readonly property var undoRemoteDeviceIds: []
         property bool credentialSavingAvailable: false
         property string currentDeviceName: "Fixture"
         property string currentDeviceId: "fixture"
@@ -130,6 +126,7 @@ TestCase {
         function dismissError() { errorMessage = "" }
         property string promptText: ""
         property string promptKind: ""
+        property string promptDeviceId: ""
         property var dragged: []
         property int opened: 0
         property var lastBrowse: ({})
@@ -147,12 +144,30 @@ TestCase {
             bookmarks = bookmarks.concat(entries.map(function(entry) { return Object.assign({}, entry, {username: entry.username || username}) }))
             return entries.length > 0
         }
+        property bool bookmarkWriteAllowed: true
+        function nameBookmark(bookmark, name) {
+            if (!bookmarkWriteAllowed) {
+                errorMessage = "Unable to save bookmarks."
+                return false
+            }
+            errorMessage = ""
+            bookmarks = bookmarks.map(entry => entry.path === bookmark.path ? Object.assign({}, entry, {name: name}) : entry)
+            return true
+        }
         property var bookmarkedUrls: []
         function addBookmarkUrls(urls) { bookmarkedUrls = urls.slice(); return urls.length > 0 }
         property var lastView: ({})
         property var lastUpload: ({})
+        signal uploadFinished(bool saved)
         function uploadFile(device, username, path, source) { lastUpload = {device: device, path: path, source: source}; busy = true }
-        function browse(device, username, path) { opened++; lastBrowse = {device: device, username: username, path: path} }
+        function browse(device, username, path, userRequested) {
+            opened++; lastBrowse = {device: device, username: username, path: path, userRequested: userRequested}
+        }
+        property var lastLocalHome: ({})
+        function browseLocalHome(fallbackPath, requestSharedAccess) {
+            lastLocalHome = {fallbackPath, requestSharedAccess}
+            browse(localDevice, localDevice.username, fallbackPath)
+        }
         function viewFile(entry, username) { opened++; lastView = {entry: entry, username: username} }
         function copyToClipboard(entries, cut) { clipboard.entries = entries.slice(); clipboard.cut = cut }
         property var lastPaste: ({})
@@ -166,6 +181,7 @@ TestCase {
         }
         function reloadBookmarks() { }
         function appearanceIconNames() { return ["command-line", "film", "pencil", "photo", "pilon"] }
+        function importAppearanceIcon(file, directory) { return "" }
         function appearanceIconUrl(name) { return iconResolver.appearanceIconUrl(name) }
         function removeBookmark(deviceId, username, path) {
             bookmarks = bookmarks.filter(function(entry) { return entry.deviceId !== deviceId || entry.username !== username || entry.path !== path })
@@ -184,7 +200,14 @@ TestCase {
         function renameEntry(entry, username, name) { lastRename = {entry: entry, username: username, name: name} }
         function moveEntry(entry, username, path) { lastMove = {entry: entry, username: username, path: path} }
         property var lastVerifySizeEstimates: null
-        function refresh(verifySizeEstimates) { lastVerifySizeEstimates = verifySizeEstimates }
+        function refresh(verifySizeEstimates) {
+            lastVerifySizeEstimates = verifySizeEstimates
+            if (markedOffline) {
+                markedOffline = false
+                cachedListing = false
+                locationChanged()
+            }
+        }
     }
     MockFiles { id: files }
     MockFiles { id: accessFiles }
@@ -257,6 +280,8 @@ TestCase {
     }
     function test_pilonConfigurationUsesAGear() {
         compare(page.iconForFile("theme.piconf", false), "icons/cog-6-tooth.svg")
+        compare(page.iconForFile("Settings.PICONFPACK", false), "icons/cog-6-tooth.svg")
+        compare(page.iconForFile("Unrelated.pack", false), "icons/document.svg")
     }
     function test_gridKeepsCompactIconAndLabelSpacing() {
         page.fileZoomLevel = 2
@@ -324,6 +349,74 @@ TestCase {
         verify(!loading.visible)
         compare(view.mapToItem(page, 0, 0), original)
         files.busy = false
+    }
+    function test_refreshKeepsRowsAndSelectionInPlace_data() {
+        return [{tag: "list", width: 1000, zoom: 0}, {tag: "compact", width: 360, zoom: 0},
+            {tag: "grid", width: 650, zoom: 2}]
+    }
+    function test_refreshKeepsRowsAndSelectionInPlace(data) {
+        test.width = data.width
+        page.fileZoomLevel = data.zoom
+        wait(30)
+        const view = findChild(page, "fileEntriesView")
+        tryCompare(view, "count", files.entries.length)
+        const position = view.mapToItem(page, 0, 0)
+        const height = view.height
+        clickEntry(0)
+        const selected = page.selectedEntries[0].path
+        try {
+            files.cachedListing = true
+            files.busy = true
+            files.refreshing = true
+            tryCompare(view, "height", height)
+            compare(view.mapToItem(page, 0, 0), position)
+            compare(page.selectedEntries[0].path, selected)
+            compare(findChild(page, "fileLocationRefreshIndicator"), null)
+            verify(findChild(page, "fileSavedListingStatus").visible)
+            verify(!findChild(page, "fileLocationLoadingIndicator").visible)
+            files.busy = false
+            files.refreshing = false
+            verify(findChild(page, "fileSavedListingStatus").visible)
+            compare(view.mapToItem(page, 0, 0), position)
+        } finally {
+            files.cachedListing = false
+            files.busy = false
+            files.refreshing = false
+        }
+    }
+    function test_fileAppearanceImportsIconsThroughFiles() {
+        const entry = {name: "Fixture", path: "/tmp/Fixture", deviceId: "local", directory: true}
+        sharedFiles.appearance.openPath(entry)
+        const editor = findChild(sharedFiles, "fileAppearanceEditor")
+        tryCompare(editor, "opened", true)
+        findChild(editor, "importFileAppearanceIcon").clicked()
+        const chooser = findWorkspaceChild("connectedFileSelection")
+        const manager = sharedFiles.selectionManager
+        try {
+            tryCompare(chooser, "opened", true)
+            compare(chooser.transientParent, editor.dialogWindow)
+            verify(!chooser.multipleSelection)
+            const entries = ["notes.txt", "Picture.SVG"].map(name => ({
+                name: name, path: "/tmp/" + name, deviceId: "fixture", deviceName: "Fixture", directory: false
+            }))
+            manager.entries = entries
+            const accept = findWorkspaceChild("confirmConnectedFileSelection")
+            tryCompare(chooser.picker, "displayedEntries", entries)
+            chooser.picker.selectEntry(entries[0], 0, Qt.NoModifier)
+            verify(!accept.enabled)
+            chooser.picker.selectEntry(entries[1], 1, Qt.NoModifier)
+            verify(accept.enabled)
+            accept.clicked()
+            compare(manager.preparedSelection[0].path, entries[1].path)
+            const staged = "file:///tmp/pilon-test/Picture.SVG"
+            manager.selectionReady([staged])
+            compare(editor.importSource.toString(), staged)
+            editor.close()
+            compare(manager.discardedSelections.pop(), staged)
+        } finally {
+            chooser.close()
+            editor.close()
+        }
     }
     function test_fileAppearanceContextAndIconSearch() {
         const entry = {name: "Fixture", path: "/tmp/Fixture", deviceId: "local", directory: true}
@@ -480,9 +573,9 @@ TestCase {
     function findWorkspaceChild(name) {
         return findChild(workspace, name) || findChild(sharedFiles, name)
     }
-    function viewerMenuClick(menuName, actionName) {
-        const menu = findWorkspaceChild(menuName)
-        menu.popup()
+    function viewerMenuClick(actionName) {
+        const menu = findWorkspaceChild("previewFileMenu")
+        mouseClick(findWorkspaceChild("previewActionsButton"))
         tryCompare(menu, "opened", true)
         waitForRendering(menu.contentItem)
         mouseClick(findWorkspaceChild(actionName))
@@ -498,18 +591,18 @@ TestCase {
         verify(waitForRendering(viewer.contentItem))
         return viewer
     }
-    function test_viewerMenuHeadingsFollowPilonPalette() {
+    function test_viewerActionsFollowPilonPalette() {
         const original={main:workspace.mainColour.toString(),text:workspace.textColour.toString()}
-        const viewer=showPreview("text"),bar=findWorkspaceChild("previewMenuBar")
+        const viewer=showPreview("text"), button=findWorkspaceChild("previewActionsButton")
+        const menu=findWorkspaceChild("previewFileMenu")
         try {
-            verify(bar!==null);compare(bar.count,3)
+            verify(button && menu)
             for(const theme of [{main:"#202020",text:"#eeeeee"},{main:"#f4f4f4",text:"#202020"}]) {
                 workspace.mainColour=theme.main;workspace.textColour=theme.text
-                tryCompare(bar.palette,"buttonText",workspace.textColour)
-                for(let i=0;i<bar.count;++i)compare(bar.itemAt(i).contentItem.color,workspace.textColour,"Every heading uses Pilon's current text colour")
+                tryCompare(button.palette,"buttonText",workspace.textColour)
+                tryCompare(menu.palette,"windowText",workspace.textColour)
             }
-            mouseClick(bar.itemAt(1))
-            const menu=findWorkspaceChild("viewerViewMenu")
+            mouseClick(button)
             tryCompare(menu,"opened",true);menu.close()
         } finally {viewer.close();workspace.mainColour=original.main;workspace.textColour=original.text}
     }
@@ -517,7 +610,7 @@ TestCase {
         const viewer = showPreview("text")
         compare(viewer.fileIndex, 0)
         wait(100)
-        viewerMenuClick("viewerViewMenu", "previewZoomIn")
+        viewerMenuClick("previewZoomIn")
         compare(viewer.zoom, 1.25)
         const content = findWorkspaceChild("previewTextView")
         verify(content.contentHeight > content.height)
@@ -525,7 +618,7 @@ TestCase {
         tryVerify(() => content.contentY > 0)
         mouseWheel(content, 100, 100, 0, 120, Qt.NoButton, Qt.ControlModifier)
         verify(viewer.zoom > 1.25)
-        viewerMenuClick("viewerViewMenu", "previewZoomReset")
+        viewerMenuClick("previewZoomReset")
         compare(viewer.zoom, 1); compare(content.contentY, 0)
         keyClick(Qt.Key_Right)
         compare(files.lastView.entry.path, files.entries[1].path)
@@ -534,6 +627,188 @@ TestCase {
         compare(files.lastView.entry.path, files.entries[1].path) // A folder is not a viewer entry.
         keyClick(Qt.Key_Left)
         compare(files.lastView.entry.path, files.entries[5].path)
+    }
+
+    function test_viewerFolderNavigationControls_data() {
+        return [{tag: "desktop", width: 850, scale: 1}, {tag: "compact", width: 448, scale: 1.4}]
+    }
+
+    function test_viewerFolderNavigationControls(data) {
+        const viewer = showPreview("text")
+        const originalParent = viewer.transientParent, originalWidth = viewer.width
+        scaledViewerHost.uiScale = data.scale
+        viewer.transientParent = scaledViewerHost
+        viewer.width = data.width
+        try {
+            const previous = findWorkspaceChild("previewPreviousFile")
+            const next = findWorkspaceChild("previewNextFile")
+            const position = findWorkspaceChild("previewFilePosition")
+            verify(previous && next && position)
+            verify(previous.visible && next.visible)
+            verify(waitForRendering(next))
+            compare(position.text, "1 of 7")
+            verify(!previous.enabled && next.enabled)
+            const nav = findWorkspaceChild("previewFileNavigation")
+            verify(previous.x + previous.width <= position.x)
+            verify(position.x + position.width <= next.x)
+            verify(next.x + next.width <= nav.width + 1)
+            mouseClick(next)
+            compare(files.lastView.entry.path, files.entries[1].path)
+            files.previewEntry = files.entries[6]; files.previewChanged()
+            compare(position.text, "7 of 7")
+            verify(previous.enabled && !next.enabled)
+            mouseClick(previous)
+            compare(files.lastView.entry.path, files.entries[5].path)
+        } finally {
+            viewer.close(); viewer.transientParent = originalParent; viewer.width = originalWidth
+        }
+    }
+
+    function test_viewerOpenFailureOffersRetry() {
+        const viewer = showPreview("")
+        files.errorMessage = "The file is unavailable."
+        try {
+            const retry = findWorkspaceChild("previewRetryFile")
+            verify(retry && retry.visible && retry.enabled)
+            compare(findWorkspaceChild("previewFailureMessage").text, files.errorMessage)
+            verify(waitForRendering(retry))
+            mouseClick(retry)
+            compare(files.lastView.entry.path, files.entries[0].path)
+        } finally { viewer.close(); files.errorMessage = "" }
+    }
+
+    function test_viewerNextLoadsMoreFilesAcrossADirectoryPage() {
+        files.entries = Array.from({length: 32}, (_, i) => ({name: "File " + i, deviceId: "fixture", deviceName: "Fixture",
+            path: "/fixture/" + i, directory: false}))
+        files.hasMoreEntries = true
+        const viewer = showPreview("text")
+        files.previewEntry = files.entries[31]
+        files.previewChanged()
+        compare(findWorkspaceChild("previewFilePosition").text, "File 32")
+        const next = findWorkspaceChild("previewNextFile")
+        verify(next.enabled)
+        mouseClick(next)
+        compare(files.pageRequests, 1)
+        files.entries = files.entries.concat([{name: "Folder", deviceId: "fixture", deviceName: "Fixture", path: "/fixture/folder", directory: true}])
+        files.loadingMoreEntries = false; files.refreshing = false; files.busy = false
+        tryCompare(files, "pageRequests", 2)
+        files.entries = files.entries.concat([{name: "Last", deviceId: "fixture", deviceName: "Fixture", path: "/fixture/last", directory: false}])
+        files.hasMoreEntries = false; files.loadingMoreEntries = false; files.refreshing = false; files.busy = false
+        tryVerify(() => files.lastView.entry?.path === "/fixture/last")
+        files.previewEntry = files.lastView.entry
+        files.previewChanged()
+        compare(findWorkspaceChild("previewFilePosition").text, "33 of 33")
+        verify(!next.enabled)
+        viewer.close()
+    }
+
+    function test_viewerNextKeepsItsOriginalFolderAfterTheBrowserMoves() {
+        files.entries = Array.from({length: 32}, (_, i) => ({name: "File " + i, deviceId: "fixture", deviceName: "Fixture",
+            path: "/fixture/" + i, directory: false}))
+        files.hasMoreEntries = true
+        const viewer = showPreview("text")
+        files.previewEntry = files.entries[31]
+        files.previewChanged()
+        const next = findWorkspaceChild("previewNextFile")
+        verify(next.enabled)
+        files.currentPath = "/another"
+        files.locationChanged()
+        verify(!next.enabled)
+        compare(findWorkspaceChild("previewFilePosition").text, "32 of 32")
+        viewer.navigate(1)
+        compare(files.pageRequests, 0)
+        viewer.close()
+    }
+
+    function test_viewerSeesTheFinalPageLoadedInTheBrowser() {
+        files.entries = Array.from({length: 32}, (_, i) => ({name: "File " + i, deviceId: "fixture", deviceName: "Fixture",
+            path: "/fixture/" + i, directory: false}))
+        files.hasMoreEntries = true
+        const viewer = showPreview("text")
+        files.previewEntry = files.entries[31]
+        files.previewChanged()
+        files.loadMoreEntries()
+        files.hasMoreEntries = false
+        files.entries = files.entries.concat([{name: "Last", deviceId: "fixture", deviceName: "Fixture",
+            path: "/fixture/last", directory: false}])
+        files.loadingMoreEntries = false; files.refreshing = false; files.busy = false
+        const next = findWorkspaceChild("previewNextFile")
+        tryCompare(next, "enabled", true)
+        mouseClick(next)
+        compare(files.lastView.entry.path, "/fixture/last")
+        compare(files.pageRequests, 1)
+        viewer.close()
+    }
+
+    function test_viewerUsesConvertedImageUrl() {
+        files.previewUrl = "file:///tmp/Original.heic"
+        files.previewImageUrl = Qt.resolvedUrl("../icons/photo.svg")
+        const viewer = showPreview("image")
+        try {
+            compare(findWorkspaceChild("previewImage").source, files.previewImageUrl)
+            compare(String(files.previewUrl), "file:///tmp/Original.heic")
+        } finally { viewer.close(); files.previewImageUrl = "" }
+    }
+
+    function test_viewerShareUsesTheOriginalEntryAndAccount() {
+        const viewer = showPreview("image")
+        const share = sharedFiles.shareManager
+        files.previewEntry = Object.assign({}, files.entries[0], {username: "remote-account", name: "Original.heic"})
+        files.previewUrl = "file:///tmp/staged.heic"
+        files.previewImageUrl = Qt.resolvedUrl("../icons/photo.svg")
+        share.shared = ({})
+        try {
+            const button = findWorkspaceChild("previewShareFile")
+            verify(button && button.visible && button.enabled)
+            verify(waitForRendering(button))
+            mouseClick(button)
+            compare(share.preparedSelection[0].name, "Original.heic")
+            compare(share.selectionUsername, "remote-account")
+            compare(sharedFiles.shareErrorOwner, files)
+            compare(sharedFiles.shareOverlay, viewer.Overlay.overlay)
+            share.selectionReady(["file:///example/Original.heic"])
+            tryCompare(share, "shared", {file: "file:///example/Original.heic", pdf: false})
+        } finally {
+            viewer.close()
+            files.previewImageUrl = ""
+        }
+        compare(sharedFiles.shareOverlay, null)
+    }
+    function test_viewerNetworkActionsWaitForLiveListing_data() {
+        return [{tag: "tailnet", deviceId: "fixture"}, {tag: "local", deviceId: "local"},
+            {tag: "saved", deviceId: "external:lan"}]
+    }
+    function test_viewerNetworkActionsWaitForLiveListing(data) {
+        tailscale.savedDevices = [{id:"external:lan", name:"Saved host", ip:"192.168.1.42",
+            included:true, saved:true, online:false, onlineKnown:false}]
+        files.currentDeviceId = data.deviceId
+        files.entries = [
+            {name:"first.txt", path:"/fixture/first.txt", deviceName:"Source", directory:false},
+            {name:"second.txt", path:"/fixture/second.txt", deviceName:"Source", deviceId:data.deviceId, directory:false}]
+        const viewer = showPreview("text")
+        const next = findWorkspaceChild("previewNextFile")
+        const share = findWorkspaceChild("previewShareFile")
+        try {
+            verify(next.enabled && share.enabled)
+            if (data.deviceId === "fixture") {
+                files.cachedListing = true
+                verify(!next.enabled && !share.enabled)
+                files.cachedListing = false
+            }
+            tailscale.vpnDisconnected = true
+            const accessible = data.deviceId !== "fixture"
+            compare(next.enabled, accessible)
+            compare(share.enabled, accessible)
+            if (accessible) {
+                share.clicked()
+                compare(sharedFiles.shareManager.preparedSelection[0].deviceId, data.deviceId)
+            }
+        } finally {
+            viewer.close()
+            tailscale.vpnDisconnected = false
+            tailscale.savedDevices = []
+            files.cachedListing = false
+        }
     }
     function test_viewerMouseSelectionAndMiddlePan() {
         const viewer = showPreview("text")
@@ -740,7 +1015,7 @@ TestCase {
             viewer.transientParent = scaledViewerHost
             viewer.width = data.width; viewer.height = 480
             const toolbar = findWorkspaceChild("documentToolbar")
-            tryVerify(() => Math.abs(toolbar.width - (viewer.width / viewer.uiScale - viewer.padding * 2)) < .01)
+            tryVerify(() => Math.abs(toolbar.width - (viewer.width / viewer.uiScale - viewer.padding * 2)) <= 0.5)
             if (data.width < 500) tryVerify(() => toolbar.height > 36)
             waitForRendering(viewer.contentItem)
             for (const name of ["previewSectionsToggle", "previewPageNumber", "previewSearch", "previewZoomOutButton", "previewZoomLevel", "previewZoomInButton"]) {
@@ -876,6 +1151,32 @@ TestCase {
         files.previewLoading = false; files.busy = false
         viewer.close()
     }
+    function test_viewerLoadingKeepsTransferDialogClosed() {
+        const viewer = showPreview("")
+        const progress = findChild(page, "fileTransferProgress")
+        try {
+            files.previewLoading = true
+            files.busy = true
+            const loading = findWorkspaceChild("previewLoadingIndicator")
+            verify(loading.running)
+            files.transfer = {file: "photo.heic", sent: 4194304, total: 16777216, totalKnown: true, elapsed: 2}
+            const inlineProgress = findWorkspaceChild("previewTransferProgress")
+            verify(inlineProgress !== null)
+            verify(inlineProgress.visible)
+            compare(inlineProgress.value, .25)
+            verify(viewer.opened)
+            verify(!loading.running)
+            verify(!progress.visible)
+            files.transfer = ({})
+            verify(!inlineProgress.visible)
+            verify(loading.running)
+        } finally {
+            files.transfer = ({})
+            files.busy = false
+            files.previewLoading = false
+            viewer.close()
+        }
+    }
     function test_viewerTouchpadScrollBothAxes() {
         files.previewUrl = Qt.resolvedUrl("../icons/photo.svg")
         const viewer = showPreview("image")
@@ -934,15 +1235,31 @@ TestCase {
         viewer.close()
     }
     function test_audioViewerWaveformAndNativeWindow() {
+        compare(findWorkspaceChild("filePreview").mediaPlayer, null)
         files.previewUrl = ""
         files.previewWaveform = Array.from({length: 48}, (_, i) => .1 + Math.abs(Math.sin(i)) * .9)
         const viewer = showPreview("audio")
+        verify(viewer.mediaPlayer)
         const waveform = findWorkspaceChild("previewAudioWaveform")
         verify(waveform.visible)
         compare(waveform.Window.window, viewer)
         verify(waveform.width > viewer.width * .7)
         verify(waveform.height > viewer.height * .3)
         grabImage(viewer.contentItem).save("/tmp/pilon-audio-viewer.png")
+        viewer.close()
+        tryCompare(viewer, "mediaPlayer", null)
+    }
+    function test_videoShowsFirstFrameWhilePaused() {
+        files.previewUrl = Qt.resolvedUrl("fixtures/preview-video.mp4")
+        const viewer = showPreview("video")
+        tryVerify(() => viewer.mediaPlayer.videoOutput.sourceRect.width === 64)
+        const player = viewer.mediaPlayer
+        compare(player.playbackState, MediaPlayer.PausedState)
+        compare(player.position, 0)
+        player.play()
+        tryVerify(() => player.position > 0)
+        viewer.close()
+        tryCompare(viewer, "mediaPlayer", null)
     }
     function test_nativeViewerStateSurfaces_data() {
         return ["image","video","text","external","loading","error"].map(kind=>({tag:kind,kind:kind}))
@@ -979,6 +1296,36 @@ TestCase {
         for (let i = 1; i <= 5; ++i) { touch.move(0, view, x - i * 25, y).commit(); wait(20) }
         touch.release(0, view, x - 125, y).commit()
         compare(files.lastView.entry.path, files.entries[3].path)
+    }
+    function test_mediaPreviewSwipeNavigation_data() {
+        return [{tag: "video", kind: "video"}, {tag: "audio", kind: "audio"}]
+    }
+    function test_mediaPreviewSwipeNavigation(data) {
+        const viewer = showPreview(data.kind)
+        files.previewEntry = files.entries[2]
+        files.previewChanged()
+        const controls = findWorkspaceChild("previewAudioWaveform").parent
+        const content = controls.parent
+        const touch = touchEvent(content)
+        function swipe(x, y, dx, dy) {
+            touch.press(0, content, x, y).commit()
+            for (let i = 1; i <= 5; ++i) {
+                touch.move(0, content, x + dx * i / 5, y + dy * i / 5).commit()
+                wait(20)
+            }
+            touch.release(0, content, x + dx, y + dy).commit()
+        }
+        const x = Math.round(content.width / 2)
+        swipe(x, 20, -125, 0)
+        compare(files.lastView.entry?.path, files.entries[3].path)
+        swipe(x, 20, 125, 0)
+        compare(files.lastView.entry?.path, files.entries[1].path)
+        files.lastView = ({})
+        swipe(x, 20, -125, 100)
+        verify(!files.lastView.entry)
+        swipe(x, controls.y + controls.height / 2, -125, 0)
+        verify(!files.lastView.entry)
+        viewer.close()
     }
     function test_nativeFileOpeningNeverShowsTheGenericViewer() {
         const viewer = findWorkspaceChild("filePreview")
@@ -1400,16 +1747,20 @@ TestCase {
         noteImportSpy.clear()
         files.previewUrl = "file:///tmp/example.png"
         const viewer = showPreview("text")
-        viewerMenuClick("viewerNotesMenu", "previewAddToNote")
+        viewerMenuClick("previewAddToNote")
         compare(noteImportSpy.count, 1)
         compare(noteImportSpy.signalArguments[0][0][0], "file:///tmp/example.png")
         compare(noteImportSpy.signalArguments[0][1], false)
         showPreview("text")
-        viewerMenuClick("viewerNotesMenu", "previewNewNote")
+        viewerMenuClick("previewNewNote")
         compare(noteImportSpy.count, 2); compare(noteImportSpy.signalArguments[1][1], true)
     }
     function init() {
         test.width = 1000; test.height = 720
+        files.hasMoreEntries = false
+        files.loadingMoreEntries = false
+        files.refreshing = false
+        files.pageRequests = 0
         tailscale.includedDevices = [{id: "fixture", name: "Fixture", ip: "127.0.0.1", online: true}]
         findChild(sharedFiles, "fileAppearanceEditor").close()
         compactAppearanceOwner.close()
@@ -1419,7 +1770,6 @@ TestCase {
         accessFiles.errorMessage = ""
         accessPopup.close()
         fakeFilesAddon.integrationEnabled = false; fakeFilesAddon.actions = []
-        fakeGithub.openedPath = ""
         findChild(page, "fileContextMenu").close()
         findChild(page, "fileActionPopup").close()
         findChild(page, "fileDeleteConfirmation").close()
@@ -1442,6 +1792,7 @@ TestCase {
         files.entries = entries
         files.bookmarks = []
         files.bookmarkedUrls = []
+        files.bookmarkWriteAllowed = true
         files.lastView = ({})
         files.currentDeviceName = "Fixture"
         files.dragged = []
@@ -1449,11 +1800,14 @@ TestCase {
         files.busy = false
         files.searching = false
         files.searchMode = false
+        files.cachedListing = false
+        files.markedOffline = false
         files.promptKind = ""
         files.promptText = ""
         files.errorMessage = ""
         files.currentDeviceId = "fixture"
         files.currentPath = "/fixture"
+        files.sharedStorageRoot = ""
         files.lastBrowse = ({})
         files.lastPaste = ({})
         page.artifactToReveal = ""
@@ -1470,6 +1824,50 @@ TestCase {
                 {tag: "device", column: "device", descending: [0, 1, 2], ascending: [2, 1, 0]},
                 {tag: "size", column: "size", descending: [1, 0, 2], ascending: [2, 0, 1]},
                 {tag: "modified", column: "modified", descending: [2, 0, 1], ascending: [1, 0, 2]}]
+    }
+    function test_folderRequestsMoreOnlyNearTheBottom() {
+        files.entries = Array.from({length: 64}, (_, i) => ({name: "First " + i, deviceId: "fixture", deviceName: "Fixture",
+            path: "/fixture/" + i, directory: false}))
+        files.hasMoreEntries = true
+        const grid = findChild(page, "fileEntriesView")
+        verify(waitForRendering(grid))
+        compare(files.pageRequests, 0)
+        grid.contentY = grid.originY + grid.contentHeight / 2
+        compare(files.pageRequests, 0)
+        grid.contentY = grid.originY + grid.contentHeight - grid.height - 16
+        tryCompare(files, "pageRequests", 1)
+        const oldY = grid.contentY
+        files.entries = files.entries.concat(Array.from({length: 20}, (_, i) => ({name: "Further " + i,
+            deviceId: "fixture", deviceName: "Fixture", path: "/fixture/further-" + i, directory: false})))
+        files.loadingMoreEntries = false; files.refreshing = false; files.busy = false
+        compare(page.displayedEntries.length, 84)
+        compare(grid.contentY, oldY)
+        compare(files.pageRequests, 1)
+    }
+    function test_folderTouchRequestsAnotherPageAtTheSortedBottom() {
+        function rows(prefix) {
+            return Array.from({length: 32}, (_, i) => ({name: prefix + i, deviceId: "fixture", deviceName: "Fixture",
+                path: "/fixture/" + prefix + i, directory: false}))
+        }
+        files.entries = rows("Z")
+        page.cycleSort("name"); page.cycleSort("name")
+        files.hasMoreEntries = true
+        const grid = findChild(page, "fileEntriesView"), pointer = area()
+        verify(waitForRendering(grid))
+        grid.positionViewAtEnd()
+        tryCompare(files, "pageRequests", 1)
+        files.entries = files.entries.concat(rows("A"))
+        files.loadingMoreEntries = false; files.refreshing = false; files.busy = false
+        tryCompare(grid, "atYEnd", true)
+        compare(files.pageRequests, 1)
+        const startY = Math.min(pointer.height - 10, 200)
+        const touch = touchEvent(pointer)
+        touch.press(0, pointer, 80, startY).commit().release(0, pointer, 80, startY).commit()
+        compare(files.pageRequests, 1)
+        touch.press(0, pointer, 80, startY).commit()
+        for (let i = 1; i <= 6; ++i) touch.move(0, pointer, 80, startY - i * 15).commit()
+        touch.release(0, pointer, 80, startY - 90).commit()
+        tryCompare(files, "pageRequests", 2)
     }
     function test_column_sort_cycles(data) {
         files.entries = [
@@ -1605,6 +2003,50 @@ TestCase {
             }
         } finally {tailscale.includedDevices=previous}
     }
+    function test_vpnDisconnectDisablesPeerAndOpenUploadButKeepsLocalAndSavedHostAvailable() {
+        const savedHost = {id:"external:lan", name:"Saved LAN host", ip:"192.168.1.42",
+            included:true, saved:true, online:false, onlineKnown:false}
+        tailscale.savedDevices = [savedHost]
+        clipboard.entries = [{name:"local.txt", deviceId:"local", deviceName:"This device", path:"/local.txt", directory:false}]
+        const previousUploadDevice = sharedFiles.uploadManager.currentDeviceId
+        sharedFiles.uploadManager.currentDeviceId = "local"
+        sharedFiles.uploadFiles(page)
+        const upload = findWorkspaceChild("fileUploadWindow")
+        tryCompare(upload, "opened", true)
+        const confirm = findWorkspaceChild("confirmFileUpload")
+        const entry = clipboard.entries[0]
+        sharedFiles.uploadManager.entries = [entry]
+        upload.picker.selectEntry(entry, 0, Qt.NoModifier)
+        verify(confirm.enabled)
+        try {
+            tailscale.vpnDisconnected = true
+            const status = findChild(page, "fileLocationStatus")
+            verify(status && status.visible)
+            compare(status.text, "Connect Tailscale to access its devices.")
+            verify(!findChild(page, "fileDevice_fixture").enabled)
+            tryCompare(files, "cachedListing", true)
+            verify(findChild(page, "fileDevice_local").enabled)
+            verify(findChild(page, "fileDevice_external:lan").enabled)
+            verify(!page.canOpenEntry(files.entries[0]))
+            verify(!confirm.enabled)
+            const uploadStatus = findWorkspaceChild("fileUploadDestinationStatus")
+            verify(uploadStatus.visible)
+            compare(uploadStatus.text, status.text)
+            const previous = files.lastPaste
+            upload.accepted()
+            compare(files.lastPaste, previous)
+            verify(upload.opened)
+            tailscale.vpnDisconnected = false
+            tryCompare(status, "visible", false)
+            tryCompare(files, "cachedListing", false)
+            verify(confirm.enabled)
+        } finally {
+            upload.close()
+            sharedFiles.uploadManager.currentDeviceId = previousUploadDevice
+            tailscale.vpnDisconnected = false
+            tailscale.savedDevices = []
+        }
+    }
     function test_refresh_reconciles_selection_without_changing_location() {
         clickEntry(0)
         clickEntry(1, Qt.ControlModifier)
@@ -1641,6 +2083,18 @@ TestCase {
         files.locationChanged()
         compare(page.selectedEntries.length, 1)
         compare(page.selectedEntry.path, "/reports/report.md")
+    }
+
+    function test_missingLocalArtifactDoesNotFetchMorePages() {
+        files.currentDeviceId = "local"
+        files.entries = Array.from({length: 32}, (_, i) => ({name: "File " + i, deviceId: "local", deviceName: "This device",
+            path: "/fixture/" + i, directory: false}))
+        files.hasMoreEntries = true
+        page.revealArtifact("/fixture/missing.txt")
+        compare(files.lastBrowse.path, "/fixture")
+        files.locationChanged()
+        compare(page.artifactToReveal, "")
+        compare(files.pageRequests, 0)
     }
 
     function test_clicks_data() { return [{tag: "list", zoom: 0}, {tag: "icons", zoom: 2}] }
@@ -1693,6 +2147,32 @@ TestCase {
         const p = point(0)
         mouseDoubleClickSequence(area(), p.x, p.y, Qt.LeftButton)
         compare(files.opened, 1)
+    }
+    function test_double_click_during_refresh_opens_the_file() {
+        files.busy = true
+        files.refreshing = true
+        try {
+            const p = point(0)
+            mouseDoubleClickSequence(area(), p.x, p.y, Qt.LeftButton)
+            compare(files.opened, 1)
+            compare(files.lastView.entry.path, "/fixture/0")
+        } finally {
+            files.refreshing = false
+            files.busy = false
+        }
+    }
+    function test_double_click_while_previous_preview_is_finishing() {
+        files.previewLoading = true
+        files.busy = true
+        try {
+            const p = point(0)
+            mouseDoubleClickSequence(area(), p.x, p.y, Qt.LeftButton)
+            compare(files.opened, 1)
+            compare(files.lastView.entry.path, "/fixture/0")
+        } finally {
+            files.busy = false
+            files.previewLoading = false
+        }
     }
     function test_four_independent_resizable_tiles() {
         const original = page
@@ -1785,6 +2265,28 @@ TestCase {
         path.text = Qt.binding(function() { return files.currentPath })
     }
 
+    function test_long_location_path_elides_without_losing_text() {
+        const originalWidth = test.width
+        const location = findChild(page, "fileLocationInput")
+        const path = "/fixture/" + "long-directory-name/".repeat(20) + "leaf"
+        try {
+            test.width = 320
+            files.currentPath = path
+            findChild(page, "fileEntriesView").forceActiveFocus()
+            tryCompare(location, "showingSummary", true)
+            const summary = findChild(location, "elidedFieldText")
+            verify(summary !== null)
+            tryCompare(summary, "truncated", true)
+            compare(summary.color, location.palette.text)
+            compare(location.ToolTip.text, path)
+            mouseClick(location)
+            tryCompare(location, "activeFocus", true)
+            compare(location.text, path)
+            compare(location.color, location.palette.text)
+            verify(!summary.visible)
+        } finally { test.width = originalWidth }
+    }
+
     function test_bookmark_menu_files_and_folders_open_correctly() {
         clickEntry(0)
         clickEntry(7, Qt.ControlModifier)
@@ -1810,6 +2312,65 @@ TestCase {
                            name: "Renamed bookmark", path: "/file.pdf"})
         compare(files.lastView.entry.name, "file.pdf")
         compare(files.lastView.username, "saved-account")
+    }
+
+    function test_this_device_opens_android_storage_data() {
+        return [{tag: "sidebar", width: 1000, ssh: true},
+            {tag: "compact_without_ssh", width: 390, ssh: false}]
+    }
+
+    function test_this_device_opens_android_storage(data) {
+        test.width = data.width
+        sharedFiles.sshEnabled = data.ssh
+        files.sharedStorageRoot = "/storage/emulated/0"
+        files.currentDeviceId = "local"
+        files.currentPath = "/storage/emulated/0/Download"
+        files.lastLocalHome = ({})
+        const popup = findChild(page, "filePlacesPopup")
+        try {
+            const up = findChild(page, "fileFolderUp")
+            verify(up.enabled)
+            mouseClick(up)
+            compare(files.lastBrowse.path, files.sharedStorageRoot)
+            files.currentPath = files.sharedStorageRoot
+            compare(up.enabled, false)
+            files.lastBrowse = ({})
+            page.navigateToParent()
+            compare(files.lastBrowse.path, undefined)
+
+            compare(findChild(page, "fileSharedStorage"), null)
+            compare(findChild(page, "filePilonFolder"), null)
+            if (page.compactPlaces) {
+                mouseClick(findChild(page, "filePlacesToggle"))
+                tryCompare(popup, "opened", true)
+            }
+            const devices = findChild(page, "filePlacesDevicesList")
+            tryVerify(() => devices.itemAtIndex(0) !== null)
+            const local = devices.itemAtIndex(0)
+            verify(local.visible && local.enabled)
+            compare(local.text, "This device")
+            waitForPolish(local.parent)
+            mouseClick(local)
+            compare(files.lastLocalHome.fallbackPath, sharedFiles.localHomePath)
+            compare(files.lastLocalHome.requestSharedAccess, true)
+        } finally {
+            popup.close()
+            sharedFiles.sshEnabled = true
+            files.sharedStorageRoot = ""
+        }
+    }
+
+    function test_picker_defaults_to_this_device_without_requesting_access() {
+        const manager = sharedFiles.selectionManager
+        const picker = findWorkspaceChild("connectedFileSelection")
+        manager.lastLocalHome = ({})
+        try {
+            sharedFiles.selectFolder("Choose folder", () => {})
+            compare(manager.lastLocalHome.fallbackPath, sharedFiles.localHomePath)
+            compare(manager.lastLocalHome.requestSharedAccess, false)
+        } finally {
+            picker.close()
+        }
     }
 
     function test_drop_on_parent_arrow_moves_selected_entries() {
@@ -1905,6 +2466,36 @@ TestCase {
         verify(host!==null);host.update();verify(waitForRendering(host.contentItem))
         verify(tabletInput.saveWindow(host.contentItem,"/tmp/pilon-bookmark-rename.png"))
         host.close()
+    }
+
+    function test_bookmarkRenameKeepsDraftOnFailedSave() {
+        files.addBookmarks([files.entries[0]], "fixture")
+        const menu = findChild(page, "bookmarkContextMenu")
+        menu.show(files.bookmarks[0], 80, 140)
+        tryCompare(menu, "opened", true)
+        verify(waitForRendering(menu.contentItem))
+        mouseClick(menu.itemAt(0))
+        const host = tabletInput.modalWindow()
+        verify(host !== null)
+        try {
+            host.update()
+            verify(waitForRendering(host.contentItem))
+            const input = findChild(host.contentItem, "bookmarkNameInput")
+            const save = findChild(host.contentItem, "saveBookmarkName")
+            verify(input !== null && save !== null)
+            input.text = "Edited bookmark"
+            files.bookmarkWriteAllowed = false
+            mouseClick(save)
+            tryCompare(files, "errorMessage", "Unable to save bookmarks.")
+            compare(files.bookmarks[0].name, "File 0")
+            compare(input.text, "Edited bookmark")
+            const error = findChild(host.contentItem, "bookmarkNameError")
+            verify(error !== null && error.visible)
+            compare(error.text, "Unable to save bookmarks.")
+            files.bookmarkWriteAllowed = true
+            mouseClick(save)
+            compare(files.bookmarks[0].name, "Edited bookmark")
+        } finally { host.close() }
     }
 
     function test_bookmarks_drag_reorders_without_opening() {
@@ -2140,30 +2731,68 @@ TestCase {
         return [{tag: "cancel", nativeClose: false}, {tag: "close", nativeClose: true}]
     }
     function test_narrowAuthenticationKeepsActionLabelsAndCloseVisible_data() {
-        return [{tag:"normal",scale:1},{tag:"touch",scale:1.4},{tag:"large",scale:2}]
+        return [{tag: "desktop", width: 800, height: 600, scale: 1, long: false},
+                {tag: "touch", width: 360, height: 480, scale: 1.4, long: true},
+                {tag: "large", width: 360, height: 480, scale: 2, long: false}]
     }
     function test_narrowAuthenticationKeepsActionLabelsAndCloseVisible(data) {
         const screen=tabletInput.screenGeometry(), parent=accessPopup.parent
+        const before={width:scaledViewerHost.width,height:scaledViewerHost.height,scale:scaledViewerHost.uiScale}
         try {
-            tabletInput.setScreenGeometry(Qt.rect(0,0,360,480))
+            tabletInput.setScreenGeometry(Qt.rect(0,0,data.width,data.height))
+            scaledViewerHost.width=data.width;scaledViewerHost.height=data.height
             scaledViewerHost.uiScale=data.scale;scaledViewerHost.show();accessPopup.parent=scaledViewerHost.contentItem
-            accessFiles.promptKind="credential";accessFiles.promptText="SSH password";accessFiles.promptChanged()
+            accessFiles.credentialSavingAvailable=true
+            accessFiles.promptKind="credential"
+            accessFiles.promptText=data.long ? "Password for account@" + "long-device".repeat(19) + ".fixture.invalid" : "SSH password"
+            accessFiles.promptChanged()
             tryCompare(accessPopup,"opened",true)
             const host=accessPopup.dialogWindow
             host.requestActivate();tryCompare(host,"active",true);host.update();verify(waitForRendering(host.contentItem))
+            verify(accessPopup.contentSizedWindow, "Password dialog must size itself to its contents")
+            verify(host.width < data.width && host.height < data.height, "Password dialog fits within its owner")
+            if (!data.long) verify(host.height / data.scale < 240, "Short prompts keep a compact window")
+            const message=findChild(accessPopup,"fileAccessMessage")
+            const messageScroll=findChild(accessPopup,"fileAccessMessageScroll")
+            verify(message.contentWidth <= message.width + 1, "The complete device name wraps within the dialog")
+            verify(message.contentHeight > 0 && messageScroll.height > 0, "The prompt remains readable")
+            const promptStart=messageScroll.mapToItem(host.contentItem,0,0)
+            if (data.long) {
+                verify(messageScroll.contentHeight > messageScroll.availableHeight)
+                messageScroll.contentItem.contentY=messageScroll.contentHeight-messageScroll.availableHeight
+                verify(messageScroll.contentItem.contentY > 0)
+                messageScroll.contentItem.contentY=0
+            } else verify(messageScroll.contentHeight <= messageScroll.availableHeight + 1, "Short prompts fit without scrolling")
+            const scroll=findChild(accessPopup,"fileAccessFormScroll")
             for(const name of ["cancelFileAccess","confirmFileAccess"]) {
                 const action=findChild(accessPopup,name)
+                if (scroll.contentHeight > scroll.availableHeight + 1) {
+                    verify(data.scale === 2, "The usual scales fit the complete form")
+                    action.forceActiveFocus(Qt.TabFocusReason)
+                    scroll.revealFocus()
+                }
                 compare(action.contentItem.truncated,false)
+                compare(action.contentItem.lineCount,1)
+                const start=action.mapToItem(host.contentItem,0,0)
                 const end=action.mapToItem(host.contentItem,action.width,action.height)
-                verify(end.x<=host.width+1 && end.y<=host.height+1,name+" fits")
+                verify(start.x >= -1 && start.y >= -1 && end.x<=host.width+1 && end.y<=host.height+1,name+" fits")
             }
+            compare(messageScroll.mapToItem(host.contentItem,0,0),promptStart)
+            const close=findChild(host,"windowCloseButton")
+            const closeEnd=close.mapToItem(host.contentItem,close.width,close.height)
+            verify(close.visible && closeEnd.x <= host.width + 1 && closeEnd.y <= host.height + 1)
             verify(tabletInput.saveWindow(host.contentItem,"/tmp/pilon-file-access-"+data.tag+".png"))
+            findChild(accessPopup,"cancelFileAccess").forceActiveFocus(Qt.TabFocusReason)
+            scroll.revealFocus()
             mouseClick(findChild(accessPopup,"cancelFileAccess"));tryCompare(accessPopup,"opened",false)
             accessFiles.errorMessage="Connection ended"
             verify(!accessPopup.opened && !host.visible)
         } finally {
             accessFiles.cancelPrompt();accessFiles.errorMessage="";accessPopup.close();accessPopup.parent=parent
-            scaledViewerHost.close();tabletInput.setScreenGeometry(screen)
+            accessFiles.credentialSavingAvailable=false
+            scaledViewerHost.close()
+            scaledViewerHost.width=before.width;scaledViewerHost.height=before.height;scaledViewerHost.uiScale=before.scale
+            tabletInput.setScreenGeometry(screen)
         }
     }
     function test_authenticationCancellationReleasesTheModalWindow(data) {
@@ -2270,6 +2899,22 @@ TestCase {
             tryCompare(sharedFiles.shareManager, "errorMessage", "")
         } finally { sharedFiles.shareManager.dismissError() }
     }
+    function test_preview_authentication_is_owned_by_viewer() {
+        const viewer = showPreview("text")
+        files.promptKind = "hostKey"
+        files.promptText = "Trust file preview fixture"
+        try {
+            files.promptChanged()
+            const confirm = findChild(page, "confirmFileAccess")
+            verify(confirm !== null)
+            tryVerify(() => confirm.Window.window?.transientParent === viewer)
+            verify(confirm.Window.window.visible)
+        } finally {
+            files.cancelPrompt()
+            viewer.close()
+        }
+    }
+
     function test_remote_export_keeps_window_open_for_credentials() {
         sharedFiles.exportNote(exportNote)
         const manager = sharedFiles.exportManager
@@ -2285,6 +2930,7 @@ TestCase {
         manager.promptText = "Password"; manager.promptKind = "credential"; manager.busy = false
         verify(dialog.opened); verify(dialog.uploading)
         manager.busy = true; manager.promptText = ""; manager.promptKind = ""; manager.busy = false
+        manager.uploadFinished(true)
         verify(!dialog.opened)
     }
     Component {
@@ -2432,6 +3078,99 @@ TestCase {
         compare(files.lastPaste.path, "/remote-destination")
         compare(files.lastPaste.entries[0].path, files.entries[0].path)
         verify(!dialog.visible)
+    }
+    function test_generated_export_preserves_remote_destination_after_failure() {
+        const manager = sharedFiles.destinationManager
+        const devices = tailscale.includedDevices
+        let prepared = [], discarded = 0
+        sharedFiles.saveGeneratedFile("Export configuration", "Pilon.piconfpack", "/home",
+            test.Window.window, {
+                suffix: ".piconfpack",
+                exists: () => false,
+                save: () => false,
+                error: () => "",
+                prepare: name => { prepared.push(name); return "file:///tmp/private-export/" + name },
+                discard: () => ++discarded
+            })
+        const dialog = findWorkspaceChild("connectedFileDestination")
+        try {
+            tryCompare(dialog, "opened", true)
+            manager.currentDeviceId = "fixture"
+            manager.currentPath = "/backup"
+            manager.entries = []
+            findWorkspaceChild("fileDestinationFilename").text = "work"
+            const accept = findWorkspaceChild("confirmConnectedFileDestination")
+            tailscale.includedDevices = []
+            verify(!accept.enabled)
+            tailscale.includedDevices = devices
+            manager.cachedListing = true
+            verify(!accept.enabled)
+            manager.cachedListing = false
+            verify(accept.enabled)
+            accept.clicked()
+            compare(prepared[0], "work.piconfpack")
+            compare(manager.lastUpload.device.id, "fixture")
+            compare(manager.lastUpload.path, "/backup")
+            verify(!accept.enabled)
+            manager.busy = false
+            manager.uploadFinished(false)
+            compare(discarded, 1)
+            verify(dialog.opened)
+            compare(findWorkspaceChild("fileDestinationFilename").text, "work")
+            verify(accept.enabled)
+            accept.clicked()
+            manager.busy = false
+            manager.uploadFinished(true)
+            tryCompare(dialog, "opened", false)
+            compare(discarded, 2)
+        } finally {
+            tailscale.includedDevices = devices
+            manager.cachedListing = false
+            if (manager.busy) { manager.busy = false; manager.uploadFinished(false) }
+            dialog.close()
+        }
+    }
+    function test_generated_export_confirms_hidden_target_and_shows_write_error() {
+        const manager = sharedFiles.destinationManager
+        let savedFile = "", writable = false, existing = true, replaced = false
+        sharedFiles.saveGeneratedFile("Export configuration", "Pilon.piconfpack", "/home",
+            test.Window.window, {
+                suffix: ".piconfpack",
+                exists: () => existing,
+                save: (file, replace) => { savedFile = file; replaced = replace; return writable },
+                error: () => "Permission denied"
+            })
+        const dialog = findWorkspaceChild("connectedFileDestination")
+        try {
+            tryCompare(dialog, "opened", true)
+            manager.currentDeviceId = "local"
+            manager.currentPath = "/home/Backup folder"
+            manager.entries = []
+            findWorkspaceChild("fileDestinationFilename").text = ".Work #2"
+            const accept = findWorkspaceChild("confirmConnectedFileDestination")
+            dialog.requestActivate()
+            tryCompare(dialog, "active", true)
+            dialog.update()
+            verify(waitForRendering(dialog.contentItem))
+            tryCompare(accept, "enabled", true)
+            mouseClick(accept)
+            const replace = findWorkspaceChild("replaceExistingFile")
+            tryCompare(replace, "opened", true)
+            compare(savedFile, "")
+            replace.dialogWindow.update()
+            verify(waitForRendering(replace.dialogWindow.contentItem))
+            mouseClick(replace.confirmButton)
+            tryCompare(replace, "opened", false)
+            compare(savedFile, "file:///home/Backup%20folder/.Work%20%232.piconfpack")
+            verify(replaced)
+            tryCompare(findWorkspaceChild("destinationNameError"), "message", "Permission denied")
+            verify(dialog.opened)
+            existing = false
+            writable = true
+            accept.clicked()
+            tryCompare(dialog, "opened", false)
+            verify(!replaced)
+        } finally { dialog.close() }
     }
     function test_connectedSaveConfirmsOnlyLocalReplacement() {
         const entry = {name:"draft copy.txt", deviceId:"local", deviceName:"This device", path:"/source/draft copy.txt", directory:false}

@@ -1,6 +1,7 @@
 #include "piconfbundle.h"
 
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -23,7 +24,7 @@ bool PiconfBundle::save(const QUrl &destination, const PiconfDocument &document,
 {
     const auto path = filePath(destination);
     if (path.isEmpty()) { error = QObject::tr("Choose a local configuration bundle."); return false; }
-    if (destination.isLocalFile() && !path.endsWith(".piconfpack", Qt::CaseInsensitive)) {
+    if (!QFileInfo(path).fileName().endsWith(".piconfpack", Qt::CaseInsensitive)) {
         error = QObject::tr("Use the .piconfpack extension for an exported configuration."); return false;
     }
     QJsonArray entries;

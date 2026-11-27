@@ -14,8 +14,13 @@
     },
     {
       "id": "voice",
-      "name": "Voice",
+      "name": "Audio models",
       "entry": "Voice.qml"
+    },
+    {
+      "id": "hugging-face",
+      "name": "Hugging Face",
+      "entry": "HuggingFace.qml"
     }
   ],
   "lifecycle": "Lifecycle.qml",

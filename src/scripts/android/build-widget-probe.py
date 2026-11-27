@@ -5,10 +5,15 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(ROOT / "src/scripts"))
+from environment import development_root
+
+DEV = development_root()
 
 
 def main():
@@ -30,7 +35,7 @@ def main():
             if path == keystore:
                 message += ". Create the standard debug keystore with your Android development tools, then rerun; this builder never generates signing keys."
             parser.error(message)
-    output = (args.output or ROOT / f"build/android/pilon-widget-{args.kind}-probe.apk").expanduser().absolute()
+    output = (args.output or DEV / f"builds/work/android/pilon-widget-{args.kind}-probe.apk").expanduser().absolute()
     if output.suffix != ".apk" or output.is_symlink() or (output.exists() and not output.is_file()):
         parser.error("--output must be an APK file path, without a symbolic link at the destination")
     output.parent.mkdir(parents=True, exist_ok=True)

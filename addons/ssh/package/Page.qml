@@ -3,8 +3,6 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Controls.impl as ControlsImpl
-import QtCore
-import QtMultimedia
 import Pilon
 import Pilon as Backend
 
@@ -34,9 +32,12 @@ Item {
         sshUsername.userEdited = false
     }
 
-    function connectTerminal(username, host, directory) {
+    function connectTerminal(username, host, directory, sshAlias) {
         addon.sshManager.trustedX11Forwarding = addon.setting("trustedX11Forwarding", false) === true
-        addon.sshManager.connectToHostAt(username, host, directory)
+        if (sshAlias)
+            addon.sshManager.connectToDevice(username, host, sshAlias, directory)
+        else
+            addon.sshManager.connectToHostAt(username, host, directory)
     }
 
     function startPendingTerminalConnection() {
@@ -45,18 +46,18 @@ Item {
         const connection = pendingTerminalConnection
         pendingTerminalConnection = null
         sshTerminal.reset()
-        connectTerminal(connection.username, connection.host, connection.path)
+        connectTerminal(connection.username, connection.host, connection.path, connection.sshAlias)
         activeHost = addon.sshManager.running ? connection.host : ""
     }
 
-    function queueTerminalConnection(host, username, path) {
+    function queueTerminalConnection(host, username, path, sshAlias) {
         const trimmedHost = host.trim()
         if (trimmedHost.length === 0)
             return
-        sshTerminal.reset()
         pendingTerminalConnection = {"host": trimmedHost,
                                      "username": username.trim(),
-                                     "path": path}
+                                     "path": path,
+                                     "sshAlias": sshAlias}
         if (addon.sshManager.running)
             addon.sshManager.disconnectFromHost()
         else
@@ -82,7 +83,7 @@ Item {
         addon.preferences.lastSshUsername = username
         addon.preferences.lastSshDeviceId = device.id
         addon.preferences.lastSshHost = device.ip
-        queueTerminalConnection(device.ip, username, path)
+        queueTerminalConnection(device.ip, username, path, device.sshAlias)
     }
 
     PilonErrorPopup {
@@ -104,7 +105,6 @@ Item {
         property color baseColour: addon.selectedSecondaryColour
         property color foregroundColour: addon.selectedTextColour
         property color mutedForegroundColour: addon.selectedMutedTextColour
-        property color warningColour: addon.selectedWarningColour
 
         width: Math.min(420, Math.max(0, sshPage.width - 32))
         height: Math.max(44, sshUsername.implicitHeight, sshDevice.implicitHeight) + 12
@@ -229,14 +229,9 @@ Item {
                     addon.preferences.lastSshDeviceId = selected.id
                     addon.preferences.lastSshHost = selected.ip
                     sshPage.applyUsernameDefault(true)
-                    if (addon.sshManager.running && currentIndex >= 0) {
-                        const device = addon.discoveredDevices[currentIndex]
-                        if (sshPage.canConnectToDevice(device) && device.ip !== sshPage.activeHost) {
-                            addon.preferences.lastSshDeviceId = device.id
-                            addon.preferences.lastSshHost = device.ip
-                            sshPage.queueTerminalConnection(device.ip, sshUsername.text, "")
-                        }
-                    }
+                    if (addon.sshManager.running && sshPage.canConnectToDevice(selected)
+                            && selected.ip !== sshPage.activeHost)
+                        sshPage.queueTerminalConnection(selected.ip, sshUsername.text, "", selected.sshAlias)
                 }
                 onModelChanged: Qt.callLater(restoreLastConnection)
                 Component.onCompleted: restoreLastConnection()
@@ -263,7 +258,7 @@ Item {
                         sshDevice.currentIndex = -1
                         sshDevice.userEditedHost = true
                     }
-                    onEditingFinished: {
+                    onAccepted: {
                         if (sshDevice.currentIndex < 0)
                             sshDevice.useCustomAddress(text, false)
                     }
@@ -345,7 +340,7 @@ Item {
                     topMargin: 8
                     bottomMargin: 8
                     onOpened: deviceChoices.positionViewAtBeginning()
-                    onClosed: if (sshDevice.addressInput) sshDevice.useCustomAddress(sshDevice.addressInput.text, true)
+                    onClosed: if (sshDevice.addressInput) sshDevice.addressInput.clear()
 
                     contentItem: ListView {
                         id: deviceChoices
@@ -368,16 +363,13 @@ Item {
                             height: Math.max(42, implicitHeight)
                             leftPadding: 12
                             rightPadding: 12
-                            placeholderText: qsTr("Enter an IP address")
+                            placeholderText: qsTr("Enter a host or IP address")
+                            Accessible.name: qsTr("SSH host or IP address")
                             placeholderTextColor: sshConnectionBar.mutedForegroundColour
                             color: sshConnectionBar.foregroundColour
                             selectionColor: addon.selectedAccentColour
                             selectedTextColor: addon.selectedAccentTextColour
                             selectByMouse: true
-                            onActiveFocusChanged: {
-                                if (!activeFocus)
-                                    sshDevice.useCustomAddress(text, false)
-                            }
                             onAccepted: {
                                 sshDevice.useCustomAddress(text, true)
                                 sshDevice.popup.close()
@@ -432,21 +424,17 @@ Item {
                         return
                     }
 
-                    const host = sshDevice.currentIndex >= 0
-                                 ? sshDevice.currentValue
-                                 : sshDevice.editText
-                    if (sshDevice.currentIndex >= 0
-                            && !sshPage.canConnectToDevice(addon.discoveredDevices[sshDevice.currentIndex]))
+                    const device = addon.discoveredDevices[sshDevice.currentIndex]
+                    if (sshDevice.currentIndex >= 0 && !sshPage.canConnectToDevice(device))
                         return
-                    sshTerminal.reset()
-                    sshPage.connectTerminal(sshUsername.text, host?.toString() ?? "", "")
+                    const host = device ? device.ip : sshDevice.editText
+                    sshPage.connectTerminal(sshUsername.text, host, "", device?.sshAlias)
                     if (!addon.sshManager.running)
                         return
-                    sshPage.activeHost = host.toString()
+                    sshPage.activeHost = host
 
                     addon.preferences.lastSshUsername = sshUsername.text.trim()
-                    if (sshDevice.currentIndex >= 0) {
-                        const device = addon.discoveredDevices[sshDevice.currentIndex]
+                    if (device) {
                         addon.preferences.lastSshDeviceId = device.id
                         addon.preferences.lastSshHost = device.ip
                     } else {
@@ -602,9 +590,7 @@ Item {
         foregroundColor: sshConnectionBar.foregroundColour
         backgroundColor: addon.withOpacity(sshConnectionBar.baseColour, 0.68)
         accentColor: addon.selectedAccentColour
-        warningColor: sshConnectionBar.warningColour
         borderColor: addon.withOpacity(sshConnectionBar.foregroundColour, 0.18)
-        warningText: ""
         TapHandler {
             acceptedDevices: PointerDevice.TouchScreen
             onTapped: {
@@ -653,11 +639,12 @@ Item {
 
             function onRunningChanged() {
                 if (!addon.sshManager.running) {
-                    sshTerminal.reset()
                     if (sshPage.pendingTerminalConnection !== null)
                         Qt.callLater(sshPage.startPendingTerminalConnection)
-                    else
+                    else {
+                        sshTerminal.reset()
                         sshPage.activeHost = ""
+                    }
                 }
             }
 

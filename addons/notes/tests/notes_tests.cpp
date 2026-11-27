@@ -1,5 +1,7 @@
 #include "../src/notesmanager.h"
+#include "../../../src/core/workspace/piconfpreferences.h"
 #include "../../../src/core/workspace/pilonworkspace.h"
+#include "../../../src/core/workspace/pilonsettings.h"
 #include "../src/notecanvas.h"
 #include "../src/notedocument.h"
 #include "../../../src/core/documents/noteimport.h"
@@ -15,6 +17,7 @@
 #include <QPainterPath>
 #include <QFile>
 #include <QJsonDocument>
+#include <QMimeData>
 #include <QProcess>
 #include <QSaveFile>
 #include <QScopeGuard>
@@ -37,14 +40,6 @@ class NotesTests : public QObject {
             if (file.open(QIODevice::ReadOnly) && QJsonDocument::fromJson(file.readAll()).object().value("id").toString() == id) return file.fileName();
         }
         return directory.filePath(id + ".pin");
-    }
-    static bool gitUpdate(NotesManager &notes, const char *method) {
-        bool result = false;
-        return QMetaObject::invokeMethod(&notes, method, Q_RETURN_ARG(bool, result)) && result;
-    }
-    static bool validateGit(NotesManager &notes, const QString &directory) {
-        bool result = false;
-        return QMetaObject::invokeMethod(&notes, "validateGitSnapshot", Q_RETURN_ARG(bool, result), Q_ARG(QString, directory)) && result;
     }
     static QVariantMap readJson(const QString &path) {
         QFile file(path); if (!file.open(QIODevice::ReadOnly)) return {};
@@ -117,400 +112,6 @@ private slots:
         QVERIFY(QMetaObject::invokeMethod(&notes,"resetPreferences",Q_RETURN_ARG(bool,result),Q_ARG(bool,false)));QVERIFY(!result);
         QVERIFY(QMetaObject::invokeMethod(&notes,"resetPreferences",Q_RETURN_ARG(bool,result),Q_ARG(bool,true)));QVERIFY(!result);
         QCOMPARE(readJson(linked),QVariantMap({{"retain",true}}));
-    }
-    void passivePreferencesCannotOverwriteAnUnfinishedGitCheckout() {
-        QTemporaryDir directory;
-        {NotesManager seed(directory.path());seed.setPressureSensitive(false);}
-        const auto metadata=directory.filePath(".git");QVERIFY(createGuardMetadata(metadata));
-        QVERIFY(writeGuardFile(metadata+"/MERGE_HEAD",QByteArray(40,'a')+'\n'));
-        QVERIFY(writeGuardFile(metadata+"/index","retained index"));const auto before=guardSnapshot(directory.path());
-        NotesManager notes(directory.path());QVERIFY(!notes.active());const auto pressure=notes.pressureSensitive();
-        notes.setPressureSensitive(!pressure);QCOMPARE(notes.pressureSensitive(),pressure);
-        QVERIFY(!notes.errorMessage().isEmpty());QCOMPARE(guardSnapshot(directory.path()),before);
-    }
-
-    void automaticMigrationRequiresGitRecovery() {
-        const auto isolatedHome = qEnvironmentVariable("PILON_TEST_NOTES_MIGRATION_HOME");
-        if (isolatedHome.isEmpty()) {
-            QTemporaryDir home(QDir::tempPath() + "/pilon-notes-migration-XXXXXX"); QVERIFY(home.isValid());
-            QProcess child; auto environment = QProcessEnvironment::systemEnvironment();
-            environment.insert("HOME", home.path());
-            environment.insert("PILON_TEST_NOTES_MIGRATION_HOME", home.path());
-            environment.insert("XDG_CONFIG_HOME", home.filePath("config"));
-            environment.insert("XDG_DATA_HOME", home.filePath("data"));
-            environment.insert("XDG_CACHE_HOME", home.filePath("cache"));
-            environment.insert("QT_QPA_PLATFORM", "offscreen"); environment.insert("PILON_NOTES_HANDWRITING", "0");
-            environment.remove("QT_QPA_PLATFORMTHEME");
-            child.setProcessEnvironment(environment);
-            child.start(QCoreApplication::applicationFilePath(), {"automaticMigrationRequiresGitRecovery"});
-            QVERIFY(child.waitForFinished(15000));
-            QCOMPARE(child.exitStatus(), QProcess::NormalExit);
-            QVERIFY2(child.exitCode() == 0, (child.readAllStandardOutput() + child.readAllStandardError()).constData());
-            return;
-        }
-        QCOMPARE(QDir::homePath(), isolatedHome);
-        QVERIFY(QFileInfo(isolatedHome).canonicalFilePath().startsWith(QFileInfo(QDir::tempPath()).canonicalFilePath() + "/pilon-notes-migration-"));
-        QVERIFY(QSettings().fileName().startsWith(isolatedHome + '/'));
-        const auto legacy = isolatedHome + "/notes", destination = isolatedHome + "/Pilon/Notes";
-        QString id;
-        { NotesManager seed(legacy); id = seed.createNote(); seed.setTitle("Portable legacy note"); seed.setText("Preserved migration source"); QVERIFY(seed.save()); }
-        QVERIFY(createGuardMetadata(destination + "/.git"));
-        QSettings settings; settings.setValue("notes/directory", legacy); settings.sync();
-        const auto original = guardSnapshot(legacy);
-        for (const auto &problem : {QString("merge"), QString("reload")}) {
-            const auto marker = destination + "/.git/MERGE_HEAD";
-            if (problem == "merge") QVERIFY(writeGuardFile(marker, QByteArray(40, 'a') + '\n'));
-            else settings.setValue("Git/pendingWorktrees", QVariantMap{{destination, QVariantMap{{"outcome", "applied"}}}});
-            settings.sync();
-            const auto targetBefore = guardSnapshot(destination);
-            const auto preferencesBefore = guardSnapshot(QFileInfo(settings.fileName()).absolutePath());
-            QTest::ignoreMessage(QtWarningMsg, QRegularExpression("Notes migration: .*Git.*"));
-            {
-                NotesManager blocked;
-                QTRY_VERIFY(!blocked.loading());
-                QCOMPARE(blocked.storageDirectory(), legacy); QCOMPARE(blocked.currentId(), id);
-                QCOMPARE(blocked.text(), QString("Preserved migration source"));
-            }
-            QCOMPARE(guardSnapshot(destination), targetBefore); QCOMPARE(guardSnapshot(legacy), original);
-            QCOMPARE(guardSnapshot(QFileInfo(settings.fileName()).absolutePath()), preferencesBefore);
-            if (problem == "merge") QVERIFY(QFile::remove(marker)); else settings.remove("Git/pendingWorktrees");
-            settings.sync();
-        }
-        {
-            NotesManager migrated; QTRY_VERIFY(!migrated.loading());
-            QCOMPARE(migrated.storageDirectory(), destination); QCOMPARE(migrated.currentId(), id);
-            QCOMPARE(migrated.text(), QString("Preserved migration source"));
-        }
-        QCOMPARE(settings.value("notes/directory").toString(), destination); QCOMPARE(guardSnapshot(legacy), original);
-        for (auto it = original.cbegin(); it != original.cend(); ++it) {
-            if (it.key().endsWith('/')) continue;
-            QFile copied(QDir(destination).filePath(it.key())); QVERIFY(copied.open(QIODevice::ReadOnly)); QCOMPARE(copied.readAll(), it.value());
-        }
-    }
-    void unfinishedCheckoutStaysInactiveWithoutAnAddon() {
-        QTemporaryDir fixture;
-        const auto directory = fixture.filePath("library");
-        const auto metadata = directory + "/.git";
-        QVERIFY(createGuardMetadata(metadata));
-        QVERIFY(writeGuardFile(metadata + "/MERGE_HEAD", QByteArray(40, 'a') + '\n'));
-        NotesManager manager(directory);
-        QVERIFY(!manager.active()); QVERIFY(!manager.errorMessage().isEmpty());
-        manager.setActive(true); QVERIFY(!manager.active());
-        QVERIFY(QFile::remove(metadata + "/MERGE_HEAD"));
-        manager.setActive(true); QVERIFY(manager.active());
-    }
-    void gitFolderChangesRequireRecovery_data() {
-        QTest::addColumn<bool>("adopt"); QTest::addColumn<bool>("sourceGuard"); QTest::addColumn<QString>("problem");
-        for (const bool adopt : {false, true}) for (const bool sourceGuard : {false, true})
-            for (const auto *problem : {"MERGE_HEAD", "rebase-merge", "rebase-apply", "CHERRY_PICK_HEAD", "REVERT_HEAD", "reload", "missing-root", "worktree", "broken-pointer", "corrupt-head"}) {
-                const auto name = QString("%1_%2_%3").arg(adopt ? "adopt" : "copy", sourceGuard ? "source" : "target", problem).toUtf8();
-                QTest::newRow(name.constData()) << adopt << sourceGuard << QString::fromLatin1(problem);
-            }
-    }
-    void gitFolderChangesRequireRecovery() {
-        QFETCH(bool, adopt); QFETCH(bool, sourceGuard); QFETCH(QString, problem);
-        QTemporaryDir fixture; const auto target = fixture.filePath("checkout"); QVERIFY(QDir().mkpath(target));
-        QSettings settings; const auto pending = settings.value("Git/pendingWorktrees");
-        const auto restore = qScopeGuard([&] { if (pending.isValid()) settings.setValue("Git/pendingWorktrees", pending); else settings.remove("Git/pendingWorktrees"); });
-        NotesManager manager(fixture.filePath("original")); const auto id = manager.createNote(); manager.setTitle("Retained"); QVERIFY(manager.save());
-        manager.setText("Unsaved source work");
-        const auto guardRoot = sourceGuard ? manager.storageDirectory() : target;
-        auto metadata = QDir(guardRoot).filePath(".git");
-        QString marker;
-        if (problem == "reload" || problem == "missing-root") {
-            const auto root = problem == "reload" ? guardRoot : QDir(guardRoot).filePath("missing-checkout");
-            settings.setValue("Git/pendingWorktrees", QVariantMap{{root, QVariantMap{{"outcome", "applied"}}}});
-        } else if (problem == "broken-pointer") {
-            metadata = fixture.filePath("absent-metadata");
-            QVERIFY(writeGuardFile(QDir(guardRoot).filePath(".git"), "gitdir: " + metadata.toUtf8() + '\n'));
-        } else if (problem == "worktree") {
-            const auto common = fixture.filePath("common"); QVERIFY(createGuardMetadata(common));
-            metadata = common + "/worktrees/linked";
-            QVERIFY(writeGuardFile(metadata + "/HEAD", "ref: refs/heads/linked\n"));
-            QVERIFY(writeGuardFile(metadata + "/commondir", "../..\n"));
-            QVERIFY(writeGuardFile(QDir(guardRoot).filePath(".git"), "gitdir: " + QDir(guardRoot).relativeFilePath(metadata).toUtf8() + '\n'));
-            marker = metadata + "/MERGE_HEAD"; QVERIFY(writeGuardFile(marker, QByteArray(40,'a') + '\n'));
-        } else {
-            QVERIFY(createGuardMetadata(metadata));
-            if (problem == "corrupt-head") QVERIFY(writeGuardFile(metadata + "/HEAD", "corrupt metadata\n"));
-            else {
-                marker = metadata + '/' + problem;
-                if (problem.startsWith("rebase-")) QVERIFY(QDir().mkpath(marker));
-                else QVERIFY(writeGuardFile(marker, QByteArray(40,'a') + '\n'));
-            }
-        }
-        const auto sourceBytes = guardSnapshot(manager.storageDirectory()), targetBytes = guardSnapshot(target);
-        const auto directory = manager.storageDirectory(); const auto directorySetting = settings.value("notes/directory");
-        const auto pendingBefore = settings.value("Git/pendingWorktrees");
-        const auto items = manager.items(); QSignalSpy changing(&manager, &NotesManager::storageDirectoryChanging);
-        QVERIFY(!(adopt ? manager.adoptGitDirectory(target) : manager.setStorageDirectory(target)));
-        QVERIFY(manager.errorMessage().contains("Git")); QVERIFY(manager.active()); QVERIFY(!manager.gitUpdating()); QVERIFY(manager.dirty());
-        QCOMPARE(manager.currentId(), id); QCOMPARE(manager.text(), QString("Unsaved source work")); QCOMPARE(manager.items(), items); QCOMPARE(changing.count(), 0);
-        QCOMPARE(manager.storageDirectory(), directory); QCOMPARE(settings.value("notes/directory"), directorySetting);
-        QCOMPARE(settings.value("Git/pendingWorktrees"), pendingBefore);
-        QCOMPARE(guardSnapshot(directory), sourceBytes); QCOMPARE(guardSnapshot(target), targetBytes);
-        if (problem == "reload" || problem == "missing-root") settings.remove("Git/pendingWorktrees");
-        else if (problem == "broken-pointer") QVERIFY(createGuardMetadata(metadata));
-        else if (problem == "corrupt-head") QVERIFY(writeGuardFile(metadata + "/HEAD", "ref: refs/heads/main\n"));
-        else if (QFileInfo(marker).isDir()) QVERIFY(QDir(marker).removeRecursively());
-        else QVERIFY(QFile::remove(marker));
-        QVERIFY2(adopt ? manager.adoptGitDirectory(target) : manager.setStorageDirectory(target), qPrintable(manager.errorMessage()));
-        QCOMPARE(manager.storageDirectory(), target);
-    }
-    void gitPendingTargetIsNotCreated() {
-        QTemporaryDir fixture;
-        NotesManager manager(fixture.filePath("original")); QVERIFY(!manager.createNote().isEmpty()); QVERIFY(manager.save());
-        const auto root = fixture.filePath("missing-checkout"), target = root + "/nested/library";
-        QSettings settings; const auto pending = settings.value("Git/pendingWorktrees");
-        const auto restore = qScopeGuard([&] { if (pending.isValid()) settings.setValue("Git/pendingWorktrees",pending); else settings.remove("Git/pendingWorktrees"); });
-        settings.setValue("Git/pendingWorktrees",QVariantMap{{root,QVariantMap{{"outcome","applied"}}}});
-        const auto before = guardSnapshot(manager.storageDirectory());
-        QVERIFY(!manager.setStorageDirectory(target)); QVERIFY(!QFileInfo::exists(root));
-        QCOMPARE(guardSnapshot(manager.storageDirectory()),before);
-        settings.remove("Git/pendingWorktrees");
-        QVERIFY(manager.setStorageDirectory(target)); QVERIFY(QFileInfo(target).isDir());
-    }
-    void gitFolderGuardResolvesAncestorAliases_data() {
-        QTest::addColumn<bool>("adopt"); QTest::addColumn<bool>("parentTraversal");
-        QTest::newRow("copy_alias") << false << false;
-        QTest::newRow("adopt_alias") << true << false;
-        QTest::newRow("adopt_alias_parent") << true << true;
-    }
-    void gitFolderGuardResolvesAncestorAliases() {
-        QFETCH(bool,adopt); QFETCH(bool,parentTraversal); QTemporaryDir fixture;
-        NotesManager manager(fixture.filePath("original")); QVERIFY(!manager.createNote().isEmpty()); QVERIFY(manager.save());
-        const auto repository = fixture.filePath("repository"), alias = fixture.filePath("alias");
-        QVERIFY(QDir().mkpath(repository + "/library")); QVERIFY(QDir().mkpath(repository + "/subfolder"));
-        QVERIFY(createGuardMetadata(repository + "/.git"));
-        const auto marker = repository + "/.git/MERGE_HEAD"; QVERIFY(writeGuardFile(marker,QByteArray(40,'a') + '\n'));
-        QVERIFY(QFile::link(parentTraversal ? repository + "/subfolder" : repository,alias));
-        const auto target = alias + (parentTraversal ? "/../library" : "/library");
-        const auto before = guardSnapshot(manager.storageDirectory()), targetBefore = guardSnapshot(repository);
-        QVERIFY(!(adopt ? manager.adoptGitDirectory(target) : manager.setStorageDirectory(target)));
-        QCOMPARE(guardSnapshot(manager.storageDirectory()),before); QCOMPARE(guardSnapshot(repository),targetBefore);
-        QVERIFY(QFile::remove(marker));
-        QVERIFY(adopt ? manager.adoptGitDirectory(target) : manager.setStorageDirectory(target));
-        QCOMPARE(manager.storageDirectory(),adopt ? repository + "/library" : target);
-    }
-    void gitFolderGuardAcceptsCurrentReftableRepositories_data() {
-        QTest::addColumn<bool>("adopt"); QTest::addColumn<bool>("sourceGuard");
-        for (const bool adopt : {false,true}) for (const bool sourceGuard : {false,true})
-            QTest::newRow(QString("%1_%2").arg(adopt ? "adopt" : "copy", sourceGuard ? "source" : "target").toUtf8().constData()) << adopt << sourceGuard;
-    }
-    void gitFolderGuardAcceptsCurrentReftableRepositories() {
-        QFETCH(bool,adopt); QFETCH(bool,sourceGuard); QTemporaryDir fixture;
-        NotesManager manager(fixture.filePath("original")); QVERIFY(!manager.createNote().isEmpty()); QVERIFY(manager.save());
-        const auto target = fixture.filePath("checkout"); QVERIFY(QDir().mkpath(target));
-        const auto root = sourceGuard ? manager.storageDirectory() : target;
-        QProcess git; auto environment = QProcessEnvironment::systemEnvironment();
-        environment.insert("GIT_CONFIG_GLOBAL","/dev/null"); environment.insert("GIT_CONFIG_SYSTEM","/dev/null"); git.setProcessEnvironment(environment);
-        git.start("git",{"-c","core.hooksPath=/dev/null","-c","init.defaultBranch=main","init","--ref-format=reftable",root});
-        QVERIFY(git.waitForFinished()); QVERIFY2(git.exitCode() == 0,git.readAllStandardError().constData());
-        QVERIFY(QFileInfo(root + "/.git/reftable/tables.list").isFile());
-        QVERIFY(writeGuardFile(root + "/.git/MERGE_HEAD",QByteArray(40,'a') + '\n'));
-        const auto before = guardSnapshot(manager.storageDirectory()), targetBefore = guardSnapshot(target);
-        QVERIFY(!(adopt ? manager.adoptGitDirectory(target) : manager.setStorageDirectory(target)));
-        QCOMPARE(guardSnapshot(manager.storageDirectory()),before); QCOMPARE(guardSnapshot(target),targetBefore);
-        QVERIFY(QFile::remove(root + "/.git/MERGE_HEAD"));
-        QVERIFY2(adopt ? manager.adoptGitDirectory(target) : manager.setStorageDirectory(target),qPrintable(manager.errorMessage()));
-    }
-    void gitAdoptionReplacesLibraryAndPreservesBothFolders_data() {
-        QTest::addColumn<bool>("passive"); QTest::newRow("active") << false; QTest::newRow("passive") << true;
-    }
-    void gitAdoptionReplacesLibraryAndPreservesBothFolders() {
-        QFETCH(bool, passive); QTemporaryDir original, checkout;
-        QString incoming;
-        { NotesManager seed(checkout.path()); incoming = seed.createNote(); seed.setTitle("Checkout"); seed.setText("Incoming content"); seed.setPressureSensitive(false); QVERIFY(seed.save()); }
-        NotesManager notes(original.path()); const auto removed = notes.createNote(); notes.setTitle("Original"); notes.setText("Pending saved before adoption");
-        if (passive) notes.setActive(false);
-        QMap<QString, QByteArray> before;
-        for (const auto &name : QDir(checkout.path()).entryList(QDir::Files | QDir::Hidden)) {
-            QFile file(checkout.filePath(name)); QVERIFY(file.open(QIODevice::ReadOnly)); before[name] = file.readAll();
-        }
-        QVERIFY2(notes.adoptGitDirectory(checkout.path()), qPrintable(notes.errorMessage()));
-        QCOMPARE(notes.active(), !passive); QVERIFY(!notes.gitUpdating()); QVERIFY(!notes.dirty());
-        QCOMPARE(notes.storageDirectory(), checkout.path()); QCOMPARE(notes.currentId(), incoming);
-        QCOMPARE(notes.text(), QString("Incoming content")); QVERIFY(!notes.pressureSensitive());
-        QCOMPARE(notes.items().size(), 1); QCOMPARE(readJson(pinPath(original, removed)).value("text").toString(), QString("Pending saved before adoption"));
-        QVERIFY(!QFileInfo::exists(pinPath(checkout, removed))); QCOMPARE(QSettings().value("notes/directory").toString(), checkout.path());
-        QTest::qWait(400);
-        QCOMPARE(QDir(checkout.path()).entryList(QDir::Files | QDir::Hidden).size(), before.size());
-        for (auto it = before.cbegin(); it != before.cend(); ++it) {
-            QFile file(checkout.filePath(it.key())); QVERIFY(file.open(QIODevice::ReadOnly)); QCOMPARE(file.readAll(), it.value());
-        }
-    }
-    void gitAdoptionRejectsInvalidAndOverlappingFolders() {
-        QTemporaryDir original, checkout; NotesManager notes(original.path()); const auto retained = notes.createNote(); notes.setText("Retained"); QVERIFY(notes.save());
-        QFile invalid(checkout.filePath("Broken.pin")); QVERIFY(invalid.open(QIODevice::WriteOnly)); invalid.write("invalid"); invalid.close();
-        QVERIFY(!notes.adoptGitDirectory(checkout.path())); QCOMPARE(notes.currentId(), retained); QCOMPARE(notes.storageDirectory(), original.path()); QVERIFY(notes.active());
-        QVERIFY(invalid.remove());
-        QFile brokenCurrent(original.filePath("Broken.pin")); QVERIFY(brokenCurrent.open(QIODevice::WriteOnly)); brokenCurrent.write("invalid"); brokenCurrent.close();
-        QVERIFY(!notes.adoptGitDirectory(checkout.path())); QVERIFY(!notes.gitUpdating()); QVERIFY(notes.active()); QCOMPARE(notes.currentId(), retained);
-        QVERIFY(brokenCurrent.remove());
-        const auto nested = original.filePath("checkout"); QVERIFY(QDir().mkpath(nested));
-        QVERIFY(!notes.adoptGitDirectory(nested));
-        QTemporaryDir outer; const auto inner = outer.filePath("notes"); QVERIFY(QDir().mkpath(inner)); NotesManager nestedNotes(inner);
-        QVERIFY(!nestedNotes.adoptGitDirectory(outer.path()));
-        notes.setWriting(true); QVERIFY(!notes.adoptGitDirectory(checkout.path())); notes.setWriting(false);
-        QVERIFY(notes.beginGitUpdate()); QVERIFY(!notes.adoptGitDirectory(checkout.path())); QVERIFY(notes.finishGitUpdate());
-    }
-    void gitAdoptionVetoesCurrentSaveAndSettingsFailure() {
-        QTemporaryDir original, checkout; NotesManager notes(original.path()); const auto retained = notes.createNote(); notes.setText("Must save");
-        const auto permissions = QFileInfo(original.path()).permissions();
-        const auto restorePermissions = qScopeGuard([&] { QFile::setPermissions(original.path(), permissions); });
-        QVERIFY(QFile::setPermissions(original.path(), QFile::ReadOwner | QFile::ExeOwner));
-        QVERIFY(!notes.adoptGitDirectory(checkout.path())); QCOMPARE(notes.storageDirectory(), original.path()); QCOMPARE(notes.currentId(), retained); QVERIFY(notes.dirty()); QVERIFY(notes.active());
-        QVERIFY(QFile::setPermissions(original.path(), permissions)); QVERIFY(notes.save());
-        const auto application = QCoreApplication::applicationName(); QCoreApplication::setApplicationName("NotesAdoptionBlocked");
-        const auto restoreApplication = qScopeGuard([&] { QCoreApplication::setApplicationName(application); });
-        const auto blocked = QSettings().fileName(); QVERIFY(QDir().mkpath(blocked));
-        QVERIFY(!notes.adoptGitDirectory(checkout.path()));
-        QCOMPARE(notes.storageDirectory(), original.path()); QCOMPARE(notes.currentId(), retained); QCOMPARE(notes.text(), QString("Must save"));
-        QVERIFY(notes.active()); QVERIFY(!notes.gitUpdating()); QVERIFY(!notes.errorMessage().isEmpty());
-        QVERIFY(!QSettings().contains("notes/directory"));
-        QVERIFY(QDir(blocked).removeRecursively());
-    }
-    void gitAdoptionSupportsAnUnloadedPassiveManager() {
-        QTemporaryDir original, checkout; QString incoming;
-        { NotesManager seed(checkout.path()); incoming = seed.createNote(); seed.setText("Incoming while disabled"); QVERIFY(seed.save()); }
-        NotesManager notes(original.path(), nullptr, true); notes.setActive(false); QVERIFY(!notes.loading()); QVERIFY(notes.items().isEmpty());
-        QVERIFY2(notes.adoptGitDirectory(checkout.path()), qPrintable(notes.errorMessage()));
-        QVERIFY(!notes.active()); QCOMPARE(notes.currentId(), incoming); QCOMPARE(notes.text(), QString("Incoming while disabled"));
-        notes.setActive(true); QTRY_VERIFY(!notes.loading()); QCOMPARE(notes.currentId(), incoming);
-    }
-    void gitValidationLeavesLiveEditsAndStagingFilesUnchanged() {
-        QTemporaryDir directory, incoming; NotesManager notes(directory.path()); const auto id = notes.createNote(); notes.setTitle("Live"); QVERIFY(notes.save());
-        const auto source = pinPath(directory,id), staged = incoming.filePath("Incoming.pin"); QVERIFY(QFile::copy(source,staged));
-        auto changed = readJson(staged); changed["text"] = "Incoming"; QVERIFY(writeJson(staged,changed));
-        QFile snapshot(staged); QVERIFY(snapshot.open(QIODevice::ReadOnly)); const auto bytes = snapshot.readAll(); snapshot.close();
-        notes.setText("Unsaved local text"); notes.setTitle("Invalid/name"); const auto previousError = notes.errorMessage(); QVERIFY(!previousError.isEmpty());
-        QVERIFY(validateGit(notes,incoming.path()));
-        QVERIFY(notes.active()); QVERIFY(!notes.property("gitUpdating").toBool()); QVERIFY(notes.dirty());
-        QCOMPARE(notes.currentId(),id); QCOMPARE(notes.text(),QString("Unsaved local text")); QCOMPARE(notes.errorMessage(),previousError);
-        QVERIFY(snapshot.open(QIODevice::ReadOnly)); QCOMPARE(snapshot.readAll(),bytes); snapshot.close();
-        QCOMPARE(readJson(source).value("text").toString(),QString{});
-        QVERIFY(QFile::copy(staged,incoming.filePath("Duplicate.pin"))); QVERIFY(!validateGit(notes,incoming.path()));
-        QVERIFY(notes.active()); QVERIFY(notes.dirty()); QCOMPARE(notes.text(),QString("Unsaved local text"));
-    }
-    void gitReloadBlocksReentrantSignalHandlerWrites() {
-        QTemporaryDir directory; NotesManager notes(directory.path()); const auto id = notes.createNote(); QVERIFY(notes.save());
-        QVERIFY(gitUpdate(notes,"beginGitUpdate")); auto incoming = readJson(pinPath(directory,id)); incoming["text"] = "Validated content";
-        QVERIFY(writeJson(pinPath(directory,id),incoming)); bool blocked = false;
-        const auto connection = connect(&notes,&NotesManager::currentChanged,&notes,[&] {
-            blocked = notes.property("gitUpdating").toBool() && !notes.active(); notes.setText("Reentrant stale editor text");
-        });
-        QVERIFY(gitUpdate(notes,"finishGitUpdate")); disconnect(connection);
-        QVERIFY(blocked); QCOMPARE(notes.text(),QString("Validated content"));
-    }
-    void gitUpdateWaitsForInitialLoadAndReadsSnapshotWithoutChangingFiles() {
-        QTemporaryDir directory;
-        QString id; { NotesManager seed(directory.path()); id = seed.createNote(); seed.setTitle("Portable"); QVERIFY(seed.save()); }
-        NotesManager notes(directory.path(),nullptr,true);
-        QVERIFY(!gitUpdate(notes,"beginGitUpdate")); QTRY_VERIFY(!notes.loading()); QVERIFY(gitUpdate(notes,"beginGitUpdate"));
-        notes.setActive(false);
-        const auto before = pinPath(directory,id), incoming = directory.filePath(id+".pin");
-        QVERIFY(QFile::rename(before,incoming));
-        QFile snapshot(incoming); QVERIFY(snapshot.open(QIODevice::ReadOnly)); const auto bytes = snapshot.readAll(); snapshot.close();
-        QVERIFY(QDir().mkpath(directory.filePath("assets/extensions")));
-        QFile opaque(directory.filePath("assets/extensions/unknown.bin")); QVERIFY(opaque.open(QIODevice::WriteOnly)); opaque.write("opaque"); opaque.close();
-        QVERIFY(gitUpdate(notes,"finishGitUpdate")); QVERIFY(!notes.active()); QCOMPARE(notes.currentId(),id);
-        QVERIFY(QFileInfo::exists(incoming)); QVERIFY(!QFileInfo::exists(before));
-        QVERIFY(snapshot.open(QIODevice::ReadOnly)); QCOMPARE(snapshot.readAll(),bytes);
-        QVERIFY(opaque.open(QIODevice::ReadOnly)); QCOMPARE(opaque.readAll(),QByteArray("opaque"));
-    }
-    void gitUpdateVetoesStrokeAndSaveFailureAndFreezesWrites() {
-        QTemporaryDir directory, destination; NotesManager notes(directory.path()); const auto id = notes.createNote();
-        notes.setText("Unsaved work"); notes.setWriting(true);
-        QVERIFY(!gitUpdate(notes, "beginGitUpdate")); QVERIFY(notes.active()); QVERIFY(notes.dirty());
-        notes.setWriting(false);
-        const auto permissions = QFileInfo(directory.path()).permissions();
-        const auto restore = qScopeGuard([&] { QFile::setPermissions(directory.path(), permissions); });
-        QVERIFY(QFile::setPermissions(directory.path(), QFile::ReadOwner | QFile::ExeOwner));
-        QVERIFY(!gitUpdate(notes, "beginGitUpdate")); QVERIFY(notes.active()); QVERIFY(notes.dirty());
-        QVERIFY(QFile::setPermissions(directory.path(), permissions));
-        QVERIFY(gitUpdate(notes, "beginGitUpdate")); QVERIFY(notes.property("gitUpdating").toBool()); QVERIFY(!notes.active());
-        QVERIFY(!notes.dirty()); QCOMPARE(readJson(pinPath(directory,id)).value("text").toString(), QString("Unsaved work"));
-        notes.setActive(true); QVERIFY(!notes.active()); notes.setText("Blocked edit");
-        QVERIFY(notes.createNote().isEmpty()); QVERIFY(!notes.removeNote(id)); QVERIFY(!notes.renameNote(id,"Blocked"));
-        QVERIFY(!notes.setStorageDirectory(destination.path()));
-        const auto paper = notes.defaultPaper(); notes.usePaperAsDefault({{"size", "a4"}, {"background", "#123456"}});
-        QCOMPARE(notes.defaultPaper(),paper); QVERIFY(!QFileInfo::exists(directory.filePath(".settings.json")));
-        QVERIFY(notes.save()); QCOMPARE(notes.text(),QString("Unsaved work"));
-        QVERIFY(gitUpdate(notes, "finishGitUpdate")); QVERIFY(notes.active()); QVERIFY(!notes.property("gitUpdating").toBool());
-        QCOMPARE(notes.text(),QString("Unsaved work"));
-    }
-    void gitUpdateVetoesImportAndResumesLatestRequestedState() {
-        QTemporaryDir directory; NotesManager notes(directory.path()); notes.createNote();
-        QImage image(40,40,QImage::Format_RGB32); image.fill(Qt::green); QVERIFY(image.save(directory.filePath("source.png")));
-        notes.importFiles({QUrl::fromLocalFile(directory.filePath("source.png"))},32,240); QVERIFY(notes.importing());
-        QVERIFY(!gitUpdate(notes,"beginGitUpdate")); QVERIFY(notes.active()); notes.cancelImport(); QTRY_VERIFY(!notes.importing());
-        QVERIFY(gitUpdate(notes,"beginGitUpdate")); notes.setActive(true); notes.setActive(false);
-        QVERIFY(gitUpdate(notes,"finishGitUpdate")); QVERIFY(!notes.active()); QVERIFY(!notes.property("gitUpdating").toBool());
-        notes.setActive(true); QTRY_VERIFY(!notes.loading()); QVERIFY(notes.active());
-    }
-    void gitUpdateReloadsIncomingEditsDeletionsAndAssetsWithoutStaleWrites() {
-        QTemporaryDir directory; NotesManager notes(directory.path()); const auto id = notes.createNote(); notes.setTitle("Before");
-        QImage image(40,40,QImage::Format_RGB32); image.fill(Qt::green); QGuiApplication::clipboard()->setImage(image);
-        QVERIFY(notes.pasteContent(32,240)); QGuiApplication::clipboard()->clear(); QVERIFY(notes.save());
-        const auto removed = notes.createNote(); notes.setTitle("Removed"); QVERIFY(notes.save()); QVERIFY(notes.selectNote(id));
-        const auto before = pinPath(directory,id), deleted = pinPath(directory,removed); QVERIFY(gitUpdate(notes,"beginGitUpdate"));
-        auto incoming = readJson(before); incoming["text"] = "Incoming work";
-        auto assets = incoming.value("assets").toMap(); const auto asset = incoming.value("elements").toList().first().toMap().value("asset").toString();
-        image.fill(Qt::red); QByteArray bytes; QBuffer buffer(&bytes); QVERIFY(buffer.open(QIODevice::WriteOnly)); QVERIFY(image.save(&buffer,"PNG"));
-        assets[asset] = QString::fromLatin1(bytes.toBase64()); const auto opaque = QByteArray::fromHex("0001ff0010").toBase64();
-        assets["extension/opaque.bin"] = QString::fromLatin1(opaque); incoming["assets"] = assets;
-        const auto renamed = directory.filePath("Incoming title.pin"); QVERIFY(QFile::rename(before,renamed)); QVERIFY(writeJson(renamed,incoming)); QVERIFY(QFile::remove(deleted));
-        QTest::qWait(400); QVERIFY(!QFileInfo::exists(before)); QVERIFY(!QFileInfo::exists(deleted));
-        QVERIFY(gitUpdate(notes,"finishGitUpdate")); QCOMPARE(notes.currentId(),id); QCOMPARE(notes.text(),QString("Incoming work"));
-        QCOMPARE(notes.title(),QString("Incoming title")); QVERIFY(!notes.selectNote(removed));
-        QFile restored(notes.elements().first().toMap().value("url").toUrl().toLocalFile()); QVERIFY(restored.open(QIODevice::ReadOnly)); QCOMPARE(restored.readAll(),bytes);
-        notes.setText("A later edit"); QVERIFY(notes.save()); QTest::qWait(400); QVERIFY(!QFileInfo::exists(before)); QVERIFY(!QFileInfo::exists(deleted));
-        QCOMPARE(readJson(renamed).value("assets").toMap().value("extension/opaque.bin").toString().toLatin1(),opaque);
-    }
-    void gitUpdateCannotResurrectTheDeletedCurrentNote() {
-        QTemporaryDir directory; NotesManager notes(directory.path()); const auto id = notes.createNote();
-        notes.setText("Pending local edit"); QVERIFY(gitUpdate(notes,"beginGitUpdate"));
-        const auto path = pinPath(directory,id); QVERIFY(QFile::remove(path));
-        QVERIFY(gitUpdate(notes,"finishGitUpdate")); QVERIFY(notes.currentId().isEmpty()); QVERIFY(notes.items().isEmpty());
-        QVERIFY(notes.save()); QTest::qWait(400); QVERIFY(!QFileInfo::exists(path)); QVERIFY(notes.items().isEmpty());
-    }
-    void invalidGitSnapshotStaysPausedUntilRecovery_data() {
-        QTest::addColumn<QString>("kind");
-        for (const auto &kind : {"duplicate", "duplicate-uuid-spelling", "broken", "format", "missing-asset", "invalid-asset", "asset-collision", "folders", "folder-cycle", "settings", "fractional-version", "invalid-geometry", "legacy", "symlink"}) QTest::newRow(kind) << QString(kind);
-    }
-    void invalidGitSnapshotStaysPausedUntilRecovery() {
-        QFETCH(QString,kind); QTemporaryDir directory, outside; NotesManager notes(directory.path()); const auto id = notes.createNote();
-        notes.setTitle("Retained"); notes.setText("Original"); QVERIFY(notes.save()); const auto path = pinPath(directory,id); const auto original = readJson(path);
-        QVERIFY(gitUpdate(notes,"beginGitUpdate")); auto invalid = original; QString extra;
-        if (kind == "duplicate") { extra = directory.filePath("Duplicate.pin"); QVERIFY(writeJson(extra,original)); }
-        else if (kind == "duplicate-uuid-spelling") { extra = directory.filePath("Duplicate.pin"); invalid["id"] = "{"+id+"}"; QVERIFY(writeJson(extra,invalid)); }
-        else if (kind == "asset-collision") {
-            invalid["elements"] = QVariantList{QVariantMap{{"id","image"},{"type","image"},{"asset","assets/shared.png"},{"x",32},{"y",240},{"width",40},{"height",40}}};
-            QImage image(40,40,QImage::Format_RGB32); image.fill(Qt::red); QByteArray red,green;
-            { QBuffer buffer(&red); QVERIFY(buffer.open(QIODevice::WriteOnly)); QVERIFY(image.save(&buffer,"PNG")); }
-            invalid["assets"] = QVariantMap{{"assets/shared.png",QString::fromLatin1(red.toBase64())}}; QVERIFY(writeJson(path,invalid));
-            image.fill(Qt::green); { QBuffer buffer(&green); QVERIFY(buffer.open(QIODevice::WriteOnly)); QVERIFY(image.save(&buffer,"PNG")); }
-            invalid["id"] = QUuid::createUuid().toString(QUuid::WithoutBraces);
-            invalid["assets"] = QVariantMap{{"assets/shared.png",QString::fromLatin1(green.toBase64())}};
-            extra = directory.filePath("Other.pin"); QVERIFY(writeJson(extra,invalid));
-        }
-        else if (kind == "broken") { QFile file(path); QVERIFY(file.open(QIODevice::WriteOnly)); file.write("<<<<<<< conflict"); }
-        else if (kind == "format") { invalid["formatVersion"] = 2; QVERIFY(writeJson(path,invalid)); }
-        else if (kind == "fractional-version") { invalid["version"] = 1.5; QVERIFY(writeJson(path,invalid)); }
-        else if (kind == "settings") { extra = directory.filePath(".settings.json"); QFile file(extra); QVERIFY(file.open(QIODevice::WriteOnly)); file.write("<<<<<<< conflict"); }
-        else if (kind == "folder-cycle") { extra = directory.filePath(".folders.json"); QVERIFY(writeJson(extra,{{"folders",QVariantList{QVariantMap{{"id",id},{"name","Loop"},{"parent",id}}}}})); }
-        else if (kind == "invalid-geometry") { invalid["elements"] = QVariantList{QVariantMap{{"id","text"},{"type","text"},{"x",32},{"y",240},{"width",-1},{"height",40}}}; QVERIFY(writeJson(path,invalid)); }
-        else if (kind == "missing-asset" || kind == "invalid-asset") {
-            invalid["elements"] = QVariantList{QVariantMap{{"id", "image"}, {"type", "image"}, {"asset", "assets/missing.png"}, {"x",32}, {"y",240}, {"width",40}, {"height",40}}};
-            if (kind == "invalid-asset") invalid["assets"] = QVariantMap{{"assets/missing.png", "not base64 %%%"}};
-            QVERIFY(writeJson(path,invalid));
-        } else if (kind == "folders") { extra = directory.filePath(".folders.json"); QVERIFY(writeJson(extra,{{"folders",QVariantList{QVariantMap{{"id",id},{"name","One"}},QVariantMap{{"id",id},{"name","Two"}}}}})); }
-        else if (kind == "legacy") { extra = directory.filePath(id+".json"); QVERIFY(writeJson(extra,original)); }
-        else { const auto target = outside.filePath("note.pin"); QVERIFY(QFile::copy(path,target)); QVERIFY(QFile::remove(path)); QVERIFY(QFile::link(target,path)); }
-        QVERIFY(!gitUpdate(notes,"finishGitUpdate")); QVERIFY(notes.property("gitUpdating").toBool()); QVERIFY(!notes.active()); QVERIFY(!notes.errorMessage().isEmpty());
-        notes.setActive(true); QVERIFY(!notes.active()); notes.setText("Must not overwrite conflict"); QVERIFY(notes.save()); QTest::qWait(400);
-        QCOMPARE(notes.text(),QString("Original")); QVERIFY(QFile::remove(path)); QVERIFY(writeJson(path,original)); if (!extra.isEmpty()) QVERIFY(QFile::remove(extra));
-        QVERIFY(gitUpdate(notes,"finishGitUpdate")); QVERIFY(notes.active()); QCOMPARE(notes.text(),QString("Original"));
     }
     void movingNotesPreservesBothRepositoryDirectories() {
         QTemporaryDir source,destination; NotesManager notes(source.path()); const auto id = notes.createNote(); QVERIFY(notes.save());
@@ -699,7 +300,7 @@ private slots:
         state[field] = value; QVERIFY(!notes.setNoteViewState(id, state)); QCOMPARE(readJson(directory.filePath(".library.json")), before);
         QCOMPARE(notes.noteViewState(id).value("zoom").toDouble(), 1.);
     }
-    void noteViewStateValidatesGitMetadataAndPreservesStaleCaptureRevision() {
+    void noteViewStateValidatesMetadataAndPreservesStaleCaptureRevision() {
         QTemporaryDir directory; QString id, element; QVariantMap state; qint64 oldRevision;
         {
             NotesManager notes(directory.path()); id = notes.createNote(); notes.setStrokes({stroke({p(40, 180), p(120, 220)})});
@@ -844,6 +445,43 @@ private slots:
         reopened.removeElement(reopened.elements().first().toMap().value("id").toString());
         QTRY_VERIFY_WITH_TIMEOUT(reopened.search("agenda").isEmpty(), 10000);
     }
+    void importedPreferencesWaitForActivation() {
+        QTemporaryDir workspace;
+        QSettings settings;
+        const auto previousRoot = settings.value("workspace/root");
+        const auto previousDirectory = settings.value("notes/directory");
+        const auto restore = qScopeGuard([&] {
+            for (const auto &[key, value] : {std::pair{"workspace/root", previousRoot}, std::pair{"notes/directory", previousDirectory}}) {
+                if (value.isValid()) settings.setValue(key, value);
+                else settings.remove(key);
+            }
+        });
+        const auto directory = workspace.filePath("notes");
+        settings.setValue("workspace/root", workspace.path());
+        settings.setValue("notes/directory", directory);
+        auto &preferences = PiconfPreferences::instance();
+        const auto stop = qScopeGuard([&] { preferences.stop(); });
+        QString error;
+        QVERIFY2(preferences.start(workspace.path(), error), qPrintable(error));
+        PilonSettings portable;
+        portable.setValue("notes/portablePreferences", QVariantMap{{"showPageOutlines", true}});
+        portable.setValue("notes/portablePreferencesPending", true);
+        const auto clear = qScopeGuard([&] {
+            portable.remove("notes/portablePreferences");
+            portable.remove("notes/portablePreferencesPending");
+        });
+        NotesManager notes;
+        notes.setActive(false);
+        QCoreApplication::processEvents();
+        QVERIFY(!QFileInfo::exists(directory));
+        QVERIFY(PilonSettings().value("notes/portablePreferencesPending").toBool());
+        notes.setActive(true);
+        QTRY_VERIFY(!notes.loading());
+        QVERIFY(notes.showPageOutlines());
+        QVERIFY(QFileInfo::exists(directory + "/.settings.json"));
+        notes.setActive(false);
+        QVERIFY(QFileInfo::exists(directory + "/.settings.json"));
+    }
     void pinEmbedsPagesAssetsAndMovesWithoutLosingContent() {
         QTemporaryDir source, destination; const auto settings = QSettings().value("notes/directory");
         auto restore = qScopeGuard([&] { if (settings.isValid()) QSettings().setValue("notes/directory", settings); else QSettings().remove("notes/directory"); });
@@ -873,6 +511,86 @@ private slots:
         NotesManager notes(directory.path()); QCOMPARE(notes.text(), QString("Preserve this"));
         QVERIFY(QFileInfo::exists(pinPath(directory, id))); QVERIFY(QFileInfo::exists(directory.filePath(".legacy/" + id + ".json")));
         QVERIFY(notes.removeNote(id)); NotesManager reloaded(directory.path()); QVERIFY(reloaded.items().isEmpty());
+    }
+    void failedMultiImagePasteReleasesStagedCopies() {
+        QTemporaryDir directory;
+        NotesManager notes(directory.path());
+        QVERIFY(!notes.createNote().isEmpty());
+        auto *clipboard = QGuiApplication::clipboard();
+        const auto clearClipboard = qScopeGuard([&] { clipboard->clear(); });
+        QImage image(20, 20, QImage::Format_RGB32); image.fill(Qt::blue);
+        clipboard->setImage(image);
+        QVERIFY(notes.pasteContent(40, 200));
+        const auto original = notes.elements().first().toMap().value("url").toUrl().toLocalFile();
+        const QDir assets(QFileInfo(original).absolutePath());
+        const QStringList before = assets.entryList(QDir::Files);
+        const QVariantList elements = notes.elements();
+        auto unavailable = elements.first().toMap();
+        unavailable["url"] = QUrl::fromLocalFile(directory.filePath("missing.png"));
+        auto *selection = new QMimeData;
+        selection->setData("application/x-pilon-note-items", QJsonDocument::fromVariant(QVariantMap{
+            {"elements", QVariantList{elements.first(), unavailable}}}).toJson());
+        clipboard->setMimeData(selection);
+        QVERIFY(notes.pasteContent(40, 200));
+        QVERIFY(!notes.errorMessage().isEmpty());
+        QCOMPARE(notes.elements(), elements);
+        QCOMPARE(assets.entryList(QDir::Files), before);
+    }
+
+    void interruptedRenameRecoversNewestNoteWithoutDeletingEitherCopy() {
+        QTemporaryDir directory;
+        QString id;
+        {
+            NotesManager notes(directory.path());
+            id = notes.createNote();
+            QVERIFY(!id.isEmpty());
+            QVERIFY(notes.renameNote(id, "Zulu"));
+            notes.setText("Version before interruption");
+            QVERIFY(notes.save());
+        }
+        auto newer = readJson(directory.filePath("Zulu.pin"));
+        newer["title"] = "Alpha";
+        newer["text"] = "Latest saved text";
+        newer["modified"] = newer.value("modified").toLongLong() + 10;
+        QVERIFY(writeJson(directory.filePath("Alpha.pin"), newer));
+        const auto before = guardSnapshot(directory.path());
+        NotesManager recovered(directory.path());
+        QVERIFY(recovered.selectNote(id));
+        QCOMPARE(recovered.title(), "Alpha");
+        QCOMPARE(recovered.text(), "Latest saved text");
+        QVERIFY(!recovered.errorMessage().isEmpty());
+        QCOMPARE(guardSnapshot(directory.path()), before);
+    }
+
+    void backgroundSaveContinuesAfterAnUnrelatedNoteFails() {
+        QTemporaryDir directory;
+        NotesManager notes(directory.path());
+        const auto first = notes.createNote();
+        const auto second = notes.createNote();
+        QVERIFY(!first.isEmpty() && !second.isEmpty());
+        const auto firstPath = pinPath(directory, first), secondPath = pinPath(directory, second);
+        const auto firstRevision = readJson(firstPath).value("inkRevision").toLongLong();
+        const auto secondRevision = readJson(secondPath).value("inkRevision").toLongLong();
+        const auto retained = directory.filePath("retained.pin-backup");
+        QVERIFY(QFile::rename(firstPath, retained));
+        QVERIFY(QDir().mkpath(firstPath));
+        const auto restore = qScopeGuard([&] {
+            QDir().rmdir(firstPath);
+            if (QFileInfo::exists(retained)) QFile::rename(retained, firstPath);
+        });
+        auto *handwriting = notes.findChild<NoteHandwriting *>();
+        QVERIFY(handwriting);
+        const QVariantList firstLines{QVariantMap{{"text", "First update"}}};
+        const QVariantList secondLines{QVariantMap{{"text", "Second update"}}};
+        handwriting->indexed(first, firstRevision, firstLines);
+        handwriting->indexed(second, secondRevision, secondLines);
+        QTRY_VERIFY(!notes.errorMessage().isEmpty());
+        const auto savedLines = [&](const QString &path) { return readJson(path).value("handwriting").toMap().value("lines").toList(); };
+        QTRY_COMPARE_WITH_TIMEOUT(savedLines(secondPath), secondLines, 1000);
+        QVERIFY(QDir().rmdir(firstPath));
+        QVERIFY(QFile::rename(retained, firstPath));
+        QVERIFY(notes.save());
+        QCOMPARE(savedLines(firstPath), firstLines);
     }
     void oldAssetCacheMovesOutOfPortableLibrary() {
         QTemporaryDir directory;
@@ -1277,6 +995,35 @@ private slots:
         reader->indexed(id, 0, {QVariantMap{{"text", "hello"}}}); // A late recognition result must not restore erased words.
         QVERIFY(reopened.search("hello").isEmpty());
     }
+    void handwritingUsesTheSharedRuntimeDirectory() {
+#ifdef Q_OS_ANDROID
+        QSKIP("Android uses a packaged recognizer.");
+#endif
+        QTemporaryDir directory;
+        const auto restore = qScopeGuard([oldRuntime = qgetenv("PILON_RUNTIME_DIR"), oldRoot = qgetenv("PILON_NOTES_OCR_ROOT"),
+                                         oldModels = qgetenv("PILON_NOTES_MODELS_DIR"), oldEnabled = qgetenv("PILON_NOTES_HANDWRITING")] {
+            for (const auto &entry : {qMakePair("PILON_RUNTIME_DIR", oldRuntime), qMakePair("PILON_NOTES_OCR_ROOT", oldRoot),
+                                      qMakePair("PILON_NOTES_MODELS_DIR", oldModels), qMakePair("PILON_NOTES_HANDWRITING", oldEnabled)}) {
+                if (entry.second.isNull()) qunsetenv(entry.first); else qputenv(entry.first, entry.second);
+            }
+        });
+        qputenv("PILON_RUNTIME_DIR", directory.filePath("runtime").toUtf8());
+        qunsetenv("PILON_NOTES_OCR_ROOT");
+        qputenv("PILON_NOTES_MODELS_DIR", directory.filePath("models").toUtf8());
+        qputenv("PILON_NOTES_HANDWRITING", "1");
+        const auto python = directory.filePath("runtime/handwriting/bin/python");
+        QVERIFY(writeGuardFile(python, "#!/bin/sh\nread -r request\nprintf '%s\\n' '{\"tiles\":[[]]}'\n"));
+        QVERIFY(QFile::setPermissions(python, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+        for (const auto *file : {"en_PP-OCRv5_rec_mobile.onnx", "ch_PP-OCRv5_det_server.onnx"})
+            QVERIFY(writeGuardFile(directory.filePath(QStringLiteral("models/ppocrv5/") + file), "fixture"));
+        NoteHandwriting recognizer;
+        QSignalSpy indexed(&recognizer, &NoteHandwriting::indexed), failed(&recognizer, &NoteHandwriting::failed);
+        recognizer.enqueue("fixture", {stroke({p(200, 200), p(250, 220)})}, 7);
+        QTRY_VERIFY_WITH_TIMEOUT(indexed.count() || failed.count(), 5000);
+        QVERIFY2(failed.isEmpty(), failed.isEmpty() ? "" : qPrintable(failed.first().first().toString()));
+        QCOMPARE(indexed.first().at(0).toString(), QString("fixture"));
+        QCOMPARE(indexed.first().at(1).toLongLong(), 7);
+    }
     void handwritingOnlyRendersChangedTiles() {
         QTemporaryDir directory; NoteHandwriting::Cache cache;
         const QVariantList original{stroke({p(200, 200), p(240, 225)}), stroke({p(200, 900), p(240, 925)})};
@@ -1485,13 +1232,7 @@ private slots:
         QProcess info; info.start("pdfinfo", {result}); QVERIFY(info.waitForFinished());
         QVERIFY(QRegularExpression("Pages:\\s+11\n").match(QString::fromUtf8(info.readAllStandardOutput())).hasMatch());
     }
-    void importedDocumentPagesSurviveFreshCache_data() {
-        QTest::addColumn<bool>("strictGit");
-        QTest::newRow("fresh-manager") << false;
-        QTest::newRow("strict-git-snapshot") << true;
-    }
     void importedDocumentPagesSurviveFreshCache() {
-        QFETCH(bool, strictGit);
         QTemporaryDir directory;
         const auto source = directory.filePath("source.pdf"), library = directory.filePath("notes");
         const QList<QColor> colours{QColor(200, 40, 60), QColor(40, 180, 70)};
@@ -1524,12 +1265,6 @@ private slots:
             QCOMPARE(readJson(file).value("pages").toList().size(), 2);
         }
         for (const auto &path : oldPaths) QVERIFY(!QFileInfo::exists(path));
-        QFile saved(file); QVERIFY(saved.open(QIODevice::ReadOnly)); const auto bytes = saved.readAll(); saved.close();
-        if (strictGit) {
-            NotesManager validator(directory.filePath("validator"));
-            QVERIFY2(validateGit(validator, library), qPrintable(validator.errorMessage()));
-            QVERIFY(saved.open(QIODevice::ReadOnly)); QCOMPARE(saved.readAll(), bytes); saved.close();
-        }
         NotesManager reopened(library); QCOMPARE(reopened.currentId(), id); QCOMPARE(reopened.elements().size(), 2);
         QCOMPARE(reopened.strokes().size(), 1);
         for (int i = 0; i < reopened.elements().size(); ++i) {
@@ -1760,6 +1495,76 @@ private slots:
         QCOMPARE(notes.folders(), folders); QCOMPARE(notes.items(), items);
         QVERIFY(QFileInfo::exists(pinPath(directory, ids.first())));
         QVERIFY(QFile::rename(backup, missing)); NotesManager reopened(directory.path()); QCOMPARE(reopened.items().size(), 4);
+    }
+    void interruptedFolderDeletionRecoversWithoutReplacingExistingData_data() {
+        QTest::addColumn<QString>("state");
+        QTest::newRow("legacy-before-commit") << QString("legacy");
+        QTest::newRow("before-commit") << QString("staged");
+        QTest::newRow("after-commit") << QString("committed");
+        QTest::newRow("existing-file") << QString("collision");
+        QTest::newRow("changed-metadata") << QString("changed");
+    }
+    void interruptedFolderDeletionRecoversWithoutReplacingExistingData() {
+        QFETCH(QString, state);
+        QTemporaryDir directory;
+        QString folder, first, second;
+        {
+            NotesManager notes(directory.path());
+            folder = notes.createFolder("Folder");
+            first = notes.createNote(folder);
+            notes.setText("Staged before the interruption");
+            QVERIFY(notes.save());
+            second = notes.createNote(folder);
+            notes.setText("Still in the library");
+            QVERIFY(notes.save());
+        }
+        const auto filename = pinPath(directory, first);
+        const auto staging = directory.filePath(".folder-delete-ABCDEF");
+        QVERIFY(QDir().mkdir(staging));
+        const auto metadata = directory.filePath(".folders.json");
+        QVERIFY(QFile::copy(metadata, staging + "/.folders.json"));
+        if (state != "legacy")
+            QVERIFY(writeJson(staging + "/.folders-after.json", {{"folders", QVariantList{}}}));
+        const auto stagedNote = QDir(staging).filePath(QFileInfo(filename).fileName());
+        QVERIFY(QFile::rename(filename, stagedNote));
+        if (state == "committed") {
+            QVERIFY(QFile::rename(pinPath(directory, second), QDir(staging).filePath(QFileInfo(pinPath(directory, second)).fileName())));
+            QVERIFY(writeJson(metadata, {{"folders", QVariantList{}}}));
+        } else if (state == "collision") {
+            QFile replacement(filename);
+            QVERIFY(replacement.open(QIODevice::WriteOnly));
+            QCOMPARE(replacement.write("Other data"), 10);
+        } else if (state == "changed") {
+            QVERIFY(writeJson(metadata, {{"folders", QVariantList{QVariantMap{{"id", folder}, {"name", "Renamed folder"}}}}}));
+        }
+
+        NotesManager reopened(directory.path());
+        if (state == "collision" || state == "changed") {
+            QVERIFY(reopened.errorMessage().contains(staging));
+            QVERIFY(!reopened.selectNote(first));
+            QVERIFY(QFileInfo::exists(stagedNote));
+            if (state == "collision") {
+                QFile replacement(filename);
+                QVERIFY(replacement.open(QIODevice::ReadOnly));
+                QCOMPARE(replacement.readAll(), QByteArray("Other data"));
+            }
+            return;
+        }
+        QVERIFY(reopened.errorMessage().isEmpty());
+        if (state == "committed") {
+            QVERIFY(!reopened.selectNote(first));
+            QVERIFY(!reopened.selectNote(second));
+            QVERIFY(reopened.items().isEmpty());
+            QVERIFY(!QFileInfo::exists(staging));
+            return;
+        }
+        QVERIFY(reopened.selectNote(first));
+        QCOMPARE(reopened.text(), QString("Staged before the interruption"));
+        QCOMPARE(reopened.currentFolder(), folder);
+        QVERIFY(reopened.selectNote(second));
+        QCOMPARE(reopened.text(), QString("Still in the library"));
+        QVERIFY(QFileInfo::exists(filename));
+        QVERIFY(!QFileInfo::exists(staging));
     }
     void earlierHandwritingGetsTitleSpaceOnlyOnce() {
         QTemporaryDir directory; QString id;

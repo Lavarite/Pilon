@@ -13,10 +13,13 @@
 #include <QColor>
 #include <memory>
 
+class QTemporaryDir;
+
 class ApplicationService : public QObject {
     Q_OBJECT
     Q_PROPERTY(bool backgroundEnabled READ backgroundEnabled NOTIFY changed)
     Q_PROPERTY(bool trayEnabled READ trayEnabled NOTIFY changed)
+    Q_PROPERTY(bool canHideToTray READ canHideToTray NOTIFY changed)
     Q_PROPERTY(bool startHidden READ startHidden NOTIFY changed)
     Q_PROPERTY(QString error READ error NOTIFY changed)
     Q_PROPERTY(bool offline READ offline NOTIFY connectivityChanged)
@@ -41,6 +44,7 @@ public:
     ~ApplicationService() override;
     bool backgroundEnabled() const { return m_enabled; }
     bool trayEnabled() const { return m_trayEnabled; }
+    bool canHideToTray() const;
     bool resetting() const { return m_resetting; }
     QVariantMap pendingResetChoices() const { return m_pendingResetChoices; }
     QVariantMap pendingResetOwnedPaths() const { return m_pendingResetOwnedPaths; }
@@ -68,11 +72,15 @@ public:
     Q_INVOKABLE QVariantMap configuredAddons() const;
     Q_INVOKABLE QVariant prepareConfiguredAddon(const QString &id);
     Q_INVOKABLE QUrl chooseConfigurationBundle(QWindow *owner, bool exporting, const QString &title, const QString &filter);
-    Q_INVOKABLE bool exportConfiguration(const QUrl &destination);
+    Q_INVOKABLE bool configurationExportTargetExists(const QUrl &destination) const;
+    Q_INVOKABLE bool exportConfiguration(const QUrl &destination, bool replaceExisting = true);
+    Q_INVOKABLE QUrl prepareConfigurationExport(const QString &name);
+    Q_INVOKABLE void discardConfigurationExport();
     Q_INVOKABLE QVariantMap previewConfiguration(const QUrl &source, const QVariantList &installed);
     Q_INVOKABLE bool confirmConfigurationImport(const QVariantList &installed);
     Q_INVOKABLE void cancelConfigurationImport();
     bool finishConfigurationImport(QString &error);
+    bool startConfiguration(QString &error);
     bool reconcileConfiguredStartup(bool previous, QString &error);
     QString workspaceDestination() const { return m_workspaceDestination; }
 
@@ -88,6 +96,7 @@ public:
     // Return false when another process owns the service (or startup failed).
     bool claimInstance();
     QStringList launchFiles() const;
+    Q_INVOKABLE QString fileOpenKind(const QUrl &url) const;
     void setWindow(QWindow *window);
     Q_INVOKABLE bool setIconColours(const QColor &foreground, const QColor &background, const QColor &accent);
     Q_INVOKABLE bool setBackgroundEnabled(bool enabled);
@@ -95,7 +104,8 @@ public:
     Q_INVOKABLE void showWindow();
     Q_INVOKABLE void hideWindow();
     Q_INVOKABLE void quit();
-    Q_INVOKABLE void cancelQuit() { m_quitCancelled = true; }
+    Q_INVOKABLE void cancelQuit() { m_quitCancelled = true; m_quitDeferred = false; }
+    Q_INVOKABLE void deferQuit() { if (!m_quitCancelled) { m_quitCancelled = true; m_quitDeferred = true; } }
     static bool prepareBackgroundDisplay();
 signals:
     void changed();
@@ -123,7 +133,7 @@ private:
     void attachAndroidFoldObserver();
 #endif
     bool m_enabled = false, m_trayEnabled = true, m_startHidden = false, m_showPending = false;
-    bool m_quitCancelled = false, m_resetting = false;
+    bool m_quitCancelled = false, m_quitDeferred = false, m_resetting = false;
     bool m_setupRequired = false;
     bool m_hardwareKeyboardAvailable = false;
     QString m_error;
@@ -136,10 +146,12 @@ private:
         QVariantList installed;
     };
     std::unique_ptr<PendingConfiguration> m_configuration;
+    std::unique_ptr<QTemporaryDir> m_configurationExport;
     int m_setupResumeStep = -1;
     QString m_preparedResetWorkspaceRoot, m_resetWorkspaceRoot;
     QVariantMap m_resetChoices, m_pendingResetChoices, m_resetOwnedPaths, m_pendingResetOwnedPaths;
     QStringList m_pendingFiles;
+    qsizetype m_pendingFileBytes = 0;
     QLocalServer m_server;
     std::unique_ptr<QLockFile> m_lock;
     QPointer<QWindow> m_window;

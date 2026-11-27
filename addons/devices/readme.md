@@ -1,39 +1,19 @@
 # Tailscale
 
-Enable Tailscale in Add-ons to discover peers. Open **SSH → Tailscale** to
-manage its connection. Choose which peers appear in SSH and Files under
-**SSH → Connections**. Saved peers appear during refresh. A successful
-discovery makes them available for connections. Direct SSH hosts work independently.
+Enable Tailscale in **Settings → Add-ons**. Use **SSH → Tailscale** to manage the connection and **SSH → Connections** to select peers for SSH and Files.
 
 ## Android
 
-Pilon uses the official [Tailscale Android app](https://tailscale.com/docs/install/android)
-for sign-in and the VPN. Choose **Install Tailscale** if needed, then **Open
-Tailscale** to sign in. **Connect** requests the official app's VPN and opens it
-for any required approval. **Disconnect** requests disconnection without signing
-out. Pilon does not create a second Tailscale account or VPN.
+1. Install the [official Tailscale app](https://tailscale.com/docs/install/android).
+2. Choose **Open Tailscale** to sign in.
+3. Choose **Connect** and approve the VPN in Tailscale if prompted.
 
-Without a discovery credential, save tailnet addresses in **SSH → Connections**.
-A saved destination's reachability stays unknown until a connection is attempted. **Android VPN active** reports Android's network
-transport, which can belong to another VPN. Check Tailscale itself for its
-connection status. **No Android VPN active** means Android exposes no VPN to
-Pilon. If Pilon is excluded through
-Tailscale's app routing, enable it there before connecting to tailnet addresses.
+Use **Disconnect** to stop the VPN. Disabling the Pilon add-on stops discovery and leaves the official app signed in. Check the connection in Tailscale if Android reports a VPN but a peer fails to open.
 
-Disabling Tailscale stops discovery and leaves the official app signed in. Cleanup of a previous
-Pilon-owned Tailscale session affects that old private session, never the official
-app's account.
+To use a peer without discovery, save its tailnet address in **SSH → Connections**. Pilon tests reachability when you connect.
 
 ## Linux
 
-Pilon uses the installed Tailscale CLI and system service. Start the service and
-sign in when required. **Use in Pilon** confirms use of an existing system
-session. Select the peers to include in SSH settings. Signing out affects
-other applications that use that system Tailscale session.
+Start the Tailscale service and sign in. Choose **Use in Pilon** to use the existing system session, then select the peers to include. Signing out affects other apps that use that session.
 
-## Source layout
-
-`package/` and `src/` contain the package and native implementation.
-`platform/android/` owns the Android Tailscale bridge, patches and instrumentation;
-`scripts/android/` builds its helper, and `tests/` contains feature tests.
-Shared host packaging assembles the Android inputs.
+[Files and transfers](../files/readme.md) · [SSH connections](../ssh/readme.md)

@@ -59,10 +59,6 @@ Control {
             refresh(false)
     }
 
-    function withOpacity(colour, opacity) {
-        return Qt.rgba(colour.r, colour.g, colour.b, opacity)
-    }
-
     function syncSelectedDevices() {
         const devices = filesPage.devices
         const allowed = []
@@ -98,6 +94,7 @@ Control {
                 selected.push({"id": device.id,
                                "name": device.name,
                                "ip": device.ip,
+                               "sshAlias": device.sshAlias,
                                "online": device.online,
                                "onlineKnown": device.onlineKnown,
                                "self": device.self,
@@ -134,8 +131,8 @@ Control {
         readonly property bool compact: filesPage.fileWorkspace.sshEnabled && width < 600
         height: compact ? 96 : 56
         radius: 16
-        color: filesPage.withOpacity(filesPage.secondaryColour, 0.68)
-        border.color: filesPage.withOpacity(filesPage.textColour, 0.22)
+        color: Qt.alpha(filesPage.secondaryColour, 0.68)
+        border.color: Qt.alpha(filesPage.textColour, 0.22)
 
         Item {
             anchors.fill: parent
@@ -161,7 +158,7 @@ Control {
                 background: Rectangle {
                     radius: 10
                     color: filesUsername.hovered
-                           ? filesPage.withOpacity(filesPage.textColour, 0.12)
+                           ? Qt.alpha(filesPage.textColour, 0.12)
                            : "transparent"
                 }
             }
@@ -201,9 +198,9 @@ Control {
                 background: Rectangle {
                     radius: 10
                     color: searchDevicesButton.down
-                           ? filesPage.withOpacity(filesPage.textColour, 0.18)
+                           ? Qt.alpha(filesPage.textColour, 0.18)
                            : searchDevicesButton.hovered
-                             ? filesPage.withOpacity(filesPage.textColour, 0.12)
+                             ? Qt.alpha(filesPage.textColour, 0.12)
                              : "transparent"
                 }
 
@@ -307,7 +304,7 @@ Control {
 
                                 background: Rectangle {
                                     radius: 7
-                                    color: filesPage.withOpacity(filesPage.textColour, 0.08)
+                                    color: Qt.alpha(filesPage.textColour, 0.08)
                                     border.color: deviceUsername.activeFocus
                                                   ? filesPage.accentColour
                                                   : "transparent"
@@ -318,8 +315,8 @@ Control {
 
                     background: Rectangle {
                         radius: 12
-                        color: filesPage.withOpacity(filesPage.secondaryColour, 0.98)
-                        border.color: filesPage.withOpacity(filesPage.textColour, 0.22)
+                        color: Qt.alpha(filesPage.secondaryColour, 0.98)
+                        border.color: Qt.alpha(filesPage.textColour, 0.22)
                     }
                 }
             }
@@ -394,6 +391,9 @@ Control {
         else if (path.endsWith(".pical")) openCalendarFile(file)
         else if (path.endsWith(".piext")) openAddonFile(file)
     }
+    function previewOverlay(manager) {
+        return filePreview.visible && filePreview.manager === manager ? filePreview.Overlay.overlay : null
+    }
     function watchPreview(manager) {
         manager.pilonFileOpening.connect(function() { if (filePreview.visible) filePreview.close() })
         manager.pilonFileReady.connect(function(file) {
@@ -409,9 +409,12 @@ Control {
                 manager.clearPreview()
                 return
             }
+            if (!filePreview.visible || filePreview.manager !== manager || filePreview.indexOf(manager.previewEntry) < 0) {
+                filePreview.nextPageRequested = false
+                filePreview.folderLocation = filePreview.listingLocation(manager)
+                filePreview.entries = filePreview.folderEntries(manager)
+            }
             filePreview.manager = manager
-            const tile = filesPage.tiles.find(t => t.remoteFiles === manager)
-            filePreview.entries = (tile ? tile.displayedEntries : manager.entries).filter(e => !e.directory)
             filePreview.resetView()
             if (!filePreview.visible) filePreview.open()
         })
@@ -427,10 +430,10 @@ Control {
         activeTile = tile
         if (entry !== undefined && entry !== null) {
             const device = fileWorkspace.deviceForId(entry.deviceId)
-            if (device !== null)
+            if (device !== null && fileWorkspace.deviceAvailable(device.id))
                 manager.browse(device, entry.username || fileWorkspace.usernameForDevice(entry.deviceId), entry.path)
-        } else if (!fileWorkspace.sshEnabled && !manager.currentDeviceId) {
-            manager.browse(manager.localDevice, manager.localDevice.username, fileWorkspace.localHomePath)
+        } else if (!manager.currentDeviceId && (!fileWorkspace.sshEnabled || Qt.platform.os === "android")) {
+            manager.browseLocalHome(fileWorkspace.localHomePath, false)
         }
         return tile
     }
@@ -469,6 +472,7 @@ Control {
     AppShortcut { action: "search"; active: filesPage.visible && !filePreview.visible; onActivated: { fileSearchInput.forceActiveFocus(); fileSearchInput.selectAll() } }
 
     function openSearchLocation(entry) {
+        if (!fileWorkspace.deviceAvailable(entry.deviceId)) return
         if (tiles.length < tileLimit) {
             addTile(entry)
         } else if (activeTile !== null && !activeTile.remoteFiles.busy) {
@@ -484,12 +488,12 @@ Control {
 
     function refresh(verifySizeEstimates = false) {
         for (let index = 0; index < tiles.length; ++index)
-            tiles[index].remoteFiles.refresh(verifySizeEstimates)
+            tiles[index].refresh(verifySizeEstimates)
     }
 
     function refreshOtherTiles(manager) {
         for (let index = 0; index < tiles.length; ++index) {
-            if (tiles[index].remoteFiles !== manager) tiles[index].remoteFiles.refresh(false)
+            if (tiles[index].remoteFiles !== manager) tiles[index].refresh(false)
         }
     }
 
@@ -513,23 +517,105 @@ Control {
         color: filesPage.mainColour
         property var manager: null
         property var entries: []
+        property bool nextPageRequested: false
+        property string folderLocation: ""
+        readonly property string currentFolderLocation: listingLocation(manager)
+        readonly property bool hasMoreFiles: folderLocation === currentFolderLocation && manager?.hasMoreEntries === true
+        onCurrentFolderLocationChanged: if (folderLocation !== currentFolderLocation) nextPageRequested = false
         property real zoom: 1
         property bool sectionsOpen: true
         readonly property bool editingNavigation: documentSearch.activeFocus || pageInput.activeFocus
         readonly property string kind: manager ? manager.previewKind : ""
+        readonly property bool mediaPreview: kind === "audio" || kind === "video"
+        readonly property var mediaPlayer: mediaPlayerLoader.item
         readonly property bool zoomable: kind === "image" || kind === "document" || kind === "text"
         readonly property var view: kind === "image" ? imageView : kind === "document" ? documentView : textView
-        readonly property int fileIndex: entries.findIndex(e => manager && e.path === manager.previewEntry.path && e.deviceId === manager.previewEntry.deviceId)
+        readonly property int fileIndex: indexOf(manager?.previewEntry)
+        readonly property bool waitingForAccess: !!manager?.promptText
+        readonly property bool previewReady: !!manager && (!manager.busy || manager.refreshing === true) && !waitingForAccess
+        readonly property bool canRequestPreview: previewReady && previewSourceAvailable(manager.previewEntry)
+        readonly property bool canShare: !!kind && !manager?.busy && !waitingForAccess
+            && !filesPage.fileWorkspace.shareManager.busy && !filesPage.fileWorkspace.shareManager.promptText
+            && previewSourceAvailable(manager?.previewEntry)
+        readonly property bool loading: !!manager?.previewLoading || kind === "document" && documentView.document.loading
+            || kind === "image" && previewImage.status === Image.Loading
+        readonly property bool showRecovery: !loading && !waitingForAccess && (kind === "external"
+            || (!kind && !!manager?.previewName && previewReady))
+        function previewDeviceId(entry) {
+            return entry ? entry.deviceId || folderLocation.split("\n", 1)[0] : ""
+        }
+        function previewSourceAvailable(entry) {
+            const deviceId = previewDeviceId(entry)
+            return filesPage.fileWorkspace.deviceAvailable(deviceId)
+                && (deviceId === "local" || manager?.cachedListing !== true)
+        }
+        function entryWithPreviewDevice(entry) {
+            return entry.deviceId ? entry : Object.assign({}, entry, {deviceId: previewDeviceId(entry)})
+        }
+        function indexOf(entry) {
+            if (!entry) return -1
+            const deviceId = previewDeviceId(entry)
+            return entries.findIndex(item => item.path === entry.path && previewDeviceId(item) === deviceId
+                && (!item.username || !entry.username || entry.username === item.username))
+        }
+        function folderEntries(source) {
+            const tile = filesPage.tiles.find(t => t.remoteFiles === source)
+            return (tile ? tile.displayedEntries : source.entries).filter(entry => !entry.directory)
+        }
+        function listingLocation(source) {
+            return source ? source.currentDeviceId + "\n" + source.currentUsername + "\n" + source.currentPath : ""
+        }
         function resetView() {
             zoom = 1
             for (const v of [imageView, documentView, textView]) { v.cancelFlick(); v.contentX = 0; v.contentY = 0 }
-            view.forceActiveFocus()
+            if (zoomable) view.forceActiveFocus()
+            else previewContent.forceActiveFocus()
+        }
+        function canNavigate(delta) {
+            const next = fileIndex + delta
+            return previewReady && !nextPageRequested && fileIndex >= 0 && next >= 0
+                && (next < entries.length ? previewSourceAvailable(entries[next])
+                    : delta === 1 && hasMoreFiles && filesPage.fileWorkspace.locationAvailable(manager))
+        }
+        function openEntry(entry) {
+            if (!previewReady || !previewSourceAvailable(entry)) return
+            const source = entryWithPreviewDevice(entry)
+            manager.viewFile(source, source.username || filesPage.fileWorkspace.usernameForDevice(source.deviceId))
         }
         function navigate(delta) {
-            const next = fileIndex + delta
-            if (!manager || manager.busy || fileIndex < 0 || next < 0 || next >= entries.length) return
-            const entry = entries[next]
-            manager.viewFile(entry, entry.username || filesPage.fileWorkspace.usernameForDevice(entry.deviceId))
+            if (!canNavigate(delta)) return
+            const next = entries[fileIndex + delta]
+            if (next) openEntry(next)
+            else {
+                nextPageRequested = true
+                continueIntoNextPage()
+            }
+        }
+        function appendFolderEntries() {
+            if (!visible || !manager || folderLocation !== currentFolderLocation) return
+            const loadedPaths = new Set(entries.map(entry => entry.path))
+            const appended = folderEntries(manager).filter(entry => !loadedPaths.has(entry.path))
+            if (appended.length) entries = entries.concat(appended)
+        }
+        function continueIntoNextPage() {
+            if (!nextPageRequested || !visible || !manager || manager.busy || folderLocation !== currentFolderLocation) return
+            if (!filesPage.fileWorkspace.locationAvailable(manager)) { nextPageRequested = false; return }
+            appendFolderEntries()
+            const next = fileIndex >= 0 ? entries[fileIndex + 1] : null
+            if (!next && hasMoreFiles) {
+                manager.loadMoreEntries()
+            } else {
+                nextPageRequested = false
+                if (next) openEntry(next)
+            }
+        }
+        Connections {
+            target: filePreview.manager
+            ignoreUnknownSignals: true
+            function onEntriesChanged() {
+                if (filePreview.manager?.loadingMoreEntries) Qt.callLater(filePreview.appendFolderEntries)
+            }
+            function onBusyChanged() { Qt.callLater(filePreview.continueIntoNextPage) }
         }
         function scrollBy(dx, dy) {
             const v = view
@@ -570,7 +656,17 @@ Control {
             filesPage.importIntoNote(urls, createNew, manager.previewName)
             close()
         }
-        onClosed: { previewPlayer.stop(); if (manager) { if (manager.busy && !kind) manager.cancel(); manager.clearPreview() } }
+        onClosed: {
+            const previous = manager
+            manager = null
+            entries = []
+            nextPageRequested = false
+            folderLocation = ""
+            if (filesPage.fileWorkspace.shareOverlay === filePreview.Overlay.overlay)
+                filesPage.fileWorkspace.shareOverlay = null
+            if (previous?.promptText) previous.cancelPrompt()
+            previous?.clearPreview()
+        }
         AppShortcut { action: "search"; active: filePreview.visible && filePreview.kind === "document"; onActivated: documentSearch.forceActiveFocus() }
         AppShortcut { action: "zoomIn"; active: filePreview.visible && filePreview.zoomable; onActivated: filePreview.setZoom(filePreview.zoom * 1.25) }
         AppShortcut { action: "zoomOut"; active: filePreview.visible && filePreview.zoomable; onActivated: filePreview.setZoom(filePreview.zoom / 1.25) }
@@ -601,65 +697,81 @@ Control {
             selectByMouse: true
             background: Rectangle { color: filesPage.secondaryColour; radius: 8 }
         }
-        Column {
+        ColumnLayout {
             anchors.fill: parent; spacing: 8
-            Item {
+            GridLayout {
                 id: previewToolbar
-                width: parent.width; height: Math.max(previewMenus.implicitHeight, 42)
-                PilonCloseButton {
-                    objectName: "closeFilePreview"
-                    anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
-                    width: 42; height: 42
-                    palette.windowText: filesPage.textColour
-                    onClicked: filePreview.close()
+                objectName: "previewToolbar"
+                Layout.fillWidth: true
+                columns: 4; columnSpacing: 8; rowSpacing: 8
+                readonly property bool compact: width < 280
+                Item {
+                    Layout.row: 0; Layout.column: 0; Layout.fillWidth: true
+                    visible: previewToolbar.compact
                 }
                 Label {
                     objectName: "previewFileName"
-                    x: previewMenus.width + 12; anchors.verticalCenter: parent.verticalCenter
-                    width: Math.max(0, parent.width - x - 50); elide: Text.ElideMiddle
-                    text: filePreview.manager ? filePreview.manager.previewName : ""
+                    Layout.row: previewToolbar.compact ? 1 : 0; Layout.column: 0
+                    Layout.columnSpan: previewToolbar.compact ? 4 : 1
+                    Layout.fillWidth: true; Layout.minimumWidth: 0
+                    elide: Text.ElideMiddle
+                    text: filePreview.manager?.previewName ?? ""
                     color: filesPage.textColour
+                    font.weight: Font.DemiBold
+                    textFormat: Text.PlainText
                 }
-                MenuBar {
-                    id: previewMenus
-                    objectName: "previewMenuBar"
-                    width: implicitWidth
-                    palette.window: filesPage.mainColour; palette.button: filesPage.secondaryColour
-                    palette.text: filesPage.textColour; palette.windowText: filesPage.textColour; palette.buttonText: filesPage.textColour
-                    palette.highlight: filesPage.accentColour; palette.highlightedText: filesPage.accentTextColour
-                    delegate: MenuBarItem {
-                        id: heading
-                        contentItem: ControlsImpl.IconLabel {
-                            text: heading.text; font: heading.font
-                            icon: heading.icon; defaultIconColor: heading.palette.buttonText
-                            color: heading.palette.buttonText
-                            spacing: heading.spacing; mirrored: heading.mirrored; display: heading.display
-                            alignment: Qt.AlignLeft
-                        }
+                PilonToolButton {
+                    objectName: "previewShareFile"
+                    Layout.row: 0; Layout.column: 1
+                    Layout.preferredWidth: 42; Layout.preferredHeight: 42
+                    icon.source: "icons/share.svg"
+                    palette.buttonText: filesPage.textColour
+                    Accessible.name: qsTr("Share file")
+                    ToolTip.visible: hovered; ToolTip.text: Accessible.name
+                    enabled: filePreview.canShare
+                    onClicked: {
+                        if (!filePreview.canShare) return
+                        const entry = filePreview.entryWithPreviewDevice(filePreview.manager.previewEntry)
+                        const username = entry.username || filesPage.fileWorkspace.usernameForDevice(entry.deviceId)
+                        filesPage.fileWorkspace.shareEntry(entry, username, filePreview.manager, filePreview.Overlay.overlay)
                     }
-                    background: Rectangle { color: filesPage.mainColour }
+                }
+                PilonToolButton {
+                    id: previewActions
+                    objectName: "previewActionsButton"
+                    Layout.row: 0; Layout.column: 2
+                    Layout.preferredWidth: 42; Layout.preferredHeight: 42
+                    icon.source: "icons/ellipsis-horizontal.svg"
+                    palette.buttonText: filesPage.textColour
+                    Accessible.name: qsTr("File actions")
+                    ToolTip.visible: hovered; ToolTip.text: Accessible.name
+                    onClicked: previewMenu.popup(previewActions, previewActions.width - previewMenu.width, previewActions.height + 8)
                     PilonMenu {
-                        title: qsTr("File")
-                        PilonMenuItem { text: qsTr("Open externally"); enabled: !!filePreview.kind; onTriggered: filePreview.manager.openPreviewExternally() }
-                        PilonMenuItem { text: qsTr("Close"); onTriggered: filePreview.close() }
+                        id: previewMenu
+                        objectName: "previewFileMenu"
+                        palette.window: filesPage.mainColour; palette.button: filesPage.secondaryColour
+                        palette.text: filesPage.textColour; palette.windowText: filesPage.textColour; palette.buttonText: filesPage.textColour
+                        palette.highlight: filesPage.accentColour; palette.highlightedText: filesPage.accentTextColour
+                        PilonMenuItem { objectName: "previewOpenExternally"; text: qsTr("Open externally"); enabled: !!filePreview.kind; onTriggered: filePreview.manager.openPreviewExternally() }
+                        PilonMenuItem { objectName: "previewZoomIn"; text: qsTr("Zoom in"); shown: filePreview.zoomable; onTriggered: filePreview.setZoom(filePreview.zoom * 1.25) }
+                        PilonMenuItem { objectName: "previewZoomOut"; text: qsTr("Zoom out"); shown: filePreview.zoomable; onTriggered: filePreview.setZoom(filePreview.zoom / 1.25) }
+                        PilonMenuItem { objectName: "previewZoomReset"; text: qsTr("Fit to window"); shown: filePreview.zoomable; onTriggered: filePreview.resetView() }
+                        PilonMenuItem { objectName: "previewAddToNote"; text: qsTr("Add to note…"); shown: filesPage.canAddToNote && !!filePreview.manager?.previewCanImport; enabled: !filePreview.manager?.busy; onTriggered: filePreview.addToNote(false) }
+                        PilonMenuItem { objectName: "previewNewNote"; text: qsTr("Create new note with this file"); shown: filesPage.canCreateNote && !!filePreview.manager?.previewCanImport; enabled: !filePreview.manager?.busy; onTriggered: filePreview.addToNote(true) }
                     }
-                    PilonMenu {
-                        objectName: "viewerViewMenu"; title: qsTr("View")
-                        PilonMenuItem { objectName: "previewZoomIn"; text: qsTr("Zoom in"); enabled: filePreview.zoomable; onTriggered: filePreview.setZoom(filePreview.zoom * 1.25) }
-                        PilonMenuItem { objectName: "previewZoomOut"; text: qsTr("Zoom out"); enabled: filePreview.zoomable; onTriggered: filePreview.setZoom(filePreview.zoom / 1.25) }
-                        PilonMenuItem { objectName: "previewZoomReset"; text: qsTr("Fit to window"); enabled: filePreview.zoomable; onTriggered: filePreview.resetView() }
-                    }
-                    PilonMenu {
-                        objectName: "viewerNotesMenu"; title: qsTr("Notes")
-                        PilonMenuItem { objectName: "previewAddToNote"; text: qsTr("Add to note…"); enabled: filesPage.canAddToNote && !!filePreview.manager && filePreview.manager.previewCanImport && !filePreview.manager.busy; onTriggered: filePreview.addToNote(false) }
-                        PilonMenuItem { objectName: "previewNewNote"; text: qsTr("Create new note with this file"); enabled: filesPage.canCreateNote && !!filePreview.manager && filePreview.manager.previewCanImport && !filePreview.manager.busy; onTriggered: filePreview.addToNote(true) }
-                    }
+                }
+                PilonCloseButton {
+                    objectName: "closeFilePreview"
+                    Layout.row: 0; Layout.column: 3
+                    Layout.preferredWidth: 42; Layout.preferredHeight: 42
+                    palette.windowText: filesPage.textColour
+                    onClicked: filePreview.close()
                 }
             }
             Flow {
                 id: documentToolbar; objectName: "documentToolbar"
                 readonly property bool compact: width < pageNavigation.implicitWidth + zoomControls.implicitWidth + 76
-                width: parent.width; height: visible ? implicitHeight : 0; spacing: 8
+                Layout.fillWidth: true; Layout.preferredHeight: implicitHeight; spacing: 8
                 visible: filePreview.zoomable
                 RowLayout {
                     id: pageNavigation
@@ -719,7 +831,8 @@ Control {
             }
             Item {
                 id: previewContent
-                width: parent.width; height: Math.max(40, parent.height - y)
+                Layout.fillWidth: true; Layout.fillHeight: true; Layout.minimumHeight: 0
+                clip: true
                 ViewerSurface {
                     id: imageView; objectName: "previewImageView"
                     onZoomRequested: (factor, position) => filePreview.setZoom(filePreview.zoom * factor, position)
@@ -733,9 +846,11 @@ Control {
                     contentHeight: Math.max(height, fittedHeight * filePreview.zoom)
                     Image {
                         id: previewImage
+                        objectName: "previewImage"
                         x: (imageView.contentWidth - width) / 2; y: (imageView.contentHeight - height) / 2
                         width: imageView.fittedWidth * filePreview.zoom; height: imageView.fittedHeight * filePreview.zoom
-                        source: imageView.visible && filePreview.manager ? filePreview.manager.previewUrl : ""
+                        source: imageView.visible && filePreview.manager
+                            ? (filePreview.manager.previewImageUrl?.toString() || filePreview.manager.previewUrl) : ""
                         fillMode: Image.PreserveAspectFit; asynchronous: true
                     }
                 }
@@ -745,12 +860,12 @@ Control {
                     onTouchStarted: position => filePreview.swipeStart(position)
                     onTouchFinished: position => filePreview.swipeEnd(position)
                     onTouchPinched: filePreview.swipePinched = true
-                    anchors.fill: parent; visible: filePreview.kind === "text" || filePreview.kind === "external"; clip: true
+                    anchors.fill: parent; visible: filePreview.kind === "text"; clip: true
                     contentWidth: width; contentHeight: previewText.height
                     PilonTextArea {
                         id: previewText; objectName: "previewText"
                         width: textView.width
-                        text: filePreview.manager ? filePreview.manager.previewText || (filePreview.kind === "external" ? qsTr("Open this file with an installed application.") : "") : ""
+                        text: filePreview.manager?.previewText ?? ""
                         font.pixelSize: 16 * filePreview.zoom
                         readOnly: true; selectByMouse: true; wrapMode: TextEdit.Wrap; color: filesPage.textColour; background: null
                     }
@@ -799,67 +914,199 @@ Control {
                     anchors.horizontalCenter: parent.horizontalCenter
                     y: filePreview.kind === "audio" ? (parent.height - height) / 2 : parent.height - height
                     spacing: 16
-                    visible: filePreview.kind === "video" || filePreview.kind === "audio"
+                    visible: filePreview.mediaPreview
                     Item {
                         id: audioWaveform; objectName: "previewAudioWaveform"
-                        width: parent.width; height: visible ? Math.max(80, previewContent.height * .45) : 0
+                        width: parent.width
+                        height: visible ? Math.max(0, Math.min(previewContent.height * .45,
+                            previewContent.height - mediaSeek.height - mediaPlayback.height - 2 * audioControls.spacing)) : 0
                         visible: filePreview.kind === "audio"
                         Row {
-                            anchors.fill: parent; spacing: 4
+                            id: waveformBars
+                            anchors.fill: parent; spacing: Math.min(4, audioWaveform.width / 96)
                             Repeater {
                                 model: filePreview.manager ? filePreview.manager.previewWaveform || [] : []
                                 Rectangle {
                                     required property real modelData
                                     required property int index
-                                    width: Math.max(1, (audioWaveform.width - 47 * 4) / 48)
-                                    height: Math.max(3, modelData * audioWaveform.height)
+                                    width: Math.max(0, (audioWaveform.width - 47 * waveformBars.spacing) / 48)
+                                    height: Math.min(audioWaveform.height, Math.max(3, modelData * audioWaveform.height))
                                     anchors.verticalCenter: parent.verticalCenter
                                     radius: width / 2
-                                    color: index / 48 <= previewPlayer.position / Math.max(1, previewPlayer.duration) ? filesPage.accentColour : filesPage.textColour
+                                    color: index / 48 <= (filePreview.mediaPlayer?.position ?? 0)
+                                        / Math.max(1, filePreview.mediaPlayer?.duration ?? 0) ? filesPage.accentColour : filesPage.textColour
                                 }
                             }
                         }
-                        MouseArea { anchors.fill: parent; onClicked: mouse => previewPlayer.setPosition(mouse.x / width * previewPlayer.duration) }
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: mouse => {
+                                const player = filePreview.mediaPlayer
+                                if (player) player.setPosition(mouse.x / width * player.duration)
+                            }
+                        }
                     }
-                    PilonSlider { width: parent.width; from: 0; to: previewPlayer.duration; value: previewPlayer.position; onMoved: previewPlayer.setPosition(value) }
+                    PilonSlider {
+                        id: mediaSeek
+                        width: parent.width; from: 0
+                        to: filePreview.mediaPlayer?.duration ?? 0
+                        value: filePreview.mediaPlayer?.position ?? 0
+                        onMoved: filePreview.mediaPlayer?.setPosition(value)
+                    }
                     Row {
+                        id: mediaPlayback
                         anchors.horizontalCenter: parent.horizontalCenter; spacing: 12
                         StyledButton {
+                            readonly property bool playing: filePreview.mediaPlayer?.playbackState === MediaPlayer.PlayingState
                             width: 48; height: 48
-                            icon.source: previewPlayer.playbackState === MediaPlayer.PlayingState ? "icons/pause.svg" : "icons/play.svg"
-                            Accessible.name: previewPlayer.playbackState === MediaPlayer.PlayingState ? qsTr("Pause") : qsTr("Play")
-                            onClicked: previewPlayer.playbackState === MediaPlayer.PlayingState ? previewPlayer.pause() : previewPlayer.play()
+                            icon.source: playing ? "icons/pause.svg" : "icons/play.svg"
+                            Accessible.name: playing ? qsTr("Pause") : qsTr("Play")
+                            onClicked: if (playing) filePreview.mediaPlayer?.pause(); else filePreview.mediaPlayer?.play()
                         }
                         Label {
                             anchors.verticalCenter: parent.verticalCenter
                             function time(ms) { const seconds = Math.floor(ms / 1000); return Math.floor(seconds / 60) + ":" + ("0" + seconds % 60).slice(-2) }
-                            text: time(previewPlayer.position) + " / " + time(previewPlayer.duration)
+                            text: time(filePreview.mediaPlayer?.position ?? 0) + " / " + time(filePreview.mediaPlayer?.duration ?? 0)
                             color: filesPage.textColour
                         }
                     }
                 }
+                PointHandler {
+                    enabled: filePreview.mediaPreview
+                    acceptedDevices: PointerDevice.TouchScreen
+                    property bool startedOnMedia: false
+                    onGrabChanged: (transition, eventPoint) => {
+                        const position = previewContent.mapFromItem(null, eventPoint.scenePosition)
+                        if (transition === PointerDevice.GrabPassive) {
+                            startedOnMedia = !audioControls.contains(audioControls.mapFromItem(previewContent, position))
+                            if (startedOnMedia) filePreview.swipeStart(position)
+                        } else {
+                            if (transition === PointerDevice.UngrabPassive && eventPoint.state === EventPoint.Released && startedOnMedia)
+                                filePreview.swipeEnd(position)
+                            startedOnMedia = false
+                        }
+                    }
+                }
                 ProgressBar {
-                    objectName: "previewLoadingIndicator"
-                    anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
-                    readonly property bool running: (filePreview.manager !== null && filePreview.manager.previewLoading)
-                        || documentView.document.loading
-                    visible: running
-                    indeterminate: running
+                    id: previewTransfer
+                    objectName: "previewTransferProgress"
+                    readonly property var progress: filePreview.manager?.previewLoading ? filePreview.manager.transfer : null
+                    anchors.centerIn: parent
+                    width: Math.min(280, parent.width)
+                    visible: filePreview.visible && !!progress?.file && progress.totalKnown && progress.total > 0
+                    value: visible ? Math.min(1, progress.sent / progress.total) : 0
                     palette.highlight: filesPage.accentColour
+                    Accessible.name: qsTr("Downloading file")
+                }
+                BusyIndicator {
+                    objectName: "previewLoadingIndicator"
+                    anchors.centerIn: parent
+                    running: filePreview.visible && filePreview.loading && !previewTransfer.visible
+                    visible: running
+                    palette.highlight: filesPage.accentColour
+                    Accessible.name: qsTr("Loading file")
+                }
+                Flickable {
+                    id: previewRecovery
+                    anchors.fill: parent; clip: true
+                    visible: filePreview.showRecovery
+                    contentWidth: width
+                    contentHeight: Math.max(height, recoveryControls.implicitHeight)
+                    boundsBehavior: Flickable.StopAtBounds
+                    ScrollBar.vertical: PilonScrollBar {}
+                    PilonScrollMotion { view: previewRecovery }
+                    ColumnLayout {
+                        id: recoveryControls
+                        width: Math.max(0, Math.min(520, previewRecovery.width - 24))
+                        x: (previewRecovery.width - width) / 2
+                        y: Math.max(0, (previewRecovery.height - implicitHeight) / 2)
+                        spacing: 12
+                        Label {
+                            objectName: "previewFailureMessage"
+                            Layout.fillWidth: true
+                            color: filesPage.textColour; textFormat: Text.PlainText
+                            wrapMode: Text.WrapAnywhere; horizontalAlignment: Text.AlignHCenter
+                            text: filePreview.kind === "external"
+                                ? filePreview.manager?.previewText || qsTr("Preview unavailable for this file.")
+                                : filePreview.manager?.errorMessage || filesPage.fileWorkspace.deviceAvailabilityMessage(
+                                    filePreview.previewDeviceId(filePreview.manager?.previewEntry)) || qsTr("Could not open this file.")
+                        }
+                        PilonWrapButton {
+                            Layout.alignment: Qt.AlignHCenter
+                            visible: filePreview.kind === "external"
+                            text: qsTr("Open externally")
+                            onClicked: filePreview.manager?.openPreviewExternally()
+                        }
+                        PilonWrapButton {
+                            objectName: "previewRetryFile"
+                            Layout.alignment: Qt.AlignHCenter
+                            visible: !filePreview.kind && !!filePreview.manager?.previewEntry?.path
+                            enabled: filePreview.canRequestPreview
+                            text: qsTr("Retry")
+                            onClicked: filePreview.openEntry(filePreview.manager.previewEntry)
+                        }
+                    }
                 }
                 PilonErrorPopup {
                     objectName: "filePreviewError"
                     owner: previewContent
-                    message: !filePreview.visible ? "" : documentView.document.error || filePreview.manager?.errorMessage
-                        || ((filePreview.kind === "video" || filePreview.kind === "audio") ? previewPlayer.errorString : "")
-                    onDismissed: if (filePreview.manager?.errorMessage) filePreview.manager.dismissError()
+                    readonly property var shareError: filesPage.fileWorkspace.shareErrorOwner === filePreview.manager
+                        ? filesPage.fileWorkspace.shareManager : null
+                    message: !filePreview.visible ? "" : shareError?.errorMessage || (filePreview.showRecovery ? ""
+                        : documentView.document.error || filePreview.manager?.errorMessage || filePreview.mediaPlayer?.errorString
+                        || (filePreview.kind === "image" && previewImage.status === Image.Error ? qsTr("Could not display this image.") : ""))
+                    onDismissed: {
+                        if (shareError?.errorMessage) shareError.dismissError()
+                        else if (filePreview.manager?.errorMessage) filePreview.manager.dismissError()
+                    }
+                }
+            }
+            RowLayout {
+                objectName: "previewFileNavigation"
+                Layout.fillWidth: true
+                visible: (filePreview.entries.length > 1 || filePreview.hasMoreFiles) && filePreview.fileIndex >= 0
+                spacing: 8
+                PilonToolButton {
+                    objectName: "previewPreviousFile"
+                    Layout.preferredWidth: 48; Layout.preferredHeight: 44
+                    icon.source: "icons/chevron-left.svg"
+                    palette.buttonText: filesPage.textColour
+                    Accessible.name: qsTr("Previous file")
+                    ToolTip.visible: hovered; ToolTip.text: Accessible.name
+                    enabled: filePreview.canNavigate(-1)
+                    onClicked: filePreview.navigate(-1)
+                }
+                Item { Layout.fillWidth: true }
+                Label {
+                    objectName: "previewFilePosition"
+                    Layout.minimumWidth: 0
+                    elide: Text.ElideRight
+                    color: filesPage.mutedTextColour
+                    text: filePreview.hasMoreFiles ? qsTr("File %1").arg(filePreview.fileIndex + 1)
+                        : qsTr("%1 of %2").arg(filePreview.fileIndex + 1).arg(filePreview.entries.length)
+                }
+                Item { Layout.fillWidth: true }
+                PilonToolButton {
+                    objectName: "previewNextFile"
+                    Layout.preferredWidth: 48; Layout.preferredHeight: 44
+                    icon.source: "icons/chevron-right.svg"
+                    palette.buttonText: filesPage.textColour
+                    Accessible.name: qsTr("Next file")
+                    ToolTip.visible: hovered; ToolTip.text: Accessible.name
+                    enabled: filePreview.canNavigate(1)
+                    onClicked: filePreview.navigate(1)
                 }
             }
         }
-        MediaPlayer {
-            id: previewPlayer
-            source: filePreview.visible && (filePreview.kind === "video" || filePreview.kind === "audio") ? filePreview.manager.previewUrl : ""
-            videoOutput: previewVideo; audioOutput: AudioOutput {}
+        Loader {
+            id: mediaPlayerLoader
+            active: filePreview.visible && filePreview.mediaPreview
+            sourceComponent: MediaPlayer {
+                source: filePreview.manager?.previewUrl ?? ""
+                videoOutput: previewVideo; audioOutput: AudioOutput {}
+                // Qt decodes the first frame when a video is loaded in the paused state.
+                onSourceChanged: if (filePreview.kind === "video" && source.toString()) pause()
+            }
         }
     }
 
@@ -894,7 +1141,7 @@ Control {
                 anchors.centerIn: parent
                 width: split.orientation === Qt.Horizontal ? 2 : parent.width
                 height: split.orientation === Qt.Vertical ? 2 : parent.height
-                color: filesPage.withOpacity(filesPage.textColour,
+                color: Qt.alpha(filesPage.textColour,
                                               divider.SplitHandle.pressed ? 0.48 : 0.22)
             }
             HoverHandler {
@@ -985,6 +1232,7 @@ Control {
     Connections {
         target: filesPage.fileWorkspace
         function onDevicesChanged() { filesPage.syncSelectedDevices() }
+        function onTailnetDisconnectedChanged() { filesPage.syncSelectedDevices() }
         function onSshEnabledChanged() {
             if (filesPage.fileWorkspace.sshEnabled) return
             searchDevicesPopup.close()
@@ -992,7 +1240,7 @@ Control {
             for (const tile of filesPage.tiles) {
                 const manager = tile.remoteFiles
                 if (!manager.currentDeviceId && !manager.busy)
-                    manager.browse(manager.localDevice, manager.localDevice.username, filesPage.fileWorkspace.localHomePath)
+                    manager.browseLocalHome(filesPage.fileWorkspace.localHomePath, false)
             }
         }
         function onFilesChanged() { filesPage.refresh() }
@@ -1006,7 +1254,5 @@ Control {
         searchManager = fileManagerComponent.createObject(filesPage)
         watchPreview(searchManager)
         addTile(null)
-        if (Qt.platform.os === "android" && !remoteFiles.currentDeviceId)
-            showLocalFolder(fileWorkspace.localHomePath)
     }
 }

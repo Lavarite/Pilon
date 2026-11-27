@@ -21,8 +21,8 @@ to Main.qml, CMake, the registry or native services.
 The compiler requires Python 3 and Qt 6 `rcc`. From the repository root:
 
 ```sh
-python3 src/scripts/compile-addon.py examples/counter --output build/counter.piext
-python3 src/scripts/compile-addon.py examples/checklist --output build/checklist.piext
+python3 src/scripts/compile-addon.py examples/counter --output builds/examples/counter.piext
+python3 src/scripts/compile-addon.py examples/checklist --output builds/examples/checklist.piext
 ```
 
 Use `--rcc /path/to/rcc` if it is not found. The compiler includes every regular
@@ -56,7 +56,6 @@ contributions and the separate native storage-safety protocol.
 they do not contain native code supplied by the package.
 
 Use `addon.device` and the entry's allocated size for responsive layouts.
-Android Codex sign-in token polling remains unresolved.
 
 ## Verify and deliver
 

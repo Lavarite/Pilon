@@ -42,22 +42,29 @@ final class PilonWidgetData {
     static final class Snapshot {
         final JSONObject value;
         final long generation, validFrom, validThrough;
-        Snapshot(JSONObject value, long generation, long from, long through) {
+        private final JSONArray frames;
+        private final long[] frameStarts;
+        Snapshot(JSONObject value, long generation, long from, long through, long[] frameStarts) {
             this.value = value; this.generation = generation; validFrom = from; validThrough = through;
+            frames = value.optJSONArray("timeline");
+            this.frameStarts = frameStarts;
+        }
+        private int frameIndex(long now) {
+            int found = Arrays.binarySearch(frameStarts, now);
+            return found >= 0 ? found : -found - 2;
         }
         JSONObject frame(long now) {
             if (now < validFrom || now >= validThrough) return null;
-            JSONArray frames = value.optJSONArray("timeline"); JSONObject current = null;
-            for (int index = 0; index < frames.length(); ++index) {
-                JSONObject frame = frames.optJSONObject(index);
-                if (date(frame.opt("at")) > now) break;
-                current = frame;
-            }
-            return current;
+            return frames.optJSONObject(frameIndex(now));
+        }
+        long nextBoundary(long now) {
+            if (now >= validThrough) return Long.MAX_VALUE;
+            int next = frameIndex(now) + 1;
+            return next < frameStarts.length ? frameStarts[next] : validThrough;
         }
     }
     static boolean addonId(String value) {
-        return value != null && value.length() <= 128 && (Arrays.asList("files", "ssh", "assistant", "notes", "calendar", "git", "devices").contains(value)
+        return value != null && value.length() <= 128 && (Arrays.asList("files", "ssh", "assistant", "notes", "calendar", "devices").contains(value)
             || value.matches("[a-z][a-z0-9-]*(\\.[a-z][a-z0-9-]*)+"));
     }
     static boolean widgetId(String value) { return value != null && value.matches("[a-z][a-z0-9-]{0,63}"); }
@@ -114,11 +121,10 @@ final class PilonWidgetData {
         StringBuilder result = new StringBuilder(69); for (byte value : bytes) result.append(String.format(java.util.Locale.ROOT, "%02x", value & 255)); return result + ".json";
     }
     static int newlyPinnedId(int supplied, int[] before, int[] current) {
-        Set<Integer> old = new HashSet<>(), added = new HashSet<>();
-        for (int id : before) old.add(id);
-        for (int id : current) if (id > 0 && !old.contains(id)) added.add(id);
-        if (added.contains(supplied)) return supplied;
-        return added.size() == 1 ? added.iterator().next() : 0;
+        if (supplied <= 0) return 0;
+        for (int id : before) if (id == supplied) return 0;
+        for (int id : current) if (id == supplied) return supplied;
+        return 0;
     }
     private static JSONObject read(File root, String filename) throws Exception {
         String json = StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
@@ -165,6 +171,7 @@ final class PilonWidgetData {
                 }
             }
             JSONArray frames = value.optJSONArray("timeline"); require(frames != null && frames.length() >= 1 && frames.length() <= 64);
+            long[] frameStarts = new long[frames.length()];
             long previous = Long.MIN_VALUE; int total = 0;
             for (int index = 0; index < frames.length(); ++index) {
                 JSONObject frame = frames.optJSONObject(index);
@@ -185,6 +192,7 @@ final class PilonWidgetData {
                 if (frame.has("actionId")) require(frame.opt("actionId") instanceof String && id(frame.getString("actionId")) && actions.has(frame.getString("actionId")));
                 long at = date(frame.opt("at"));
                 require(at >= from && at < through && at > previous && (index != 0 || at == from) && text(frame.opt("title"), 256, false)); previous = at;
+                frameStarts[index] = at;
                 JSONArray rows = frame.optJSONArray("rows"); require(rows != null && rows.length() <= 64 && (total += rows.length()) <= 512);
                 Set<String> rowIds = new HashSet<>();
                 for (int rowIndex = 0; rowIndex < rows.length(); ++rowIndex) {
@@ -200,7 +208,7 @@ final class PilonWidgetData {
                     if (row.has("actionId")) require(row.opt("actionId") instanceof String && id(row.getString("actionId")) && actions.has(row.getString("actionId")));
                 }
             }
-            return new Snapshot(value, generation, from, through);
+            return new Snapshot(value, generation, from, through, frameStarts);
         } catch (Exception failure) { return null; }
     }
     static boolean validActionUri(String value) {

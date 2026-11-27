@@ -43,6 +43,7 @@ Control {
     property int displayedMessageCount: 0
     property real chatSidebarWidth: 240
     readonly property bool compactLayout: width < 560
+    readonly property real reservedHeaderHeight: compactLayout ? Math.max(modeButton.height, chatToggle.height) + 12 : 0
     property bool chatBrowserOpen: false
     onCompactLayoutChanged: chatBrowserOpen = false
     property var collapsedProjects: ({})
@@ -93,7 +94,7 @@ Control {
         return Qt.formatDateTime(date, date.getFullYear() === today.getFullYear() ? "d MMM, hh:mm" : "d MMM yyyy, hh:mm")
     }
     function createChat(projectId) {
-        if (page.assistant.selectProject(projectId)) { page.assistant.clear(); page.chatBrowserOpen = false }
+        if (page.assistant.selectProject(projectId)) page.chatBrowserOpen = false
     }
     function editInstructions(projectId) {
         const project = (page.assistant.projects || []).find(p => p.id === projectId)
@@ -138,12 +139,13 @@ Control {
             const entry = source[sourceIndex]
             const messageId = entry.messageId || "message:" + id + ":" + sourceIndex
             if (entry.role === "tool" || entry.role === "thinking") {
-                activity[entry.id] = entry
+                const activityEntry = Object.assign({}, entry, {messageId: messageId})
+                activity[messageId] = activityEntry
                 const previous = messages[messages.length - 1]
                 if (previous && previous.role === "activity")
-                    previous.entries.push(entry)
+                    previous.entries.push(activityEntry)
                 else
-                    messages.push({role: "activity", id: entry.id, messageId: messageId, entries: [entry]})
+                    messages.push({role: "activity", id: entry.id, messageId: messageId, entries: [activityEntry]})
             } else {
                 messages.push(Object.assign({},entry,{messageId:messageId}))
             }
@@ -168,7 +170,8 @@ Control {
                 if (entry.name === "read_files") { try { fileCount = JSON.parse(entry.input).files.length } catch (_) { fileCount = 1 } }
                 // The collapsed model carries only its summary. Large tool
                 // bodies stay in memory and are read when a group is opened.
-                const value = JSON.stringify({id: entry.id, role: entry.role, name: entry.name, state: entry.state, elapsedMs: entry.elapsedMs, fileCount: fileCount})
+                const value = JSON.stringify({id: entry.id, messageId: entry.messageId, role: entry.role,
+                    name: entry.name, state: entry.state, elapsedMs: entry.elapsedMs, fileCount: fileCount})
                 if (j >= rows.count) rows.append({encoded: value})
                 else if (rows.get(j).encoded !== value) rows.setProperty(j, "encoded", value)
             }
@@ -246,6 +249,7 @@ Control {
             ? page.attachmentWarnings.filter(w => w.length > 0).join("\n") : ""
     }
     function sendMessage() {
+        if (assistant.mediaCancelling) return
         if (assistant.recording)
             assistant.stopRecording()
         if (assistant.busy || attachmentsBlocked
@@ -268,7 +272,8 @@ Control {
         required property color foreground
         required property color mutedColour
         readonly property bool thinking: entry.role === "thinking"
-        readonly property bool expanded: page.expandedTools[entry.id] === true
+        readonly property string expansionKey: "row:" + entry.messageId
+        readonly property bool expanded: page.expandedTools[expansionKey] === true
         spacing: 8
         ActionButton {
             id: activityToggle
@@ -301,7 +306,7 @@ Control {
             onClicked: {
                 conversation.followTail = false
                 const expanded = Object.assign({}, page.expandedTools)
-                expanded[activity.entry.id] = !activity.expanded
+                expanded[activity.expansionKey] = !activity.expanded
                 page.expandedTools = expanded
             }
         }
@@ -360,6 +365,7 @@ Control {
         textColour: page.textColour
         mutedTextColour: page.mutedTextColour
         warningColour: page.warningColour
+        onPlaybackRequested: if (page.assistant.speaking) page.assistant.stopSpeech()
     }
 
     component HeaderChoice: PilonComboBox {
@@ -472,14 +478,34 @@ Control {
         }
     }
 
-    Label {
-        id: modelWarning
-        anchors.left: parent.left; anchors.right: parent.right
-        anchors.top: parent.top
-        text: page.assistant.modelWarning
-        visible: text.length > 0
-        height: visible ? implicitHeight : 0
-        color: page.warningColour; wrapMode: Text.Wrap
+    ActionButton {
+        id: chatToggle
+        objectName: "assistantChatsToggle"
+        anchors.top: parent.top; anchors.left: parent.left
+        visible: page.compactLayout
+        text: qsTr("Chats")
+        icon.source: "icons/chat-bubble-left-right.svg"
+        display: AbstractButton.IconOnly
+        Accessible.expanded: page.chatBrowserOpen
+        onClicked: page.chatBrowserOpen = !page.chatBrowserOpen
+    }
+    ActionButton {
+        id: modeButton
+        parent: page.compactLayout ? page : composerModeSlot
+        x: parent.width - width
+        y: page.compactLayout ? 0 : (parent.height - height) / 2
+        objectName: "assistantApprovalMode"
+        readonly property string approveLabel: qsTr("Approve")
+        readonly property string yoloLabel: qsTr("YOLO")
+        width: Math.max(38, Math.ceil(Math.max(modeMetrics.advanceWidth(approveLabel),
+            modeMetrics.advanceWidth(yoloLabel))) + leftPadding + rightPadding)
+        text: page.assistant.yolo ? yoloLabel : approveLabel
+        FontMetrics { id: modeMetrics; font: modeButton.font }
+        warning: page.assistant.yolo
+        enabled: !page.assistant.busy || page.assistant.pendingAction.length > 0
+        onClicked: page.assistant.yolo = !page.assistant.yolo
+        ToolTip.visible: hovered
+        ToolTip.text: qsTr("YOLO runs commands and transfers automatically. Approve asks before running them. Neither mode limits the number of tool calls.")
     }
 
     Rectangle {
@@ -488,9 +514,9 @@ Control {
         visible: !page.compactLayout || page.chatBrowserOpen
         z: page.compactLayout ? 5 : 0
         anchors.left: parent.left
-        anchors.top: modelWarning.bottom
+        anchors.top: parent.top
         anchors.bottom: parent.bottom
-        anchors.topMargin: modelWarning.visible ? 12 : 0
+        anchors.topMargin: page.compactLayout ? page.reservedHeaderHeight : 0
         width: page.compactLayout ? Math.min(320, page.width) : Math.min(page.chatSidebarWidth, page.width * .5)
         radius: 12
         color: page.compactLayout ? page.secondaryColour : page.alpha(page.secondaryColour, 0.42)
@@ -781,16 +807,6 @@ Control {
                 renameChatPopup.open()
             }
         }
-        HeaderChoice {
-            objectName: "moveChatProject"
-            width: chatContextMenu.availableWidth
-            model: [qsTr("Chats")].concat((page.assistant.projects || []).map(project => project.name))
-            displayText: qsTr("Move to…")
-            enabled: !page.assistant.busy && !page.assistant.recording
-            onActivated: {
-                if (page.assistant.moveChatToProject(chatContextMenu.chatId, currentIndex === 0 ? "" : page.assistant.projects[currentIndex - 1].id)) chatContextMenu.close()
-            }
-        }
         PilonMenuItem {
             objectName: "deleteChatAction"
             text: qsTr("Delete")
@@ -883,15 +899,33 @@ Control {
         anchors.left: page.compactLayout ? parent.left : chatBrowser.right
         anchors.leftMargin: page.compactLayout ? 0 : 12
         anchors.right: parent.right
-        anchors.top: modelWarning.bottom
-        anchors.topMargin: modelWarning.visible ? 12 : 0
+        anchors.top: parent.top
+        anchors.topMargin: page.reservedHeaderHeight
         anchors.bottom: calendarPrompt.visible ? calendarPrompt.top : composer.top
         anchors.bottomMargin: 12
+        Item {
+            id: warningArea
+            anchors.fill: parent
+            // Keep the warning above the composer even when the keyboard leaves little space.
+            visible: !page.chatBrowserOpen && !page.assistant.error
+                && height >= modelWarningPopup.height + PilonStyle.pageMargin
+            PilonErrorPopup {
+                id: modelWarningPopup
+                objectName: "assistantModelWarning"
+                owner: warningArea
+                message: page.assistant.modelWarning
+                width: Math.max(0, Math.min(480, warningArea.width - 2 * PilonStyle.pageMargin))
+                x: parent ? page.mapToItem(parent, conversationPane.x + (warningArea.width - width) / 2, 0).x : 0
+                y: parent ? page.mapToItem(parent, 0, conversationPane.y + PilonStyle.pageMargin).y : 0
+            }
+        }
         ListView {
             id: conversation
             objectName: "assistantConversation"
             anchors.fill: parent
             anchors.margins: 16
+            anchors.topMargin: Math.min(16, Math.max(0, (parent.height - 32) / 2))
+            anchors.bottomMargin: anchors.topMargin
             clip: true
             spacing: 12
             model: chatMessages
@@ -974,6 +1008,8 @@ Control {
                 onHeightChanged: if (index === conversation.count - 1) conversation.scheduleTail()
                 readonly property bool user: modelData.role === "user"
                 readonly property bool activity: modelData.role === "activity"
+                readonly property string activityKey: "group:" + modelData.messageId
+                readonly property bool activityExpanded: page.expandedTools[activityKey] === true
 
                 Rectangle {
                     id: bubble
@@ -1011,14 +1047,14 @@ Control {
                                 spacing: 8
                                 ControlsImpl.ColorImage {
                                     width: 24; height: 24; source: "icons/chevron-right.svg"; color: bubble.foreground
-                                    rotation: page.expandedTools["group:" + message.modelData.id] ? 90 : 0
+                                    rotation: message.activityExpanded ? 90 : 0
                                 }
                                 Label { text: page.activitySummary(message.entries); color: bubble.foreground }
                             }
                             onPressed: conversation.followTail = false
                             onClicked: {
                                 const expanded = Object.assign({}, page.expandedTools)
-                                const key = "group:" + message.modelData.id
+                                const key = message.activityKey
                                 expanded[key] = !expanded[key]; page.expandedTools = expanded
                                 if (expanded[key]) Qt.callLater(function() {
                                     conversation.forceLayout()
@@ -1027,14 +1063,15 @@ Control {
                             }
                         }
                         Repeater {
-                            model: page.expandedTools["group:" + message.modelData.id] === true ? message.entries : null
+                            model: message.activityExpanded ? message.entries : null
                             delegate: ActivityRow {
                                 required property string encoded
+                                readonly property var summary: JSON.parse(encoded)
                                 width: messageContent.width
-                                entry: page.activityEntries[JSON.parse(encoded).id] || JSON.parse(encoded)
+                                entry: page.activityEntries[summary.messageId] || summary
                                 foreground: bubble.foreground
                                 mutedColour: bubble.mutedColour
-                                visible: page.expandedTools["group:" + message.modelData.id] === true
+                                visible: message.activityExpanded
                             }
                         }
                         ActionButton {
@@ -1097,14 +1134,52 @@ Control {
                             visible: !message.activity && (message.modelData.attachments || []).length > 0
                             Repeater {
                                 model: message.modelData.attachments || []
-                                delegate: AttachmentCard {
+                                delegate: Column {
                                     required property var modelData
-                                    attachment: modelData
-                                    textColour: bubble.foreground
-                                    mutedTextColour: bubble.mutedColour
+                                    id: submittedAttachment
+                                    width: Math.min(280, messageContent.width)
+                                    spacing: 4
+                                    AttachmentCard {
+                                        attachment: submittedAttachment.modelData
+                                        textColour: bubble.foreground
+                                        mutedTextColour: bubble.mutedColour
+                                    }
+                                    Label {
+                                        objectName: "audioTranscript_" + (submittedAttachment.modelData.id || "")
+                                        width: parent.width
+                                        visible: text.length > 0
+                                        text: submittedAttachment.modelData.transcript
+                                            || ((page.assistant.transcribingAttachments || []).includes(submittedAttachment.modelData.id)
+                                                ? qsTr("Transcribing…") : "")
+                                        color: bubble.mutedColour
+                                        textFormat: Text.PlainText
+                                        wrapMode: Text.Wrap
+                                    }
                                 }
                             }
                         }
+                    }
+                }
+            }
+            footer: Item {
+                width: conversation.width
+                height: transcriptionBubble.visible ? transcriptionBubble.height : 0
+                onHeightChanged: conversation.scheduleTail()
+                Rectangle {
+                    id: transcriptionBubble
+                    objectName: "assistantTranscribingBubble"
+                    visible: page.assistant.transcribing === true
+                    width: Math.min(parent.width, transcriptionLabel.implicitWidth + 24)
+                    height: transcriptionLabel.implicitHeight + 24
+                    radius: 12
+                    color: page.replySurface
+                    Label {
+                        id: transcriptionLabel
+                        anchors.fill: parent
+                        anchors.margins: 12
+                        text: page.assistant.transcribingEarlierAudio ? qsTr("Transcribing earlier audio…") : qsTr("Transcribing…")
+                        color: page.readableText(page.mutedTextColour, transcriptionBubble.color)
+                        wrapMode: Text.Wrap
                     }
                 }
             }
@@ -1127,11 +1202,13 @@ Control {
     Rectangle {
         id: composer
         objectName: "assistantComposer"
+        readonly property real availablePageHeight: Math.max(0, page.height - page.reservedHeaderHeight)
+        readonly property real verticalPadding: Math.min(12, Math.max(0, (availablePageHeight - composerActions.implicitHeight) / 2))
         anchors.left: page.compactLayout ? parent.left : chatBrowser.right
         anchors.leftMargin: page.compactLayout ? 0 : 12
         anchors.right: parent.right
         anchors.bottom: parent.bottom
-        height: Math.min(composerContent.implicitHeight + 24, Math.max(0, page.height))
+        height: Math.min(composerContent.implicitHeight + 2 * verticalPadding, availablePageHeight)
         radius: 14
         color: page.alpha(page.secondaryColour, 0.58)
         border.color: page.alpha(page.textColour, 0.18)
@@ -1141,6 +1218,8 @@ Control {
             objectName: "assistantComposerScroll"
             anchors.fill: parent
             anchors.margins: 12
+            anchors.topMargin: composer.verticalPadding
+            anchors.bottomMargin: composer.verticalPadding
             contentWidth: availableWidth
             clip: true
             ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
@@ -1156,7 +1235,7 @@ Control {
                     width: parent.width
                     visible: text.length > 0
                     text: page.assistant.recording ? qsTr("Recording…")
-                        : page.assistant.speaking && page.currentChatWorking ? qsTr("Generating speech…")
+                        : page.assistant.generatingSpeech && page.currentChatWorking ? qsTr("Generating speech…")
                         : ""
                     color: page.mutedTextColour
                     wrapMode: Text.Wrap
@@ -1168,7 +1247,7 @@ Control {
                     objectName: "assistantAttachments"
                     width: parent.width
                     height: Math.min(attachmentContents.implicitHeight, Math.max(38, Math.min(180,
-                        page.height * .75 - composerActions.implicitHeight - messageViewport.height - 24
+                        composer.availablePageHeight * .75 - composerActions.implicitHeight - messageViewport.height - 24
                         - composerContent.spacing * (2 + Number(composerStatus.visible) + Number(projectIndicator.visible))
                         - (composerStatus.visible ? composerStatus.height : 0) - (projectIndicator.visible ? projectIndicator.height : 0))))
                     visible: page.assistant.attachments.length > 0
@@ -1240,55 +1319,62 @@ Control {
                     id: composerActions
                     objectName: "assistantComposerActions"
                     width: parent.width
-                    implicitHeight: compact ? composerTools.implicitHeight + 8 + composerSendRow.height
-                        : Math.max(composerTools.implicitHeight, composerSendRow.height)
-                    readonly property bool compact: width < modeButton.width + 4 * 38 + 6 * 8 + 120 + (chatToggle.visible ? 46 : 0)
-                    Flow {
+                    implicitHeight: Math.max(iconSize, modelButton.implicitHeight, page.compactLayout ? 0 : modeButton.height)
+                    readonly property int actionCount: 3 + Number(voiceButton.visible) + Number(recordButton.visible)
+                    readonly property int gapCount: actionCount - (page.compactLayout ? 1 : 0)
+                    readonly property real iconBudget: width - (page.compactLayout ? 0 : modeButton.width)
+                    readonly property real modelReserve: page.compactLayout || iconBudget < modelButton.minimumTextWidth + 24 * (actionCount - 1)
+                        ? 0 : Math.max(0, modelButton.minimumTextWidth - 24)
+                    readonly property real actionGap: Math.min(8, Math.max(0, (iconBudget - modelReserve - 24 * actionCount) / gapCount))
+                    readonly property real iconSize: Math.max(24, Math.min(38,
+                        Math.floor((iconBudget - modelReserve - actionGap * gapCount) / actionCount)))
+                    component ComposerIcon: ActionButton {
+                        readonly property real glyphSize: Math.min(24, width - 8)
+                        width: composerActions.iconSize
+                        height: width
+                        anchors.verticalCenter: parent.verticalCenter
+                        display: AbstractButton.IconOnly
+                        icon.width: glyphSize
+                        icon.height: glyphSize
+                        leftPadding: (width - glyphSize) / 2
+                        rightPadding: leftPadding
+                        topPadding: leftPadding
+                        bottomPadding: leftPadding
+                    }
+                    Row {
                         id: composerTools
-                        width: composerActions.compact ? parent.width : modeButton.width + 3 * 38 + 3 * 8 + (chatToggle.visible ? 46 : 0)
-                        spacing: 8
-                        ActionButton {
-                            id: chatToggle
-                            objectName: "assistantChatsToggle"
-                            visible: page.compactLayout
-                            text: qsTr("Chats"); icon.source: "icons/chat-bubble-left-right.svg"
-                            display: AbstractButton.IconOnly
-                            onClicked: page.chatBrowserOpen = !page.chatBrowserOpen
+                        height: parent.height
+                        spacing: composerActions.actionGap
+                        Item {
+                            id: composerModeSlot
+                            visible: !page.compactLayout
+                            width: modeButton.width
+                            height: parent.height
                         }
-                        ActionButton {
-                            id: modeButton
-                            objectName: "assistantApprovalMode"
-                            width: Math.max(38, implicitContentWidth + leftPadding + rightPadding)
-                            text: page.assistant.yolo ? qsTr("YOLO") : qsTr("Approve")
-                            warning: page.assistant.yolo
-                            enabled: !page.assistant.busy || page.assistant.pendingAction.length > 0
-                            onClicked: page.assistant.yolo = !page.assistant.yolo
-                            ToolTip.visible: hovered
-                            ToolTip.text: qsTr("YOLO runs commands and transfers automatically. Approve asks before running them. Neither mode limits the number of tool calls.")
-                        }
-                        ActionButton {
-                            id: voiceButton
-                            objectName: "assistantVoiceMode"
-                            text: qsTr("Spoken answers")
-                            icon.source: "icons/speaker-wave.svg"
-                            display: AbstractButton.IconOnly
-                            accented: page.assistant.voiceMode
-                            onClicked: page.assistant.voiceMode = !page.assistant.voiceMode
-                        }
-                        ActionButton {
+                        ComposerIcon {
                             objectName: "assistantAttach"
                             text: qsTr("Attach files")
-                            icon.source: "icons/paper-clip.svg"
-                            display: AbstractButton.IconOnly
+                            icon.source: "icons/plus.svg"
                             enabled: !page.assistant.busy && !page.assistant.recording
                             onClicked: if (page.fileWorkspace) page.fileWorkspace.selectFiles(qsTr("Attach files"), files => page.assistant.addAttachments(files))
                         }
-                        ActionButton {
+                        ComposerIcon {
+                            id: voiceButton
+                            objectName: "assistantVoiceMode"
+                            visible: page.assistant.speechOutputAvailable === true
+                            text: qsTr("Spoken answers")
+                            icon.source: "icons/speaker-wave.svg"
+                            accented: page.assistant.voiceMode
+                            onClicked: page.assistant.voiceMode = !page.assistant.voiceMode
+                        }
+                        ComposerIcon {
+                            id: recordButton
                             objectName: "assistantRecord"
+                            visible: page.assistant.recording || page.assistant.speechInputAvailable === true
+                                || page.assistant.nativeAudioInput === true
                             property bool stoppingRecording: false
                             text: page.assistant.recording ? qsTr("Stop recording") : qsTr("Record audio")
                             icon.source: page.assistant.recording ? "icons/stop.svg" : "icons/microphone.svg"
-                            display: AbstractButton.IconOnly
                             warning: page.assistant.recording
                             enabled: !page.assistant.busy
                             onPressed: stoppingRecording = page.assistant.recording
@@ -1299,13 +1385,16 @@ Control {
                         }
                     }
                     Row {
-                        id: composerSendRow
-                        x: composerActions.compact ? 0 : composerTools.width + 8
-                        y: composerActions.compact ? composerTools.height + 8 : 0
-                        width: parent.width - x; height: Math.max(modelButton.implicitHeight, sendButton.implicitHeight); spacing: 8
-                        Item { width: Math.max(0, parent.width - modelButton.width - 38 - 16); height: 1; visible: width > 0 }
+                        anchors.right: parent.right
+                        height: parent.height
+                        spacing: composerActions.actionGap
                         AssistantModelButton {
                             id: modelButton
+                            anchors.verticalCenter: parent.verticalCenter
+                            labelSpace: Math.max(0,
+                                composerActions.width - composerTools.width - sendButton.width - 2 * composerActions.actionGap)
+                            width: Math.min(implicitWidth, labelSpace)
+                            gaugeSize: composerActions.iconSize
                             assistant: page.assistant
                             popupSurface: page
                             secondaryColour: page.secondaryColour
@@ -1313,13 +1402,13 @@ Control {
                             mutedTextColour: page.mutedTextColour
                             accentColour: page.accentColour
                         }
-                        ActionButton {
+                        ComposerIcon {
                             id: sendButton
                             objectName: "assistantSend"
                             text: page.currentChatWorking ? qsTr("Stop") : qsTr("Send")
                             icon.source: page.currentChatWorking ? "icons/stop.svg" : "icons/arrow-up.svg"
-                            enabled: page.currentChatWorking || (!page.assistant.busy && !page.attachmentsBlocked)
-                            display: AbstractButton.IconOnly
+                            enabled: page.currentChatWorking || (!page.assistant.busy && !page.assistant.mediaCancelling
+                                && !page.attachmentsBlocked)
                             accented: true
                             onClicked: {
                                 if (page.assistant.recording)

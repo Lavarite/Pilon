@@ -5,12 +5,14 @@ pilon_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)"
 if [[ "${PILON_ENV_LOADED:-0}" != 1 ]]; then
     exec python3 "$pilon_root/src/scripts/environment.py" bash "${BASH_SOURCE[0]}" "$@"
 fi
+pilon_dev="${PILON_DEV_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/pilon-dev}"
+export PILON_DEV_DIR="$pilon_dev"
 pilon_sdk="${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}"
 pilon_ndk="${ANDROID_NDK_ROOT:-$pilon_sdk/ndk/27.2.12479018}"
 pilon_jdk="${JAVA_HOME:-$HOME/Android/jdk-21}"
 pilon_qt="${PILON_ANDROID_QT:-$HOME/Qt/6.12.0/android_arm64_v8a}"
 pilon_host_qt="${QT_HOST_PATH:-$HOME/Qt/6.12.0/gcc_64}"
-pilon_build="${PILON_ANDROID_BUILD_DIR:-$pilon_root/build/android/app}"
+pilon_build="${PILON_ANDROID_BUILD_DIR:-$pilon_dev/builds/work/android/app}"
 pilon_mode="${PILON_ANDROID_BUILD_TYPE:-Debug}"
 case "$pilon_mode" in
     Debug|Release) ;;
@@ -32,6 +34,7 @@ done
 [[ "$("$pilon_qt/bin/qmake" -query QT_VERSION)" == "$("$pilon_host_qt/bin/qmake" -query QT_VERSION)" ]] || {
     printf 'Host and Android Qt versions must match.\n' >&2; exit 1;
 }
+
 if [[ "$pilon_mode" == Release ]]; then
     set +x
     for pilon_name in PILON_ANDROID_KEYSTORE PILON_ANDROID_KEY_ALIAS PILON_ANDROID_KEYSTORE_PASSWORD PILON_ANDROID_KEY_PASSWORD; do
@@ -74,22 +77,23 @@ if [[ "${PILON_BUILD_APP_ONLY:-0}" != 1 ]]; then
     bash "$pilon_root/src/scripts/android/build-pdfium.sh"
     bash "$pilon_root/src/scripts/android/build-office.sh"
     bash "$pilon_root/addons/assistant/scripts/android/build-media-runtime.sh"
-    bash "$pilon_root/addons/assistant/scripts/android/build-breeze.sh"
-    bash "$pilon_root/addons/git/scripts/android/build-git-providers.sh"
+    bash "$pilon_root/addons/assistant/scripts/android/build-speech.sh"
     bash "$pilon_root/addons/devices/scripts/android/build-tailscale.sh"
     bash "$pilon_root/src/scripts/android/build-qt-platform.sh"
     bash "$pilon_root/addons/assistant/scripts/android/build-agent-runtime.sh"
 fi
 "$pilon_qt/bin/qt-cmake" -S "$pilon_root/src" -B "$pilon_build" -GNinja \
-    -DCMAKE_BUILD_TYPE=Release -DQT_ANDROID_DEPLOYMENT_TYPE="$pilon_mode" -DPILON_BUILD_TESTS=OFF \
+    -DCMAKE_BUILD_TYPE=Release -DQT_ANDROID_DEPLOYMENT_TYPE="$pilon_mode" -DPILON_BUILD_TESTS=OFF -DPILON_DEV_DIR="$pilon_dev" \
     -DQT_HOST_PATH="$pilon_host_qt" -DANDROID_SDK_ROOT="$pilon_sdk" -DANDROID_NDK_ROOT="$pilon_ndk"
+# Qt's APK rule can miss changes to the staging directory when only the manifest or assets changed.
+rm -f -- "$pilon_build/android-build/pilon.apk"
 cmake --build "$pilon_build" --target apk --parallel "${PILON_BUILD_JOBS:-4}"
 if [[ "$pilon_mode" == Release ]]; then
     pilon_unsigned="$pilon_build/android-build/build/outputs/apk/release/android-build-release-unsigned.apk"
     pilon_version="$(sed -n 's/^project(Pilon VERSION \([0-9.]*\) .*/\1/p' "$pilon_root/src/CMakeLists.txt")"
-    pilon_apk="$pilon_root/builds/android/pilon-$pilon_version-android-arm64-v8a.apk"
+    pilon_apk="$pilon_dev/builds/android/pilon-$pilon_version-android-arm64-v8a.apk"
     mkdir -p "$(dirname "$pilon_apk")"
-    pilon_aligned="$(mktemp "$pilon_root/builds/android/.aligned.XXXXXX.apk")"
+    pilon_aligned="$(mktemp "$pilon_dev/builds/android/.aligned.XXXXXX.apk")"
     trap 'rm -f -- "$pilon_aligned" "$pilon_apk.new"' EXIT
     "$pilon_sdk/build-tools/37.0.0/zipalign" -f -P 16 4 "$pilon_unsigned" "$pilon_aligned"
     "$pilon_sdk/build-tools/37.0.0/apksigner" sign --ks "$PILON_ANDROID_KEYSTORE" \

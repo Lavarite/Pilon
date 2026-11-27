@@ -4,9 +4,9 @@ pilon_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)"
 if [[ "${PILON_ENV_LOADED:-0}" != 1 ]]; then
     exec python3 "$pilon_root/src/scripts/environment.py" bash "${BASH_SOURCE[0]}" "$@"
 fi
-pilon_python="$pilon_root/runtime/handwriting/bin/python"
+pilon_python="$PILON_RUNTIME_DIR/handwriting/bin/python"
 if [[ ! -x "$pilon_python" ]]; then
-    uv venv --python 3.12 "$pilon_root/runtime/handwriting"
+    uv venv --python 3.12 "$PILON_RUNTIME_DIR/handwriting"
 fi
 # Runtime wheels are local to each device; never install competing ORT wheels
 # into one environment (they all provide the same Python module).

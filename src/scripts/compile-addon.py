@@ -11,7 +11,7 @@ import tempfile
 import xml.etree.ElementTree as ET
 from urllib.parse import urlsplit
 
-BUILTINS = {"files", "ssh", "assistant", "notes", "calendar", "git", "devices"}
+BUILTINS = {"files", "ssh", "assistant", "notes", "calendar", "devices"}
 PACKAGE_ID = re.compile(r"[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)+")
 SECTION_ID = re.compile(r"[a-z][a-z0-9-]{0,63}")
 
@@ -172,7 +172,12 @@ def main():
         for candidate in candidates:
             if not candidate or not pathlib.Path(candidate).is_file():
                 continue
-            version = subprocess.run([candidate, "--version"], text=True, capture_output=True, check=True)
+            try:
+                version = subprocess.run([candidate, "--version"], text=True, capture_output=True, check=True)
+            except (OSError, subprocess.CalledProcessError):
+                if args.rcc:
+                    raise
+                continue
             if re.search(r"\b6\.", version.stdout + version.stderr):
                 rcc = candidate
                 break

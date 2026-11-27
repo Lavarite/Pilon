@@ -78,9 +78,13 @@ def install(executable):
 
 
 if __name__ == '__main__':
-    from environment import load_environment
+    from environment import installation_root, load_environment
     load_environment()
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--executable', type=Path, default=Path(__file__).resolve().parents[2] / 'builds/pilon')
+    portable = Path(__file__).resolve().parents[2]
+    candidates = [portable / '.bin/pilon', portable / 'bin/pilon',
+                  installation_root() / '.bin/pilon', installation_root() / 'bin/pilon']
+    default = next((candidate for candidate in candidates if candidate.is_file()), candidates[2])
+    parser.add_argument('--executable', type=Path, default=default)
     args = parser.parse_args()
     print(f'Installed launcher: {install(args.executable)}')

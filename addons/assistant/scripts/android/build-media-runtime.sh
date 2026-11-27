@@ -5,9 +5,10 @@ pilon_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 if [[ "${PILON_ENV_LOADED:-0}" != 1 ]]; then
     exec python3 "$pilon_root/src/scripts/environment.py" bash "${BASH_SOURCE[0]}" "$@"
 fi
-pilon_work="$pilon_root/build/android/media-runtime"
-pilon_output="$pilon_root/builds/android/runtime/arm64-v8a"
-pilon_licenses="$pilon_root/builds/android/licenses/media"
+pilon_dev="${PILON_DEV_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/pilon-dev}"
+pilon_work="$pilon_dev/dev-deps/android/media-runtime"
+pilon_output="$pilon_dev/builds/android/runtime/arm64-v8a"
+pilon_licenses="$pilon_dev/builds/android/licenses/media"
 pilon_ndk="${ANDROID_NDK_ROOT:-${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}/ndk/27.2.12479018}"
 pilon_llvm="$pilon_ndk/toolchains/llvm/prebuilt/linux-x86_64/bin"
 [[ -x "$pilon_llvm/aarch64-linux-android28-clang" ]] || { printf 'Missing Android NDK compiler: %s\n' "$pilon_llvm" >&2; exit 1; }

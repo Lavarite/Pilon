@@ -4,15 +4,16 @@ pilon_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)"
 if [[ "${PILON_ENV_LOADED:-0}" != 1 ]]; then
     exec python3 "$pilon_root/src/scripts/environment.py" bash "${BASH_SOURCE[0]}" "$@"
 fi
-pilon_work="$pilon_root/build/android/qt-platform"
+pilon_dev="${PILON_DEV_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/pilon-dev}"
+pilon_work="$pilon_dev/dev-deps/android/qt-platform"
 pilon_kit="${PILON_ANDROID_QT:-$HOME/Qt/6.12.0/android_arm64_v8a}"
 pilon_host="${QT_HOST_PATH:-$HOME/Qt/6.12.0/gcc_64}"
 pilon_sdk="${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}"
 pilon_ndk="${ANDROID_NDK_ROOT:-$pilon_sdk/ndk/27.2.12479018}"
 pilon_jdk="${JAVA_HOME:-$HOME/Android/jdk-21}"
 pilon_base=025bdad181de241e81bf853c8a2d7bf3d19261a9
-pilon_output="$pilon_root/builds/android/qt-platform"
-pilon_licenses="$pilon_root/builds/android/licenses/qt-platform"
+pilon_output="$pilon_dev/builds/android/qt-platform"
+pilon_licenses="$pilon_dev/builds/android/licenses/qt-platform"
 [[ "$("$pilon_kit/bin/qmake" -query QT_VERSION)" == 6.12.0 ]]
 [[ "$("$pilon_host/bin/qmake" -query QT_VERSION)" == 6.12.0 ]]
 mkdir -p "$pilon_work" "$pilon_output/plugins" "$pilon_licenses"
@@ -71,10 +72,10 @@ python3 "$pilon_root/src/tests/platform/android/android_qt_texture_resize_tests.
     -DANDROID_NDK_ROOT="$pilon_ndk" -DANDROID_PLATFORM=android-28 -DANDROID_ABI=arm64-v8a \
     -DPILON_QT_BASE_SOURCE="$pilon_work/source"
 cmake --build "$pilon_work/reproducible-build" --parallel "${PILON_BUILD_JOBS:-4}"
-python3 - "$pilon_root" "$pilon_kit" "$pilon_jdk" "$pilon_sdk" "$pilon_input" <<'PY'
+python3 - "$pilon_root" "$pilon_kit" "$pilon_jdk" "$pilon_sdk" "$pilon_input" "$pilon_dev" <<'PY'
 from pathlib import Path
 import hashlib,json,os,shutil,struct,subprocess,sys,zipfile
-root,kit,jdk,sdk=map(Path,sys.argv[1:5]);work=root/'build/android/qt-platform';out=root/'builds/android/qt-platform';notices=root/'builds/android/licenses/qt-platform'
+root,kit,jdk,sdk=map(Path,sys.argv[1:5]);dev=Path(sys.argv[6]);work=dev/'dev-deps/android/qt-platform';out=dev/'builds/android/qt-platform';notices=dev/'builds/android/licenses/qt-platform'
 classes=work/'reproducible-java'
 if classes.exists():
  assert classes.name=='reproducible-java' and classes.parent.name=='qt-platform'

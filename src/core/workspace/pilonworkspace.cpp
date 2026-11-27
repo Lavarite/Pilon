@@ -1,9 +1,12 @@
 #include "pilonworkspace.h"
 #include <QCoreApplication>
+#include <QCryptographicHash>
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QRegularExpression>
 #include <QSaveFile>
 #include <QScopeGuard>
@@ -13,7 +16,15 @@
 #include <QTemporaryFile>
 #include <QUuid>
 #include <QVariantMap>
+#include <algorithm>
+#include <cerrno>
 #include <filesystem>
+#if defined(Q_OS_LINUX) || defined(Q_OS_ANDROID)
+#include <fcntl.h>
+#include <linux/fs.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+#endif
 #ifdef Q_OS_ANDROID
 #include <QJniObject>
 #include "../../platform/android/androidstorage.h"
@@ -62,7 +73,7 @@ bool safePath(const QString &path, QString *error) {
             return fail(error, QObject::tr("The storage path contains a symbolic link: %1").arg(part));
     return true;
 }
-bool gitAncestor(QString path) {
+bool insideCheckout(QString path) {
     if (!QFileInfo(path).isDir())
         path = QFileInfo(path).absolutePath();
     while (true) {
@@ -129,8 +140,8 @@ bool stageSource(const Source &source, const QString &stage, const QString &dest
             QObject::tr("The new Pilon folder cannot be inside the data being copied: %1").arg(source.path));
     if (!safePath(source.path, error))
         return false;
-    if (source.managedLibrary && gitAncestor(source.path))
-        return fail(error, QObject::tr("The folder belongs to a Git worktree. Keep its current location or "
+    if (source.managedLibrary && insideCheckout(source.path))
+        return fail(error, QObject::tr("The folder is inside a repository. Keep its current location or "
                                        "move the repository separately: %1")
                                .arg(source.path));
     QList<QPair<QString, QString>> pending{{source.path, source.relative}};
@@ -143,7 +154,7 @@ bool stageSource(const Source &source, const QString &stage, const QString &dest
                                    .arg(path));
         if (info.fileName() == ".git")
             return fail(error,
-                        QObject::tr("Move Git repositories separately before changing the Pilon folder: %1")
+                        QObject::tr("Move repositories separately before changing the Pilon folder: %1")
                             .arg(path));
         if (info.isDir()) {
             if (!QDir().mkpath(stage + '/' + relative))
@@ -157,8 +168,8 @@ bool stageSource(const Source &source, const QString &stage, const QString &dest
             }
         } else if (info.isFile()) {
             const auto suffix = info.suffix().toLower();
-            const bool isWorkingModel = relative.startsWith("addon-data/assistant/models/") ||
-                                        relative.startsWith("addon-data/notes/models/");
+            const bool isWorkingModel = relative.startsWith("addons/assistant/data/models/") ||
+                                        relative.startsWith("addons/notes/data/models/");
             const bool immutable = (source.weights || isWorkingModel || relative.startsWith("Models/")) &&
                                    (QStringList{"gguf", "safetensors", "onnx", "tflite", "litertlm"}.contains(suffix) ||
                                     (suffix == "bin" && info.fileName().startsWith("ggml-")));
@@ -212,6 +223,82 @@ bool migrateWorkspaceModels(const QString &root, QString *error) {
            fail(error, QObject::tr("Cannot remove the emptied model folder: %1").arg(legacy));
 }
 
+bool migrateAddonData(const QString &root, QString *error) {
+    const auto old = root + "/addon-data";
+    if (!safePath(old, error))
+        return false;
+    if (!QFileInfo::exists(old))
+        return true;
+    if (!QFileInfo(old).isDir())
+        return fail(error, QObject::tr("Expected an add-on data directory: %1").arg(old));
+    for (const auto &entry : QDir(old).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot)) {
+        if (!moveModelPath(entry.absoluteFilePath(), root + "/addons/" + entry.fileName() + "/data", error))
+            return false;
+    }
+    // Leave any unrecognized files in place.
+    QDir().rmdir(old);
+    return true;
+}
+
+bool normalizePublicFolders(const QString &root, QString *error) {
+    QSettings settings(root + "/.pilon/settings.ini", QSettings::IniFormat);
+    const auto names = QDir(root).entryList(QDir::AllEntries | QDir::Hidden | QDir::System | QDir::NoDotAndDotDot);
+    bool changed = false;
+    for (const auto &name : {QString("Notes"), QString("Calendar"), QString("Artifacts")}) {
+        const auto old = root + '/' + name;
+        const auto lower = name.toLower();
+        const auto target = root + '/' + lower;
+        const auto staged = root + "/.pilon/case-rename-" + lower;
+        const QFileInfo prior(old), next(target);
+        if (prior.isSymLink() || next.isSymLink())
+            continue;
+        if (name == "Artifacts" && names.contains(name) && prior.isDir()) {
+            static const QRegularExpression chatId(R"(\A[0-9a-f]{32}\z)");
+            for (const auto &entry : QDir(old).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot | QDir::NoSymLinks))
+                if (chatId.match(entry.fileName()).hasMatch())
+                    QDir().rmdir(entry.absoluteFilePath());
+            QDir().rmdir(old);
+        }
+        bool renamed = false;
+        const auto errorMessage = QObject::tr("Cannot rename the Pilon folder: %1").arg(old);
+        if (QFileInfo(staged).isSymLink()) return fail(error, errorMessage);
+        if (QFileInfo::exists(staged)) {
+            if (QFileInfo::exists(old) || next.exists() || !QFileInfo(staged).isDir() || !QDir().rename(staged, target))
+                return fail(error, errorMessage);
+            renamed = true;
+        } else if (names.contains(name) && QFileInfo(old).isDir() && !names.contains(lower) && !insideCheckout(old)) {
+            if (next.exists()) {
+                // Android shared storage needs an intermediate name for a case-only rename.
+                if (!QDir().rename(old, staged) || !QDir().rename(staged, target))
+                    return fail(error, errorMessage);
+            } else if (!QDir().rename(old, target)) {
+                return fail(error, errorMessage);
+            }
+            renamed = true;
+        }
+        const auto key = lower + "/directory";
+        if (name != "Artifacts" && (renamed || !names.contains(name)) && settings.value(key).toString() == old) {
+            settings.setValue(key, target);
+            changed = true;
+        }
+    }
+    auto bookmarks = settings.value("files/bookmarks").toList();
+    bool movedBookmark = false;
+    for (auto &value : bookmarks) {
+        auto bookmark = value.toMap();
+        if (bookmark.value("deviceId") != "local") continue;
+        const auto old = bookmark.value("path").toString();
+        const auto current = PilonWorkspace::currentPublicPath(root, old);
+        if (current == old) continue;
+        bookmark["path"] = current;
+        value = bookmark;
+        movedBookmark = true;
+    }
+    if (movedBookmark) settings.setValue("files/bookmarks", bookmarks);
+    if (changed || movedBookmark) settings.sync();
+    return settings.status() == QSettings::NoError || fail(error, QObject::tr("Cannot save the Pilon folder names."));
+}
+
 QString remap(const QString &path, const QString &before, const QString &after) {
     return contained(path, before) ? after + path.mid(before.size()) : path;
 }
@@ -235,12 +322,12 @@ bool prepareSettings(const QString &source, const QString &stage, const QString 
         const auto calendar = settings.value("calendar/directory").toString();
         if (notes.isEmpty() || notes == QDir::homePath() + "/Pilon/Notes" ||
             notes == QDir::homePath() + "/notes" || notes == legacyData() + "/notes")
-            settings.setValue("notes/directory", root + "/Notes");
+            settings.setValue("notes/directory", root + "/notes");
         if (calendar.isEmpty() || calendar == QDir::homePath() + "/Pilon/Calendar")
-            settings.setValue("calendar/directory", root + "/Calendar");
+            settings.setValue("calendar/directory", root + "/calendar");
     } else {
         for (const auto &key :
-             {QString("notes/directory"), QString("calendar/directory"), QString("GitHub/cloneDirectory")})
+             {QString("notes/directory"), QString("calendar/directory")})
             if (settings.contains(key))
                 settings.setValue(key, remap(settings.value(key).toString(), before, root));
         auto bookmarks = settings.value("files/bookmarks").toList();
@@ -252,15 +339,6 @@ bool prepareSettings(const QString &source, const QString &stage, const QString 
         }
         if (settings.contains("files/bookmarks"))
             settings.setValue("files/bookmarks", bookmarks);
-        auto repositories = settings.value("Git/localRepositories").toMap();
-        QVariantMap moved;
-        for (auto i = repositories.cbegin(); i != repositories.cend(); ++i) {
-            auto entry = i->toMap();
-            entry["localPath"] = remap(entry.value("localPath").toString(), before, root);
-            moved[remap(i.key(), before, root)] = entry;
-        }
-        if (settings.contains("Git/localRepositories"))
-            settings.setValue("Git/localRepositories", moved);
     }
     settings.remove("workspace/root");
     settings.sync();
@@ -295,9 +373,9 @@ bool commitBootstrap(const QString &root, QString *error, bool linksRemoved = fa
     QSaveFile output(path);
     if (!input.open(QIODevice::ReadOnly) || !output.open(QIODevice::WriteOnly))
         return fail(error, QObject::tr("Cannot save the Pilon folder pointer."));
-    output.setPermissions(QFile::ReadOwner | QFile::WriteOwner);
     const auto bytes = input.readAll();
-    if (output.write(bytes) != bytes.size() || !output.commit())
+    if (input.error() != QFileDevice::NoError || !output.setPermissions(QFile::ReadOwner | QFile::WriteOwner)
+        || output.write(bytes) != bytes.size() || !output.commit())
         return fail(
             error,
             QObject::tr("Cannot save the Pilon folder pointer. Check the settings folder permissions."));
@@ -377,6 +455,57 @@ bool purgeLegacyLinks(QString *error) {
             return false;
     return commitBootstrap(PilonWorkspace::configuredRoot(), error, true);
 }
+QString migrationJournal() {
+    return QFileInfo(PilonWorkspace::bootstrapFile()).absolutePath() + "/workspace-migration.json";
+}
+constexpr qint64 maxMigrationJournal = 32 * 1024 * 1024;
+QString fileDigest(const QString &path) {
+    QFile file(path);
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    if (!file.open(QIODevice::ReadOnly) || !hash.addData(&file)) return {};
+    return QString::fromLatin1(hash.result().toHex());
+}
+bool recoverMigration(QString *error) {
+    QFile journal(migrationJournal());
+    if (!journal.exists() && !QFileInfo(journal).isSymLink()) return true;
+    const auto problem = QObject::tr("Cannot recover the interrupted Pilon folder move. Keep its staging folder and check the destination.");
+    if (!safePath(journal.fileName(), error)) return false;
+    if (!QFileInfo(journal).isFile() || journal.size() > maxMigrationJournal || !journal.open(QIODevice::ReadOnly))
+        return fail(error, problem);
+    const auto bytes = journal.read(maxMigrationJournal + 1);
+    if (journal.error() != QFileDevice::NoError || bytes.size() > maxMigrationJournal) return fail(error, problem);
+    const auto record = QJsonDocument::fromJson(bytes).object();
+    journal.close();
+    const auto source = record.value("source").toString(), target = record.value("target").toString();
+    const auto stage = record.value("stage").toString();
+    const auto active = committedRoot();
+    const auto stageInfo = QFileInfo(stage);
+    if (!QDir::isAbsolutePath(target) || target == "/" || QDir::cleanPath(target) != target ||
+        stageInfo.absolutePath() != target || !stageInfo.fileName().startsWith(".pilon-migrate-") ||
+        !segment(stageInfo.fileName()) || QDir::cleanPath(stage) != stage ||
+        !record.value("source").isString() || !record.value("publishing").isObject() ||
+        (active != target && active != source) || !safePath(stage, error))
+        return fail(error, problem);
+    const auto publishing = record.value("publishing").toObject();
+    static const QRegularExpression sha256(R"(\A[0-9a-f]{64}\z)");
+    for (auto i = publishing.constBegin(); i != publishing.constEnd(); ++i) {
+        const auto parts = i.key().split('/');
+        if (!std::all_of(parts.cbegin(), parts.cend(), segment) || parts.contains(".git") ||
+            !sha256.match(i.value().toString()).hasMatch()) return fail(error, problem);
+    }
+    // A published file lost its staged name. Preserve it if somebody has since edited it.
+    if (active != target && stageInfo.isDir()) {
+        for (auto i = publishing.constBegin(); i != publishing.constEnd(); ++i) {
+            const auto destination = target + '/' + i.key();
+            if (!QFileInfo::exists(stage + '/' + i.key()) && safePath(destination, nullptr) &&
+                QFileInfo(destination).isFile() && !insideCheckout(destination) &&
+                fileDigest(destination) == i.value().toString() && !QFile::remove(destination))
+                return fail(error, problem);
+        }
+    }
+    if (stageInfo.exists() && (!stageInfo.isDir() || !QDir(stage).removeRecursively())) return fail(error, problem);
+    return journal.remove() || fail(error, problem);
+}
 bool migrate(const QString &root, const QList<Source> &sources, const QString &settingsSource,
              const QString &before, QString *error) {
     if (!PilonWorkspace::validateRoot(root, error))
@@ -384,13 +513,15 @@ bool migrate(const QString &root, const QList<Source> &sources, const QString &s
     const bool rootExisted = QFileInfo::exists(root);
     if (!QDir().mkpath(root))
         return fail(error, QObject::tr("Cannot create the Pilon folder."));
-    bool committed = false;
-    QStringList published, createdDirectories;
+    bool committed = false, journalWritten = false;
+    QStringList createdDirectories;
     const auto rollback = qScopeGuard([&] {
         if (committed)
             return;
-        for (const auto &file : published)
-            QFile::remove(file);
+        if (journalWritten) {
+            QString recoveryError;
+            if (!recoverMigration(&recoveryError) && error) *error += '\n' + recoveryError;
+        }
         for (auto i = createdDirectories.crbegin(); i != createdDirectories.crend(); ++i)
             QDir().rmdir(*i);
         if (!rootExisted)
@@ -407,6 +538,7 @@ bool migrate(const QString &root, const QList<Source> &sources, const QString &s
         return false;
     QList<QPair<QString, QString>> entries{{stage.path(), QString{}}};
     QStringList directories, files;
+    QJsonObject publishing;
     for (qsizetype index = 0; index < entries.size(); ++index) {
         const auto [path, relative] = entries[index];
         for (const auto &entry : QDir(path).entryInfoList(
@@ -429,12 +561,28 @@ bool migrate(const QString &root, const QList<Source> &sources, const QString &s
                         QObject::tr(
                             "Existing data differs at %1. Choose an empty folder or preserve it separately.")
                             .arg(existing.filePath()));
+                if (!existing.exists()) {
+                    const auto hash = fileDigest(entry.absoluteFilePath());
+                    if (hash.isEmpty()) return fail(error, QObject::tr("Cannot verify staged file %1.").arg(target));
+                    publishing.insert(target, hash);
+                }
                 files << target;
             }
         }
     }
+    const auto record = QJsonDocument(QJsonObject{{"source", before}, {"target", root}, {"stage", stage.path()}, {"publishing", publishing}})
+                            .toJson(QJsonDocument::Compact);
+    QSaveFile journal(migrationJournal());
+    if (record.size() > maxMigrationJournal || !safePath(journal.fileName(), error) ||
+        !QDir().mkpath(QFileInfo(journal.fileName()).absolutePath()) || !journal.open(QIODevice::WriteOnly) ||
+        !journal.setPermissions(QFile::ReadOwner | QFile::WriteOwner) ||
+        journal.write(record) != record.size() || !journal.commit())
+        return fail(error, QObject::tr("Cannot save the Pilon folder move recovery record."));
+    journalWritten = true;
+    stage.setAutoRemove(false);
     for (const auto &relative : directories) {
         const auto path = root + '/' + relative;
+        if (!safePath(path, error)) return false;
         if (!QFileInfo::exists(path)) {
             if (!QDir().mkdir(path))
                 return fail(error, QObject::tr("Cannot create the destination folder: %1").arg(path));
@@ -446,18 +594,33 @@ bool migrate(const QString &root, const QList<Source> &sources, const QString &s
     }
     for (const auto &relative : files) {
         const auto path = root + '/' + relative;
-        if (QFileInfo::exists(path))
-            continue;
-        if (!QFile::rename(stage.path() + '/' + relative, path))
+        const auto staged = stage.filePath(relative);
+        if (!safePath(path, error)) return false;
+        if (publishing.contains(relative) ? QFileInfo::exists(path) : !sameFile(staged, path))
+            return fail(error, QObject::tr("Destination data changed while moving the Pilon folder: %1").arg(path));
+        if (publishing.contains(relative) && !PilonWorkspace::moveWithoutReplacing(staged, path)) {
+#ifdef Q_OS_ANDROID
+            if ((errno == EINVAL || errno == ENOSYS || errno == EOPNOTSUPP)
+                    && AndroidStorage::isWithin(root, AndroidStorage::sharedStoragePath()))
+                return fail(error, QObject::tr("Android shared storage cannot safely publish a Pilon folder here. Choose a folder in Pilon's private storage."));
+#endif
             return fail(error, QObject::tr("Cannot publish the staged file: %1").arg(path));
-        published << path;
+        }
     }
     if (!commitBootstrap(root, error))
         return false;
     committed = true;
-    return true;
+    return recoverMigration(error);
 }
 } // namespace
+bool PilonWorkspace::moveWithoutReplacing(const QString &source, const QString &destination) {
+#ifdef SYS_renameat2
+    const auto from = QFile::encodeName(source), to = QFile::encodeName(destination);
+    return ::syscall(SYS_renameat2, AT_FDCWD, from.constData(), AT_FDCWD, to.constData(), RENAME_NOREPLACE) == 0;
+#else
+    return QDir().rename(source, destination);
+#endif
+}
 QString PilonWorkspace::bootstrapFile() {
     return QFileInfo(platformStoragePath(QSettings().fileName())).absolutePath() + "/workspace.ini";
 }
@@ -470,7 +633,9 @@ QString PilonWorkspace::configuredRoot() {
     if (!initialized.isEmpty())
         return QDir::cleanPath(initialized);
 #ifdef Q_OS_ANDROID
-    const auto defaultRoot = AndroidStorage::workspacePath();
+    const auto shared = AndroidStorage::workspacePath();
+    const auto defaultRoot = AndroidStorage::hasAccess() && !shared.isEmpty() && QFileInfo(shared + "/.pilon").isDir()
+        ? shared : legacyData() + "/Pilon";
 #else
     const auto defaultRoot = QDir::homePath() + "/Pilon";
 #endif
@@ -480,15 +645,19 @@ QString PilonWorkspace::configuredRoot() {
 QString PilonWorkspace::addonsDirectory() {
     return configuredRoot() + "/addons";
 }
-QString PilonWorkspace::addonDataRoot() {
-    return configuredRoot() + "/addon-data";
-}
 QString PilonWorkspace::addonDataDirectory(const QString &id) {
-    return segment(id) && !id.startsWith('.') ? addonDataRoot() + '/' + id : QString{};
+    return segment(id) && !id.startsWith('.') ? addonsDirectory() + '/' + id + "/data" : QString{};
 }
 QString PilonWorkspace::appDataDirectory() {
     const auto root = committedRoot();
     return root.isEmpty() ? legacyData() : root + "/.pilon";
+}
+QString PilonWorkspace::assistantAgentDirectory() {
+#ifdef Q_OS_ANDROID
+    return appDataDirectory() + "/assistant/agent";
+#else
+    return configuredRoot() + "/.pilon/assistant/agent";
+#endif
 }
 QString PilonWorkspace::modelsDirectory() {
     return addonModelsDirectory("assistant");
@@ -501,7 +670,15 @@ QString PilonWorkspace::runtimeDirectory() {
 #ifdef Q_OS_ANDROID
     return qEnvironmentVariable("PILON_RUNTIME_DIR", appDataDirectory() + "/runtime");
 #else
-    return qEnvironmentVariable("PILON_RUNTIME_DIR", QDir(QCoreApplication::applicationDirPath()).absoluteFilePath("../runtime"));
+    const auto override = qEnvironmentVariable("PILON_RUNTIME_DIR");
+    if (!override.isEmpty()) return override;
+    const auto installed = QFileInfo(QCoreApplication::applicationDirPath()).absolutePath();
+    for (const auto &root : {installed, configuredRoot()}) {
+        if (!QDir::isAbsolutePath(root)) continue;
+        for (const auto *name : {"/.runtime", "/runtime"})
+            if (QFileInfo(root + name).isDir()) return root + name;
+    }
+    return installed + "/.runtime";
 #endif
 }
 #ifdef Q_OS_ANDROID
@@ -516,7 +693,21 @@ QString PilonWorkspace::packagedExecutable(const QString &name) {
 }
 #endif
 QString PilonWorkspace::artifactsDirectory() {
-    return configuredRoot() + "/Artifacts";
+    const auto root = configuredRoot();
+    const bool legacy = QFileInfo(root + "/Artifacts").isDir() &&
+        QDir(root).entryList(QDir::Dirs | QDir::NoDotAndDotDot).contains("Artifacts");
+    return root + (legacy ? "/Artifacts" : "/artifacts");
+}
+QString PilonWorkspace::currentPublicPath(const QString &root, const QString &path) {
+    for (const auto &name : {QString("Notes"), QString("Calendar"), QString("Artifacts")}) {
+        const auto old = root + '/' + name;
+        if (!contained(path, old)) continue;
+        const auto current = root + '/' + name.toLower();
+        if (QFileInfo(current).isDir() &&
+            !QDir(root).entryList(QDir::AllEntries | QDir::System | QDir::NoDotAndDotDot).contains(name))
+            return current + path.mid(old.size());
+    }
+    return path;
 }
 QString PilonWorkspace::publicDirectory(const QString &name) {
     if (!segment(name) || name.startsWith('.') || name == "addons" || name == "addon-data")
@@ -571,6 +762,7 @@ bool PilonWorkspace::persistRoot(const QString &path, QString *error) {
 bool PilonWorkspace::initializeStorage(QString *error) {
     if (error)
         error->clear();
+    if (!recoverMigration(error)) return false;
     const auto pointer = bootstrapFile();
     if (QFileInfo::exists(pointer)) {
         QSettings bootstrap(pointer, QSettings::IniFormat);
@@ -590,7 +782,8 @@ bool PilonWorkspace::initializeStorage(QString *error) {
             return fail(
                 error, QObject::tr("The Pilon settings folder is unavailable. Restore it before starting: %1")
                            .arg(root + "/.pilon"));
-        return validateRoot(root, error) && migrateWorkspaceModels(root, error) && purgeLegacyLinks(error);
+        return validateRoot(root, error) && migrateAddonData(root, error) && normalizePublicFolders(root, error) &&
+               migrateWorkspaceModels(root, error) && purgeLegacyLinks(error);
     }
     const auto root = configuredRoot(), data = legacyData();
     QList<Source> sources{
@@ -612,27 +805,32 @@ bool PilonWorkspace::initializeStorage(QString *error) {
     if (notes.isEmpty()) {
         for (const auto &path : noteDefaults)
             if (QFileInfo::exists(path)) {
-                sources.append({path, "Notes", {}, false, true});
+                if (path != root + "/Notes") sources.append({path, "notes", {}, false, true});
                 break;
             }
-    } else if (noteDefaults.contains(notes))
-        sources.append({notes, "Notes", {}, false, true});
-    if (calendar.isEmpty() || calendar == QDir::homePath() + "/Pilon/Calendar")
-        sources.append({QDir::homePath() + "/Pilon/Calendar", "Calendar", {}, false, true});
+    } else if (noteDefaults.contains(notes) && notes != root + "/Notes")
+        sources.append({notes, "notes", {}, false, true});
+    if ((calendar.isEmpty() || calendar == QDir::homePath() + "/Pilon/Calendar") &&
+        root + "/Calendar" != QDir::homePath() + "/Pilon/Calendar")
+        sources.append({QDir::homePath() + "/Pilon/Calendar", "calendar", {}, false, true});
     const auto installed = QCoreApplication::applicationDirPath();
     if (qEnvironmentVariableIsEmpty("PILON_MODELS_DIR") && !QFileInfo::exists(root + "/Models")) {
         const auto modelSource = QDir(installed).absoluteFilePath("../models");
-        sources.append({modelSource, "addon-data/assistant/models", {"ppocrv5"}, true});
-        sources.append({modelSource + "/ppocrv5", "addon-data/notes/models/ppocrv5", {}, true});
+        sources.append({modelSource, "addons/assistant/data/models", {"ppocrv5"}, true});
+        sources.append({modelSource + "/ppocrv5", "addons/notes/data/models/ppocrv5", {}, true});
     }
-    if (qEnvironmentVariableIsEmpty("PILON_ARTIFACT_DIR") && qEnvironmentVariableIsEmpty("PILON_AGENT_DIR"))
-        sources.append({QDir(installed).absoluteFilePath("../AgentFiles/artifacts"), "Artifacts", {}});
+    const QDir legacyArtifacts(QDir(installed).absoluteFilePath("../AgentFiles/artifacts"));
+    if (qEnvironmentVariableIsEmpty("PILON_ARTIFACT_DIR") && qEnvironmentVariableIsEmpty("PILON_AGENT_DIR") &&
+        !legacyArtifacts.isEmpty(QDir::AllEntries | QDir::Hidden | QDir::System | QDir::NoDotAndDotDot))
+        sources.append({legacyArtifacts.path(), "artifacts", {}});
     return migrate(root, sources, platformStoragePath(QSettings().fileName()), {}, error) &&
+           migrateAddonData(root, error) && normalizePublicFolders(root, error) &&
            migrateWorkspaceModels(root, error) && purgeLegacyLinks(error);
 }
 bool PilonWorkspace::relocateStorage(const QString &destination, QString *error) {
     if (error)
         error->clear();
+    if (!recoverMigration(error)) return false;
     const auto source = committedRoot(), target = QDir::cleanPath(destination);
     if (source.isEmpty())
         return fail(error, QObject::tr("Initialize the Pilon folder before moving it."));
@@ -644,12 +842,17 @@ bool PilonWorkspace::relocateStorage(const QString &destination, QString *error)
         return fail(error, QObject::tr("The old and new Pilon folders cannot overlap."));
     if (!validateRoot(source, error) || !validateRoot(target, error))
         return false;
-    if (gitAncestor(source) || gitAncestor(target))
-        return fail(error, QObject::tr("Move Git repositories separately before changing the Pilon folder."));
-    QSettings settings(settingsFile(), QSettings::IniFormat);
-    if (!settings.value("Git/pendingWorktrees").toMap().isEmpty())
-        return fail(error, QObject::tr("Finish or recover Git updates before changing the Pilon folder."));
-    return migrate(target,
-                   {{source, QString{}, {".pilon/assistant/codex/tmp", ".pilon/assistant/codex/.tmp/plugins"}}},
-                   settingsFile(), source, error);
+    if (insideCheckout(source) || insideCheckout(target))
+        return fail(error, QObject::tr("Move repositories separately before changing the Pilon folder."));
+    QStringList excluded{".pilon/assistant/codex/tmp", ".pilon/assistant/codex/.tmp/plugins"};
+#ifndef Q_OS_ANDROID
+    // The launcher still targets this installation after moving user data.
+    const auto executable = QDir::cleanPath(QCoreApplication::applicationFilePath());
+    for (const auto *name : {".bin", "bin"}) {
+        if (executable != source + '/' + name + "/pilon") continue;
+        excluded.append({QString::fromLatin1(name), ".runtime", "runtime"});
+        break;
+    }
+#endif
+    return migrate(target, {{source, QString{}, excluded}}, settingsFile(), source, error);
 }

@@ -84,6 +84,22 @@ obj = {"height":"${vars.base}", "draft":"saved"} # retained
         QVERIFY(doc.setValue(path, {"settings", "obj", "draft"}, QVariant(), error));
         QVERIFY(!doc.values()["settings"].toMap()["obj"].toMap().contains("draft"));
     }
+    void conflictingBatchEditsLeaveSharedAssignmentsUntouched() {
+        const auto path = PiconfDocument::MainPath;
+        const PiconfDocument::Files original{{path,
+            "format=1\n[vars]\nlevel=12\n[appearance]\nfirst=\"${vars.level}\"\nsecond=\"${vars.level}\"\n"}};
+        PiconfDocument doc;
+        QString error;
+        QVERIFY(doc.parse(original, error));
+        QVERIFY(!doc.apply({{path, {"appearance", "first"}, 21}, {path, {"appearance", "second"}, 22}}, {}, error));
+        QVERIFY(!error.isEmpty());
+        QCOMPARE(doc.files(), original);
+        QVERIFY2(doc.apply({{path, {"appearance", "first"}, 21}, {path, {"appearance", "second"}, 21}}, {}, error),
+                 qPrintable(error));
+        const auto appearance = doc.values().value("appearance").toMap();
+        QCOMPARE(appearance.value("first").toInt(), 21);
+        QCOMPARE(appearance.value("second").toInt(), 21);
+    }
     void cannotLoadForeignAddonIncludes() {
         const QString own = "addon-data/org.example.a/config.piconf",
                       other = "addon-data/org.example.b/settings.piconf";

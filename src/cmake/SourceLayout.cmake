@@ -4,7 +4,6 @@ set(PILON_INCLUDE_DIRECTORIES
     "${CMAKE_CURRENT_SOURCE_DIR}/../addons/calendar/src"
     "${CMAKE_CURRENT_SOURCE_DIR}/../addons/devices/src"
     "${CMAKE_CURRENT_SOURCE_DIR}/../addons/files/src"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../addons/git/src"
     "${CMAKE_CURRENT_SOURCE_DIR}/../addons/notes/src"
     "${CMAKE_CURRENT_SOURCE_DIR}/../addons/ssh/src"
     "${CMAKE_CURRENT_SOURCE_DIR}/app"
@@ -15,7 +14,6 @@ set(PILON_INCLUDE_DIRECTORIES
     "${CMAKE_CURRENT_SOURCE_DIR}/core/workspace"
     "${CMAKE_CURRENT_SOURCE_DIR}/platform/android"
     "${CMAKE_CURRENT_SOURCE_DIR}/../addons/assistant/platform/android"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../addons/git/platform/android"
 )
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/../addons/assistant/config/assistant-models.json" PROPERTIES QT_RESOURCE_ALIAS "assistant-models.json")
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/../addons/assistant/config/breeze-requirements.lock" PROPERTIES QT_RESOURCE_ALIAS "breeze-requirements.lock")
@@ -35,16 +33,6 @@ set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/../addons/assistant/ski
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/../addons/assistant/skills/frontend-design/skill.json" PROPERTIES QT_RESOURCE_ALIAS "assistant-skills/frontend-design/skill.json")
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/../addons/assistant/skills/frontend-design/source.json" PROPERTIES QT_RESOURCE_ALIAS "assistant-skills/frontend-design/source.json")
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/../addons/assistant/skills/frontend-design/upstream.md" PROPERTIES QT_RESOURCE_ALIAS "assistant-skills/frontend-design/upstream.md")
-set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/../addons/assistant/skills/gh-address-comments/LICENSE.txt" PROPERTIES QT_RESOURCE_ALIAS "assistant-skills/gh-address-comments/LICENSE.txt")
-set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/../addons/assistant/skills/gh-address-comments/SKILL.md" PROPERTIES QT_RESOURCE_ALIAS "assistant-skills/gh-address-comments/SKILL.md")
-set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/../addons/assistant/skills/gh-address-comments/skill.json" PROPERTIES QT_RESOURCE_ALIAS "assistant-skills/gh-address-comments/skill.json")
-set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/../addons/assistant/skills/gh-address-comments/source.json" PROPERTIES QT_RESOURCE_ALIAS "assistant-skills/gh-address-comments/source.json")
-set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/../addons/assistant/skills/gh-address-comments/upstream.md" PROPERTIES QT_RESOURCE_ALIAS "assistant-skills/gh-address-comments/upstream.md")
-set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/../addons/assistant/skills/gh-fix-ci/LICENSE.txt" PROPERTIES QT_RESOURCE_ALIAS "assistant-skills/gh-fix-ci/LICENSE.txt")
-set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/../addons/assistant/skills/gh-fix-ci/SKILL.md" PROPERTIES QT_RESOURCE_ALIAS "assistant-skills/gh-fix-ci/SKILL.md")
-set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/../addons/assistant/skills/gh-fix-ci/skill.json" PROPERTIES QT_RESOURCE_ALIAS "assistant-skills/gh-fix-ci/skill.json")
-set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/../addons/assistant/skills/gh-fix-ci/source.json" PROPERTIES QT_RESOURCE_ALIAS "assistant-skills/gh-fix-ci/source.json")
-set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/../addons/assistant/skills/gh-fix-ci/upstream.md" PROPERTIES QT_RESOURCE_ALIAS "assistant-skills/gh-fix-ci/upstream.md")
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/../addons/assistant/skills/local-files/SKILL.md" PROPERTIES QT_RESOURCE_ALIAS "assistant-skills/local-files/SKILL.md")
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/../addons/assistant/skills/local-files/skill.json" PROPERTIES QT_RESOURCE_ALIAS "assistant-skills/local-files/skill.json")
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/../addons/assistant/skills/notes/SKILL.md" PROPERTIES QT_RESOURCE_ALIAS "assistant-skills/notes/SKILL.md")
@@ -106,7 +94,6 @@ set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/../addons/files/ui/File
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/../addons/files/ui/PhosphorBrowser.qml" PROPERTIES QT_RESOURCE_ALIAS "PhosphorBrowser.qml")
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/../addons/files/ui/FileAppearanceSection.qml" PROPERTIES QT_RESOURCE_ALIAS "FileAppearanceSection.qml")
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/../addons/files/ui/FilesPage.qml" PROPERTIES QT_RESOURCE_ALIAS "FilesPage.qml")
-set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/../addons/git/readme.md" PROPERTIES QT_RESOURCE_ALIAS "docs/git.md")
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/../addons/notes/config/handwriting-cuda-requirements.lock" PROPERTIES QT_RESOURCE_ALIAS "handwriting-cuda-requirements.lock")
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/../addons/notes/config/handwriting-openvino-requirements.lock" PROPERTIES QT_RESOURCE_ALIAS "handwriting-openvino-requirements.lock")
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/../addons/notes/config/handwriting-requirements.lock" PROPERTIES QT_RESOURCE_ALIAS "handwriting-requirements.lock")
@@ -198,6 +185,7 @@ set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/../addons/assistant/scr
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/../addons/assistant/scripts/setup_agent_workspace.py" PROPERTIES QT_RESOURCE_ALIAS "setup_agent_workspace.py")
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/ui/controls/AppShortcut.qml" PROPERTIES QT_RESOURCE_ALIAS "ui/AppShortcut.qml")
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/../addons/assistant/ui/AssistantActionButton.qml" PROPERTIES QT_RESOURCE_ALIAS "ui/AssistantActionButton.qml")
+set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/ui/controls/PilonAddTile.qml" PROPERTIES QT_RESOURCE_ALIAS "ui/PilonAddTile.qml")
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/ui/controls/PilonButton.qml" PROPERTIES QT_RESOURCE_ALIAS "ui/PilonButton.qml")
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/ui/controls/PilonCloseButton.qml" PROPERTIES QT_RESOURCE_ALIAS "ui/PilonCloseButton.qml")
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/ui/controls/PilonColourDialog.qml" PROPERTIES QT_RESOURCE_ALIAS "ui/PilonColourDialog.qml")

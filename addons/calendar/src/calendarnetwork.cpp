@@ -13,7 +13,6 @@
 #include <QProcess>
 #include "../../../src/platform/android/androidcredentials.h"
 #include <QPointer>
-#include <QScopeGuard>
 #include <QRandomGenerator>
 #include <QRegularExpression>
 #include <QStandardPaths>
@@ -40,6 +39,15 @@ namespace {
 QString uid() { return QUuid::createUuid().toString(QUuid::Id128); }
 QString esc(const QString &s) { return QString::fromUtf8(QUrl::toPercentEncoding(s)); }
 QByteArray json(const QVariantMap &m) { return QJsonDocument::fromVariant(m).toJson(QJsonDocument::Compact); }
+QJsonObject eventPage(const QByteArray &body, const QString &listKey) {
+    const auto page = QJsonDocument::fromJson(body).object();
+    const auto entries = page.value(listKey);
+    if (!entries.isArray()) return {};
+    const auto events = entries.toArray();
+    for (const auto &event : events)
+        if (event.toObject().value("id").toString().isEmpty()) return {};
+    return page;
+}
 bool calendarApiDisabled(const QByteArray &body) {
     const auto error = QJsonDocument::fromJson(body).object().value("error").toObject();
     for (const auto &entry : error.value("errors").toArray())
@@ -175,7 +183,7 @@ QString CalendarManager::mobileAuthorizationError(const QString &provider, const
     } else return tr("Unsupported Calendar account provider.");
     return {};
 }
-void CalendarManager::mobileIdentity(const QString &provider, QVariantMap tokens, AuthorizationReply done) {
+void CalendarManager::verifyAccountIdentity(const QString &provider, QVariantMap tokens, AuthorizationReply done) {
     const QUrl url(provider == "google" ? "https://www.googleapis.com/oauth2/v2/userinfo" : "https://graph.microsoft.com/v1.0/me?$select=id,mail,userPrincipalName");
     Reply completed = [this, provider, tokens, done = std::move(done)](int status, QByteArray bytes, QVariantMap) mutable {
         if (status != 200) { done({}, errorText(bytes, status)); return; }
@@ -216,30 +224,42 @@ void CalendarManager::connectMobileAccount(const QString &provider) {
         if (state != m_state) return;
         if (error.isEmpty()) error = mobileAuthorizationError(provider, tokens);
         if (!error.isEmpty()) { cancelLogin(); fail(error); return; }
-        mobileIdentity(provider, tokens, [this, provider, state](QVariantMap verified, QString identityError) {
+        verifyAccountIdentity(provider, tokens, [this, provider, state](QVariantMap verified, QString identityError) {
             if (state != m_state) return;
             cancelLogin();
             if (!identityError.isEmpty()) { fail(identityError); return; }
-            acceptMobileAccount(provider, verified);
+            acceptVerifiedAccount(provider, verified);
         });
     });
     if (state == m_state) m_cancelNativeLogin = std::move(cancel);
     else if (cancel) cancel();
 }
-void CalendarManager::acceptMobileAccount(const QString &provider, const QVariantMap &tokens) {
+void CalendarManager::acceptVerifiedAccount(const QString &provider, const QVariantMap &tokens) {
+    if (!openStorage()) return;
     auto id = uid();
+    QVariantMap secret;
     for (auto it = m_accounts.cbegin(); it != m_accounts.cend(); ++it) {
         if (it->value("provider") != provider) continue;
         const auto previous = credentials(it.key());
         const bool sameSubject = previous.value("native_subject") == tokens.value("native_subject") && !previous.value("native_subject").toString().isEmpty();
         const bool legacyEmail = previous.value("native_subject").toString().isEmpty()
             && it->value("email").toString().compare(tokens.value("native_email").toString(), Qt::CaseInsensitive) == 0;
-        if (sameSubject || legacyEmail) { id = it.key(); break; }
+        if (sameSubject || legacyEmail) { id = it.key(); secret = previous; break; }
     }
     auto account = m_accounts.value(id);
+    const auto previousAccount = account;
     account["id"] = id; account["provider"] = provider; account["email"] = tokens.value("native_email"); account["status"] = tr("Connected");
     account.remove("pending"); m_accounts[id] = account;
-    storeCredentials(id, tokens); persist(); discover(id, [this] { sync(); });
+    if (!persist()) {
+        if (previousAccount.isEmpty()) m_accounts.remove(id);
+        else m_accounts[id] = previousAccount;
+        emit changed();
+        return;
+    }
+    if (tokens.contains("native_provider")) secret.clear();
+    secret.insert(tokens);
+    storeCredentials(id, secret);
+    discover(id, [this] { sync(); });
 }
 void CalendarManager::refreshMobileAccount(const QString &id, const QVariantMap &previous, AuthorizationReply done) {
     m_nativeRefreshes[id].append(std::move(done));
@@ -255,7 +275,7 @@ void CalendarManager::refreshMobileAccount(const QString &id, const QVariantMap 
         };
         if (error.isEmpty()) error = mobileAuthorizationError(provider, tokens, previous);
         if (!error.isEmpty()) { finished({}, error); return; }
-        mobileIdentity(provider, tokens, finished);
+        verifyAccountIdentity(provider, tokens, finished);
     });
 }
 bool CalendarManager::microsoftCalendarWritable(const QString &account, const QVariantMap &calendar) const {
@@ -385,7 +405,6 @@ void CalendarManager::storeCredentials(const QString &id, const QVariantMap &sec
 }
 void CalendarManager::request(const QString &account, const QByteArray &method, const QUrl &url, const QByteArray &body,
                               const QVariantMap &headers, Reply done, bool retried, int redirects) {
-    if (m_gitUpdating) { done(0, {}, {{"error", tr("Finish or abort Calendar's Git update first.")}}); return; }
     if (url.scheme() != "https" || !url.userInfo().isEmpty()) {
         done(0, {}, {});
         return;
@@ -398,13 +417,11 @@ void CalendarManager::request(const QString &account, const QByteArray &method, 
         done(403, json({{"error", QVariantMap{{"message", tr("Microsoft calendar access is read-only.")}}}}), {});
         return;
     }
-    ++m_pendingRequests;
     const QPointer<CalendarManager> self(this);
     const auto completed = std::make_shared<bool>(false);
     done = [self, completed, callback = std::move(done)](int status, QByteArray bytes, QVariantMap metadata) {
         if (!self || *completed) return;
         *completed = true;
-        auto pending = qScopeGuard([self] { if (self) --self->m_pendingRequests; });
         callback(status, std::move(bytes), std::move(metadata));
     };
     if (m_transport) {
@@ -521,27 +538,37 @@ void CalendarManager::tokenRequest(const QString &provider, const QVariantMap &f
     const auto clientSecret = qEnvironmentVariable("PILON_GOOGLE_CLIENT_SECRET");
     if (provider == "google" && !clientSecret.isEmpty())
         form.addQueryItem("client_secret", clientSecret);
-    QNetworkRequest request(QUrl(provider == "google" ? "https://oauth2.googleapis.com/token"
-                                                      : "https://login.microsoftonline.com/common/oauth2/v2.0/token"));
-    request.setTransferTimeout(30000);
-    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/x-www-form-urlencoded");
-    auto reply = m_network.post(request, form.toString(QUrl::FullyEncoded).toUtf8());
-    connect(reply, &QNetworkReply::finished, this, [=] {
-        int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-        auto bytes = reply->readAll();
-        reply->deleteLater();
+    const QUrl url(provider == "google" ? "https://oauth2.googleapis.com/token"
+                                        : "https://login.microsoftonline.com/common/oauth2/v2.0/token");
+    const auto body = form.toString(QUrl::FullyEncoded).toUtf8();
+    const auto completed = [done = std::move(done)](int status, const QByteArray &bytes) {
         auto result = QJsonDocument::fromJson(bytes).toVariant().toMap();
         done(result, status == 200 && !result.value("access_token").toString().isEmpty() ? QString{}
                                                                                          : errorText(bytes, status));
+    };
+    if (m_transport) {
+        m_transport({}, "POST", url, body, {{"Content-Type", "application/x-www-form-urlencoded"}},
+                    [completed](int status, QByteArray bytes, QVariantMap) { completed(status, bytes); });
+        return;
+    }
+    QNetworkRequest request(url);
+    request.setTransferTimeout(30000);
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/x-www-form-urlencoded");
+    auto reply = m_network.post(request, body);
+    connect(reply, &QNetworkReply::finished, this, [reply, completed] {
+        const auto status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const auto bytes = reply->readAll();
+        reply->deleteLater();
+        completed(status, bytes);
     });
 }
 void CalendarManager::connectAccount(const QString &provider, const QString &email, const QString &password) {
-    if (m_gitUpdating) { fail(tr("Finish or abort Calendar's Git update first.")); return; }
     if (provider == "icloud") {
         if (!email.contains('@') || password.trimmed().isEmpty()) {
             fail(tr("Enter your Apple Account email and an app-specific password."));
             return;
         }
+        if (!openStorage()) return;
         auto id = uid();
         for (auto it = m_accounts.cbegin(); it != m_accounts.cend(); ++it)
             if (it->value("provider") == provider &&
@@ -676,48 +703,12 @@ void CalendarManager::completeLogin(const QString &code) {
         [this, provider, state](QVariantMap tokens, QString error) {
             if (state != m_state)
                 return;
-            cancelLogin();
-            if (!error.isEmpty()) {
-                fail(error);
-                return;
-            }
-            auto id = uid();
-            m_accounts[id] = {{"id", id}, {"provider", provider}, {"email", provider}, {"status", tr("Connected")}, {"pending", true}};
-            storeCredentials(id, tokens);
-            persist();
-            QUrl url(provider == "google" ? "https://www.googleapis.com/oauth2/v2/userinfo"
-                                          : "https://graph.microsoft.com/v1.0/"
-                                            "me?$select=mail,userPrincipalName");
-            request(id, "GET", url, {}, {}, [this, id, provider, tokens](int status, QByteArray bytes, QVariantMap) {
-                QString destination = id;
-                if (status == 200) {
-                    auto data = QJsonDocument::fromJson(bytes).toVariant().toMap();
-                    auto email = data.value("email", data.value("mail")).toString();
-                    if (email.isEmpty())
-                        email = data.value("userPrincipalName").toString();
-                    for (auto it = m_accounts.cbegin(); it != m_accounts.cend(); ++it)
-                        if (it.key() != id && it->value("provider") == provider && !email.isEmpty() &&
-                            it->value("email").toString().compare(email, Qt::CaseInsensitive) == 0) {
-                            destination = it.key();
-                            break;
-                        }
-                    if (destination != id) {
-                        auto secret = credentials(destination);
-                        for (auto i = tokens.begin(); i != tokens.end(); ++i)
-                            secret[i.key()] = i.value();
-                        storeCredentials(destination, secret);
-                        QByteArray unused;
-                        keyring("clear", id, &unused);
-                        m_tokens.remove(id);
-                        m_accounts.remove(id);
-                    }
-                    m_accounts[destination]["email"] = email;
-                    m_accounts[destination]["status"] = tr("Connected");
-                    persist();
-                }
-                m_accounts[destination].remove("pending");
-                persist();
-                discover(destination, [this] { sync(); });
+            if (!error.isEmpty()) { cancelLogin(); fail(error); return; }
+            verifyAccountIdentity(provider, tokens, [this, provider, state](QVariantMap verified, QString identityError) {
+                if (state != m_state) return;
+                cancelLogin();
+                if (!identityError.isEmpty()) { fail(identityError); return; }
+                acceptVerifiedAccount(provider, verified);
             });
         });
 }
@@ -743,7 +734,6 @@ void CalendarManager::removeCalendar(const QString &id) {
     m_calendars.remove(id);
 }
 bool CalendarManager::disconnectAccount(const QString &id) {
-    if (m_gitUpdating) { fail(tr("Finish or abort Calendar's Git update first.")); return false; }
     if (!m_accounts.contains(id)) return true;
     if (m_syncing || m_credentialWrites.contains(id) || m_nativeRefreshes.contains(id) || !m_loginProvider.isEmpty()) {
         fail(tr("Wait for the current sync or sign-in before disconnecting."));
@@ -803,7 +793,6 @@ bool CalendarManager::accountOperationsBusy() const {
     });
 }
 void CalendarManager::addFeed(const QString &address, const QString &name) {
-    if (m_gitUpdating) { fail(tr("Finish or abort Calendar's Git update first.")); return; }
     QUrl url(address.trimmed());
     if (url.scheme() == "webcal")
         url.setScheme("https");
@@ -1053,7 +1042,6 @@ void CalendarManager::discover(const QString &account, std::function<void()> don
                                       : "https://graph.microsoft.com/v1.0/me/calendars?$top=100"));
 }
 void CalendarManager::retrySync() {
-    if (m_gitUpdating) { fail(tr("Finish or abort Calendar's Git update first.")); return; }
     for (auto it = m_accounts.cbegin(); it != m_accounts.cend(); ++it)
         if (!it->value("credentialWarning").toString().isEmpty() && m_tokens.contains(it.key()))
             storeCredentials(it.key(), m_tokens.value(it.key()));
@@ -1167,13 +1155,14 @@ void CalendarManager::fetchCalendar(const QString &id, std::function<void()> don
                 request(account, "GET", url, {},
                         {{"Prefer", "outlook.body-content-type=\"text\", IdType=\"ImmutableId\""}},
                         [=, this, keep = weak.lock()](int s, QByteArray b, QVariantMap) {
-                            if (s != 200) {
-                                m_calendars[id]["syncError"] = errorText(b, s);
+                            const auto page = s == 200 ? eventPage(b, "value") : QJsonObject{};
+                            if (page.isEmpty()) {
+                                m_calendars[id]["syncError"] = s == 200 ? tr("Invalid calendar server response.") : errorText(b, s);
                                 persist();
                                 done();
                                 return;
                             }
-                            auto data = QJsonDocument::fromJson(b).toVariant().toMap();
+                            auto data = page.toVariantMap();
                             for (const auto &v : data.value("value").toList()) {
                                 auto raw = v.toMap();
                                 if (raw.value("seriesMasterId").toString().isEmpty())
@@ -1287,7 +1276,6 @@ void CalendarManager::fetchCalendar(const QString &id, std::function<void()> don
         return;
     }
     auto rows = std::make_shared<QVariantList>();
-    auto checkpoint = std::make_shared<QString>();
     bool full = provider != "google" || c.value("syncToken").toString().isEmpty();
     auto page = std::make_shared<std::function<void(QUrl)>>();
     std::weak_ptr<std::function<void(QUrl)>> weak = page;
@@ -1306,14 +1294,14 @@ void CalendarManager::fetchCalendar(const QString &id, std::function<void()> don
                         finish(s, b, {}, false);
                         return;
                     }
-                    QJsonParseError parseError;
-                    auto document = QJsonDocument::fromJson(b, &parseError);
-                    if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
-                        finish(0, {}, {}, false);
+                    const QString listKey = provider == "google" ? "items" : "value";
+                    const auto page = eventPage(b, listKey);
+                    if (page.isEmpty()) {
+                        finish(0, json({{"error", QVariantMap{{"message", tr("Invalid calendar server response.")}}}}), {}, false);
                         return;
                     }
-                    auto data = document.toVariant().toMap();
-                    for (const auto &v : data.value(provider == "google" ? "items" : "value").toList()) {
+                    auto data = page.toVariantMap();
+                    for (const auto &v : data.value(listKey).toList()) {
                         auto raw = v.toMap();
                         auto e =
                             provider == "google" ? CalendarFormat::fromGoogle(raw) : CalendarFormat::fromMicrosoft(raw);
@@ -1732,7 +1720,7 @@ void CalendarManager::uploadNext(const QString &calendar, std::function<void()> 
         done();
         return;
     }
-    const bool responding = !l.value("response").toString().isEmpty();
+    const bool responding = !deleting && !l.value("response").toString().isEmpty();
     if (!responding && method == "PATCH" && QJsonDocument::fromJson(body).object().isEmpty()) {
         m_links[key]["baseline"] = CalendarFormat::content(e);
         m_links[key]["pending"] = "";
@@ -1758,16 +1746,28 @@ void CalendarManager::uploadNext(const QString &calendar, std::function<void()> 
                 }
                 if ((status >= 200 && status < 300) || (deleting && status == 404)) {
                     if (responding) {
-                        m_links[key].remove("response");
-                        m_links[key]["pending"] = "";
-                        m_links[key]["baseline"] = CalendarFormat::content(e);
+                        auto &link = m_links[key];
+                        if (link.value("response") == l.value("response")) {
+                            link.remove("response");
+                            if (link.value("pending") == "save" && m_events.value(id).value("version") == e.value("version"))
+                                link["pending"] = "";
+                        }
+                        link["baseline"] = CalendarFormat::content(e);
                         m_resync = true;
                     } else if (deleting)
                         m_links.remove(key);
                     else {
-                        auto raw = QJsonDocument::fromJson(bytes).toVariant().toMap();
+                        const auto payload = QJsonDocument::fromJson(bytes).object();
+                        const auto createdId = payload.value("id").toString();
+                        if (creating && provider != "icloud" && createdId.isEmpty()) {
+                            m_calendars[calendar]["syncError"] = tr("The calendar server did not return an event ID. Try syncing again.");
+                            persist();
+                            done();
+                            return;
+                        }
+                        const auto raw = payload.toVariantMap();
                         auto &link = m_links[key];
-                        link["remoteId"] = provider == "icloud" ? url.toString() : raw.value("id", remote);
+                        link["remoteId"] = provider == "icloud" ? url.toString() : (createdId.isEmpty() ? remote : createdId);
                         link["etag"] = response.value("etag", raw.value(provider == "google" ? "etag" : "@odata.etag"));
                         link["raw"] = provider == "icloud" ? QVariant(QString::fromUtf8(body)) : QVariant(raw);
                         link["baseline"] = CalendarFormat::content(e);

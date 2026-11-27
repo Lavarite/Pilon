@@ -32,9 +32,7 @@ class TerminalItem : public QQuickPaintedItem
     Q_PROPERTY(QColor backgroundColor READ backgroundColor WRITE setBackgroundColor
                    NOTIFY backgroundColorChanged)
     Q_PROPERTY(QColor accentColor READ accentColor WRITE setAccentColor NOTIFY accentColorChanged)
-    Q_PROPERTY(QColor warningColor READ warningColor WRITE setWarningColor NOTIFY warningColorChanged)
     Q_PROPERTY(QColor borderColor READ borderColor WRITE setBorderColor NOTIFY borderColorChanged)
-    Q_PROPERTY(QString warningText READ warningText WRITE setWarningText NOTIFY warningTextChanged)
 
 public:
     explicit TerminalItem(QQuickItem *parent = nullptr);
@@ -55,12 +53,8 @@ public:
     void setBackgroundColor(const QColor &color);
     [[nodiscard]] QColor accentColor() const;
     void setAccentColor(const QColor &color);
-    [[nodiscard]] QColor warningColor() const;
-    void setWarningColor(const QColor &color);
     [[nodiscard]] QColor borderColor() const;
     void setBorderColor(const QColor &color);
-    [[nodiscard]] QString warningText() const;
-    void setWarningText(const QString &text);
 
     Q_INVOKABLE void feed(const QByteArray &data);
     Q_INVOKABLE void reset();
@@ -84,9 +78,7 @@ signals:
     void foregroundColorChanged();
     void backgroundColorChanged();
     void accentColorChanged();
-    void warningColorChanged();
     void borderColorChanged();
-    void warningTextChanged();
     void dataGenerated(const QByteArray &data);
     void terminalSizeChanged(int rows, int columns);
 
@@ -135,8 +127,7 @@ private:
     [[nodiscard]] QString selectedText() const;
     [[nodiscard]] bool cellSelected(int visibleRow, int column) const;
     [[nodiscard]] bool documentCell(int line, int column, VTermScreenCell &cell) const;
-    [[nodiscard]] QColor terminalColor(VTermColor color, bool background) const;
-    [[nodiscard]] bool screenCell(int row, int column, VTermScreenCell &cell) const;
+    [[nodiscard]] QColor terminalColor(VTermColor color) const;
     [[nodiscard]] QPair<QString, int> inputMethodLine() const;
 
     VTerm *m_terminal = nullptr;
@@ -147,6 +138,8 @@ private:
     int m_columns = 80;
     int m_scrollOffset = 0;
     int m_zoomWheelDelta = 0;
+    int m_scrollWheelRemainder = 0;
+    qreal m_scrollPixelRemainder = 0;
     SelectionPosition m_selectionAnchor;
     SelectionPosition m_selectionEnd;
     VTermPos m_cursorPosition{0, 0};
@@ -160,9 +153,7 @@ private:
     QColor m_foregroundColor{245, 245, 245};
     QColor m_backgroundColor{20, 20, 20, 220};
     QColor m_accentColor{80, 140, 240};
-    QColor m_warningColor{240, 164, 60};
     QColor m_borderColor{255, 255, 255, 40};
-    QString m_warningText;
     QString m_preeditText;
     QList<QInputMethodEvent::Attribute> m_preeditAttributes;
     int m_preeditCursor = 0;

@@ -52,6 +52,7 @@ class CiScopeTests(unittest.TestCase):
         self.git("switch", "-qc", "topic")
         self.write("docs/guide.md", "docs only")
         self.write("docs/screenshots/new.png", "image fixture")
+        self.write("CONTRIBUTING.md", "contributor instructions")
         topic = self.commit()
         self.git("switch", "-q", "main")
         self.write("src/file.qml", "already on main")

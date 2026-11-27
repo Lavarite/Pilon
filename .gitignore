@@ -1,8 +1,14 @@
 # Generated executables, downloaded models and bundled runtimes
 /builds/
+/dev-deps/
 /models/
 /runtime/
+/.runtime/
+/.bin/
 /AgentFiles/
+
+# Private maintainer material
+/dont-publish/
 
 # CMake and Qt build output
 build/

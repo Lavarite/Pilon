@@ -5,6 +5,7 @@ import android.app.AlarmManager;
 import android.app.Instrumentation;
 import android.app.Notification;
 import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.ContextWrapper;
@@ -19,13 +20,17 @@ import android.system.Os;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.pilon.Pilon.R;
 
-/** Exercises production persistence under the target UID without changing its personal queue. */
+/** Exercises production persistence on a dedicated test installation. */
 public final class ReminderProbeInstrumentation extends Instrumentation {
     private int checks;
     private boolean notificationDelivery;
@@ -35,9 +40,17 @@ public final class ReminderProbeInstrumentation extends Instrumentation {
         ++checks;
     }
 
+    @FunctionalInterface private interface Cleanup { void run() throws Exception; }
+
+    private static void attemptCleanup(List<String> issues, String label, Cleanup cleanup) {
+        try { cleanup.run(); }
+        catch (Throwable failure) { issues.add(label); }
+    }
+
     private static final class FixtureContext extends ContextWrapper {
         final File directory;
         final String preferences;
+        final Set<String> owners = new HashSet<>();
         FixtureContext(Context base) throws Exception {
             super(base);
             preferences = "pilon-reminder-probe-" + UUID.randomUUID();
@@ -51,7 +64,9 @@ public final class ReminderProbeInstrumentation extends Instrumentation {
     }
 
     private JSONObject state(FixtureContext context) throws Exception {
-        return new JSONObject(Files.readString(new File(context.directory, "pilon-reminders.json").toPath()));
+        JSONObject data = new JSONObject(Files.readString(new File(context.directory, "pilon-reminders.json").toPath()));
+        context.owners.add(data.getString("owner"));
+        return data;
     }
 
     private JSONObject snapshot(String key, long due) throws Exception {
@@ -79,7 +94,7 @@ public final class ReminderProbeInstrumentation extends Instrumentation {
         return null;
     }
 
-    private void runChecks() throws Exception {
+    private void runChecks() throws Throwable {
         Context target = getTargetContext();
         require(target.getApplicationInfo().uid == Process.myUid(), "Probe is not running under the app UID");
         ComponentName receiver = new ComponentName(target, PilonReminderReceiver.class);
@@ -91,6 +106,7 @@ public final class ReminderProbeInstrumentation extends Instrumentation {
         File queue = new File(context.directory, "pilon-reminders.json");
         String key = UUID.randomUUID().toString().replace("-", "").repeat(2), tag = "calendar:" + key;
         NotificationManager manager = target.getSystemService(NotificationManager.class);
+        Throwable primary = null;
         try {
             require(PilonReminders.status(context).isEmpty(), "Reading absent state created an error");
             require(!queue.exists(), "Passive status created a queue");
@@ -120,8 +136,8 @@ public final class ReminderProbeInstrumentation extends Instrumentation {
             try {
                 require(!PilonReminders.replace(context, future.toString(), -1), "Unwritable queue commit reported success");
                 require(Arrays.equals(valid, Files.readAllBytes(queue.toPath())), "Failed commit replaced the previous queue");
-                require(packages.getComponentEnabledSetting(receiver) == PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
-                    "Failed commit left the receiver active");
+                require(packages.getComponentEnabledSetting(receiver) == PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+                    "Failed replacement disabled the receiver for the previous queue");
             } finally { Os.chmod(context.directory.getAbsolutePath(), 0700); }
             require(PilonReminders.prepareRetry(context), "Could not retry a failed queue commit");
             require(PilonReminders.replace(context, future.toString(), -1), "Queue did not recover after a failed commit");
@@ -193,17 +209,49 @@ public final class ReminderProbeInstrumentation extends Instrumentation {
             require(PilonReminders.prepareRetry(context), "Explicit retry did not rebuild the derived queue");
             require(state(context).getBoolean("enabled"), "Retry did not restore enabled state");
             require(!state(context).getString("owner").equals(initial.getString("owner")), "Repair reused the corrupt generation namespace");
+        } catch (Throwable error) {
+            primary = error;
+            throw error;
         } finally {
-            Os.chmod(context.directory.getAbsolutePath(), 0700);
-            require(PilonReminders.setEnabled(context, false), "Fixture alarm cleanup failed");
-            manager.cancel(tag, 0);
-            packages.setComponentEnabledSetting(receiver, originalComponent, PackageManager.DONT_KILL_APP);
-            target.deleteSharedPreferences(context.preferences + "-pilon_appearance");
-            for (File file : context.directory.listFiles()) require(file.delete(), "Fixture file cleanup failed");
-            require(context.directory.delete(), "Fixture directory cleanup failed");
-            require(personalBefore == null ? !personal.exists() : Arrays.equals(personalBefore, Files.readAllBytes(personal.toPath())),
-                "Probe changed the personal reminder queue");
-            require(notification(manager, tag) == null, "Fixture notification cleanup failed");
+            List<String> issues = new ArrayList<>();
+            attemptCleanup(issues, "restore fixture directory permissions", () -> Os.chmod(context.directory.getAbsolutePath(), 0700));
+            attemptCleanup(issues, "stop fixture reminders", () ->
+                require(PilonReminders.setEnabled(context, false), "Fixture alarm cleanup failed"));
+            for (String owner : context.owners) {
+                for (int request : new int[]{PilonReminders.EXACT_ALARM, PilonReminders.RECOVERY_ALARM}) {
+                    attemptCleanup(issues, "cancel fixture alarm", () -> {
+                        Intent fixture = new Intent(context, PilonReminderReceiver.class).setAction(PilonReminders.ALARM)
+                            .setData(Uri.parse("pilon-reminders://" + owner));
+                        PendingIntent pending = PendingIntent.getBroadcast(context, request, fixture,
+                            PendingIntent.FLAG_NO_CREATE | PendingIntent.FLAG_IMMUTABLE);
+                        if (pending != null) target.getSystemService(AlarmManager.class).cancel(pending);
+                    });
+                }
+            }
+            attemptCleanup(issues, "cancel fixture notification", () -> manager.cancel(tag, 0));
+            attemptCleanup(issues, "restore receiver", () ->
+                packages.setComponentEnabledSetting(receiver, originalComponent, PackageManager.DONT_KILL_APP));
+            attemptCleanup(issues, "delete fixture appearance", () -> {
+                String name = context.preferences + "-pilon_appearance";
+                if (target.getSharedPreferences(name, Context.MODE_PRIVATE).contains("accent"))
+                    require(target.deleteSharedPreferences(name), "Fixture preference cleanup failed");
+            });
+            File[] files = context.directory.listFiles();
+            if (files == null) issues.add("list fixture directory");
+            else for (File file : files)
+                attemptCleanup(issues, "delete fixture file", () -> require(file.delete(), "Fixture file cleanup failed"));
+            attemptCleanup(issues, "delete fixture directory", () ->
+                require(context.directory.delete(), "Fixture directory cleanup failed"));
+            attemptCleanup(issues, "verify personal reminder queue", () ->
+                require(personalBefore == null ? !personal.exists() : Arrays.equals(personalBefore, Files.readAllBytes(personal.toPath())),
+                    "Probe changed the personal reminder queue"));
+            attemptCleanup(issues, "verify fixture notification removal", () ->
+                require(notification(manager, tag) == null, "Fixture notification cleanup failed"));
+            if (!issues.isEmpty()) {
+                AssertionError cleanup = new AssertionError("Reminder fixture cleanup failed to " + String.join(", ", issues));
+                if (primary == null) throw cleanup;
+                primary.addSuppressed(cleanup);
+            }
         }
     }
 
@@ -218,7 +266,9 @@ public final class ReminderProbeInstrumentation extends Instrumentation {
                 + "; notification delivery " + (notificationDelivery ? "verified" : "requires OS grants") + "\n");
             finish(Activity.RESULT_OK, result);
         } catch (Throwable error) {
-            result.putString("stream", "Pilon reminder checks failed after " + checks + ": " + error + "\n");
+            String message = "Pilon reminder checks failed after " + checks + ": " + error + "\n";
+            for (Throwable cleanup : error.getSuppressed()) message += cleanup.getMessage() + "\n";
+            result.putString("stream", message);
             finish(Activity.RESULT_CANCELED, result);
         }
     }

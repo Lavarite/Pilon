@@ -40,7 +40,7 @@ public:
     bool hasChatGptSession() const;
     QString error() const { return m_error; }
     Q_INVOKABLE void dismissError() { if (!m_error.isEmpty()) { m_error.clear(); emit stateChanged(); } }
-    QByteArray apiKey(const QString &id);
+    QByteArray apiKey(const QString &id, const QUrl &origin = {});
     Q_INVOKABLE void signIn();
     Q_INVOKABLE void continueSignIn();
     Q_INVOKABLE void cancelSignIn();

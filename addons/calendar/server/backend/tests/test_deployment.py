@@ -1,8 +1,10 @@
 """Deployment generation is tested without running privileged commands."""
 import importlib.util
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location("calendar_install", Path(__file__).resolve().parents[2] / "install-on-vm.py")
 installer = importlib.util.module_from_spec(spec)
@@ -37,9 +39,23 @@ class DeploymentTests(unittest.TestCase):
             root = Path(directory) / "PilonCalendar"
             root.mkdir()
             parent = root.parent / "docker-compose.yml"
-            parent.write_text("name: existing-project\ninclude:\n  - Other/docker-compose.yml\n")
+            parent.write_text("name: existing-project\ninclude:\n  - Other/docker-compose.yml\nnetworks:\n  default: {}\n")
             installer.integrate_compose(root)
             installer.integrate_compose(root)
             self.assertEqual(parent.read_text().count("PilonCalendar/docker-compose.yml"), 1)
+            self.assertIn("  - PilonCalendar/docker-compose.yml\nnetworks:\n", parent.read_text())
             self.assertIn("Other/docker-compose.yml", parent.read_text())
             self.assertIn(str(parent), installer.compose_command(root, integrate=True))
+
+    def test_failed_nginx_reload_restores_previous_site(self):
+        with tempfile.TemporaryDirectory() as directory:
+            site = Path(directory) / "site.conf"
+            enabled = Path(directory) / "enabled.conf"
+            site.write_bytes(b"previous site\n")
+            enabled.symlink_to(site)
+            with patch.multiple(installer, SITE=site, ENABLED=enabled), patch.object(installer, "run") as run:
+                run.side_effect = [None, subprocess.CalledProcessError(1, "systemctl")]
+                with self.assertRaises(subprocess.CalledProcessError):
+                    installer.apply_site("calendar.example.org", True)
+            self.assertEqual(site.read_bytes(), b"previous site\n")
+            self.assertEqual(enabled.readlink(), site)

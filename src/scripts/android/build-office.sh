@@ -4,14 +4,15 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 if [[ "${PILON_ENV_LOADED:-0}" != 1 ]]; then
     exec python3 "$root/src/scripts/environment.py" bash "${BASH_SOURCE[0]}" "$@"
 fi
-work="$root/build/android/office"
-runtime="$root/builds/android/runtime/arm64-v8a"
-licenses="$root/builds/android/licenses/office"
-office="$root/builds/android/office"
+pilon_dev="${PILON_DEV_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/pilon-dev}"
+work="$pilon_dev/dev-deps/android/office"
+runtime="$pilon_dev/builds/android/runtime/arm64-v8a"
+licenses="$pilon_dev/builds/android/licenses/office"
+office="$pilon_dev/builds/android/office"
 sdk="${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}"
 ndk="${ANDROID_NDK_ROOT:-$sdk/ndk/27.2.12479018}"
 java="${PILON_ANDROID_JAVA:-$HOME/Android/jdk-21}"
-archive="$root/downloads/libreoffice-26.2.6.3-arm64.apk"
+archive="$pilon_dev/dev-deps/downloads/libreoffice-26.2.6.3-arm64.apk"
 upstream=https://raw.githubusercontent.com/LibreOffice/core/libreoffice-26.2.6.3
 mkdir -p "$work/include" "$runtime" "$licenses" "$office/assets" "$(dirname "$archive")"
 fetch() {

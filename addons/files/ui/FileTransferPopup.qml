@@ -9,7 +9,7 @@ PilonPopup {
     objectName: "fileTransferProgress"
     required property var workspace
     required property var remoteFiles
-    readonly property var progress: remoteFiles ? (remoteFiles.transfer || {}) : ({})
+    readonly property var progress: remoteFiles && !remoteFiles.previewLoading ? (remoteFiles.transfer || {}) : ({})
     parent: workspace.Overlay.overlay
     x: Math.round((parent.width - width) / 2)
     y: Math.round((parent.height - height) / 2)
@@ -43,7 +43,7 @@ PilonPopup {
     onProgressChanged: update()
     background: Rectangle {
         radius: 12; color: dialog.workspace.secondaryColour
-        border.color: dialog.workspace.withOpacity(dialog.workspace.textColour, 0.22)
+        border.color: Qt.alpha(dialog.workspace.textColour, 0.22)
     }
     contentItem: ColumnLayout {
         spacing: 12

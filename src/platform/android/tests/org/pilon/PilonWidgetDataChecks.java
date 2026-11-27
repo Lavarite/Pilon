@@ -60,9 +60,23 @@ public final class PilonWidgetDataChecks {
             check(data.frame(Instant.parse("2026-11-10T12:00:00Z").toEpochMilli()).getJSONArray("rows").length() == 0);
             check(data.frame(Instant.parse("2026-11-11T00:00:00Z").toEpochMilli()) == null);
             check(data.frame(Instant.parse("2026-11-08T23:59:59Z").toEpochMilli()) == null);
+            long first = Instant.parse("2026-11-09T00:00:00Z").toEpochMilli();
+            long second = Instant.parse("2026-11-10T00:00:00Z").toEpochMilli();
+            long expiry = Instant.parse("2026-11-11T00:00:00Z").toEpochMilli();
+            check(PilonWidgetSchedule.nextUpdate(data, first - 1) == first);
+            check(PilonWidgetSchedule.nextUpdate(data, first) == second);
+            check(PilonWidgetSchedule.nextUpdate(data, second - 1) == second);
+            check(PilonWidgetSchedule.nextUpdate(data, second) == expiry);
+            check(PilonWidgetSchedule.nextUpdate(data, expiry) == Long.MAX_VALUE);
+            JSONObject repeating = new JSONObject().put("clock", new JSONObject().put("date", "2026-10-25").put("timeZone", "Europe/London"))
+                .put("timeGrid", new JSONObject().put("startMinute", 0).put("endMinute", 90));
+            long autumn = Instant.parse("2026-10-25T00:45:00Z").toEpochMilli();
+            check(PilonWidgetSchedule.nextUpdate(repeating, autumn - 86400000, autumn + 86400000, autumn)
+                == Instant.parse("2026-10-25T01:00:00Z").toEpochMilli());
             check(PilonWidgetData.newlyPinnedId(2, new int[]{1}, new int[]{1, 2}) == 2);
-            check(PilonWidgetData.newlyPinnedId(0, new int[]{1}, new int[]{1, 2}) == 2);
-            check(PilonWidgetData.newlyPinnedId(1, new int[]{1}, new int[]{1, 2}) == 2);
+            check(PilonWidgetData.newlyPinnedId(0, new int[]{1}, new int[]{1, 2}) == 0);
+            check(PilonWidgetData.newlyPinnedId(1, new int[]{1}, new int[]{1, 2}) == 0);
+            check(PilonWidgetData.newlyPinnedId(3, new int[]{1}, new int[]{1, 2}) == 0);
             check(PilonWidgetData.newlyPinnedId(0, new int[]{1}, new int[]{1}) == 0);
             check(PilonWidgetData.newlyPinnedId(0, new int[]{1}, new int[]{1, 2, 3}) == 0);
             check(PilonWidgetData.newlyPinnedId(2, new int[]{1}, new int[]{1, 2, 3}) == 2);

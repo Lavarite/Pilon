@@ -155,6 +155,21 @@ TestCase {
                 {tag: "cover-scaled", width: 360, scale: 1.4, textSize: 16, sidebarWidth: 56},
                 {tag: "inner", width: 752, scale: 1, textSize: 16, sidebarWidth: 56}]
     }
+    function test_emptyMonthFitsARegularDesktopWindow() {
+        const owner = createTemporaryObject(ownerComponent, test,
+            {width: 800, height: 600, sidebarWidth: 64, textSize: 16})
+        verify(owner)
+        const page = owner.page
+        page.viewMode = 2
+        page.selectedDate = new Date(2098, 1, 1, 12)
+        owner.update()
+        verify(waitForRendering(owner.contentItem))
+        const view = findChild(page, "calendarMonth")
+        const header = findChild(page, "calendarMonthHeader")
+        verify(view.contentWidth <= view.width + 0.5, "All seven weekdays fit on desktop")
+        verify(view.contentHeight <= view.height + 0.5, "Every empty week fits without scrolling")
+        compare(header.contentWidth, view.contentWidth)
+    }
     function test_crowdedMonthDaysShowTitlesBeforeMore(data) {
         const extraIds = []
         try {

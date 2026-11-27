@@ -32,7 +32,7 @@ bool safe(const QString &root, const QString &relative, QString &error)
     if (QFileInfo(root).canonicalFilePath() != root || !QFileInfo(root).isDir()) {
         error = QObject::tr("The Pilon folder is unavailable or has moved."); return false;
     }
-    const auto parts = relative.split('/');
+    const auto parts = PiconfDocument::storagePath(relative).split('/');
     for (qsizetype i = 0; i < parts.size(); ++i) {
         path += '/' + parts[i];
         const QFileInfo entry(path);
@@ -46,7 +46,7 @@ bool safe(const QString &root, const QString &relative, QString &error)
 bool read(const QString &root, const QString &name, Files &out, QString &error)
 {
     if (!safe(root, name, error)) return false;
-    QFile file(root + '/' + name);
+    QFile file(root + '/' + PiconfDocument::storagePath(name));
     if (!file.exists()) return true;
     if (!file.open(QIODevice::ReadOnly) || file.size() > MaxTransaction) {
         error = prefix(name) + QObject::tr("cannot read the file within the size limit."); return false;
@@ -60,14 +60,14 @@ bool read(const QString &root, const QString &name, Files &out, QString &error)
 bool write(const QString &root, const QString &name, const QByteArray &bytes, QString &error)
 {
     if (!safe(root, name, error)) return false;
-    const QString path = root + '/' + name;
+    const QString path = root + '/' + PiconfDocument::storagePath(name);
     if (!QDir().mkpath(QFileInfo(path).absolutePath())) {
         error = prefix(name) + QObject::tr("cannot create its directory."); return false;
     }
     QSaveFile file(path);
     if (!file.open(QIODevice::WriteOnly)) { error = prefix(name) + file.errorString(); return false; }
-    file.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
-    if (file.write(bytes) != bytes.size() || !file.commit()) { error = prefix(name) + file.errorString(); return false; }
+    if (!file.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner)
+        || file.write(bytes) != bytes.size() || !file.commit()) { error = prefix(name) + file.errorString(); return false; }
     return true;
 }
 
@@ -104,7 +104,7 @@ bool rollback(const QString &root, QString &error, const QSet<QString> *written 
         }
         if (!record[0].isNull()) {
             if (!write(root, name, record[0].toByteArray(), error)) return false;
-        } else if (!QFile::remove(root + '/' + name)) { error = prefix(name) + QObject::tr("cannot undo creation."); return false; }
+        } else if (!QFile::remove(root + '/' + PiconfDocument::storagePath(name))) { error = prefix(name) + QObject::tr("cannot undo creation."); return false; }
     }
     if (QFile::remove(root + '/' + Journal)) return true;
     error = QObject::tr("Cannot clear the configuration recovery record."); return false;
