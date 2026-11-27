@@ -26,11 +26,35 @@ then import the resulting `.piext` in **Settings → Add-ons**.
 
 ## Screenshots
 
-| Notes | Calendar |
-| --- | --- |
-| ![A note with typed text and a hand-drawn map](docs/screenshots/notes.png) | ![Pilon Calendar in month view](docs/screenshots/calendar.png) |
-| **Files** | **Add-ons** |
-| ![Files showing folders and documents on this device](docs/screenshots/files.png) | ![Settings showing the installed add-ons and an add-on import tile](docs/screenshots/add-ons.png) |
+<table width="100%">
+  <thead>
+    <tr>
+      <th width="50%" align="center">Notes</th>
+      <th width="50%" align="center">Calendar</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td width="50%" align="center" valign="top"><img src="docs/screenshots/notes.png" width="640" alt="A note with typed text and a hand-drawn map"></td>
+      <td width="50%" align="center" valign="top"><img src="docs/screenshots/calendar.png" width="640" alt="Pilon Calendar in month view"></td>
+    </tr>
+  </tbody>
+</table>
+
+<table width="100%">
+  <thead>
+    <tr>
+      <th width="50%" align="center">Files</th>
+      <th width="50%" align="center">Add-ons</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td width="50%" align="center" valign="top"><img src="docs/screenshots/files.png" width="640" alt="Files showing folders and documents on this device"></td>
+      <td width="50%" align="center" valign="top"><img src="docs/screenshots/add-ons.png" width="640" alt="Settings showing the installed add-ons and an add-on import tile"></td>
+    </tr>
+  </tbody>
+</table>
 
 [Contribute](CONTRIBUTING.md) · [Report a bug](https://github.com/Lavarite/Pilon/issues) · [GPL-3.0-only](LICENSE)
 

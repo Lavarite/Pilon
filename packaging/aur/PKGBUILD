@@ -21,7 +21,7 @@ optdepends=('qt6-wayland: native Wayland support'
             'ffmpeg: media conversion and previews')
 # Qt's two-pass resource compiler needs the intermediate object data.
 options=('!lto')
-_source_sha256=95bb9c1c201687549a2e0ed1e2a8f509587192d0a11e2d1c1448bafa155e9e6f
+_source_sha256=ef68b6279b74787bd16b89f927b878faee8b10989fccc324a99dd3af53dfdd99
 _vterm=libvterm-0.3.3
 _ical=libical-3.0.20
 source=("$url/releases/download/v$pkgver/pilon-$pkgver-source.tar.gz"
