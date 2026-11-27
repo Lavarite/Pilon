@@ -5,6 +5,10 @@ Enable the add-ons you need or build your own.
 
 [Install](#install) · [Add-ons](#built-in-add-ons) · [Build an add-on](#build-an-add-on) · [Documentation](docs/index.md)
 
+## Trailer
+
+A 23-second tour of Pilon.
+
 ## Install
 
 **Linux x86‑64**
