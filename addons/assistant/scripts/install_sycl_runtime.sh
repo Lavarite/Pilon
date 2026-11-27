@@ -6,7 +6,7 @@ pilon_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)"
 if [[ "${PILON_ENV_LOADED:-0}" != 1 ]]; then
     exec python3 "$pilon_root/src/scripts/environment.py" bash "${BASH_SOURCE[0]}" "$@"
 fi
-pilon_sycl="$pilon_root/runtime/sycl"
+pilon_sycl="$PILON_RUNTIME_DIR/sycl"
 pilon_tag=b10964
 pilon_archive_sha=31699a7742ee6a3177be642baeecdc38cecf593ac74870e722cea0dbe8c291c9
 if [[ "$(uname -m)" != x86_64 ]]; then

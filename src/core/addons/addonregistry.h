@@ -21,7 +21,7 @@ class AddonRegistry : public QObject {
     Q_PROPERTY(bool recovery READ recovery CONSTANT)
   public:
     explicit AddonRegistry(QObject *parent = nullptr);
-    AddonRegistry(const QString &builtins, const QString &installed, const QString &data, bool recovery,
+    AddonRegistry(const QString &builtins, const QString &installed, const QString &state, bool recovery,
                   QObject *parent = nullptr);
     QVariantList addons() const;
     QVariantList sidebarAddons() const;
@@ -46,14 +46,16 @@ class AddonRegistry : public QObject {
     Q_INVOKABLE bool install(const QUrl &package);
     Q_INVOKABLE bool installConfigured(const QUrl &package, const QString &id, const QString &version, const QString &sha256);
     Q_INVOKABLE bool installConfiguredBuiltin(const QString &id, const QString &version, const QString &sha256);
+    Q_INVOKABLE bool hasBundledPackage(const QString &id) const;
     Q_INVOKABLE bool downloadConfigured(const QUrl &source, const QString &id, const QString &version, const QString &sha256);
     Q_INVOKABLE void cancelConfiguredDownload();
     QString restoringAddon() const { return m_restoring; }
-    Q_INVOKABLE void refresh();
+    Q_INVOKABLE bool refresh();
     Q_INVOKABLE QString dataDirectory(const QString &id);
     Q_INVOKABLE bool settingsWritable(const QString &id);
     Q_INVOKABLE QVariant setting(const QString &id, const QString &key, const QVariant &fallback = {});
     Q_INVOKABLE bool setSetting(const QString &id, const QString &key, const QVariant &value);
+    static constexpr qint64 MaxPackageBytes = 128 * 1024 * 1024;
   signals:
     void sidebarChanged();
     void changed();
@@ -61,8 +63,6 @@ class AddonRegistry : public QObject {
     void configuredDownloadFinished(const QString &id, bool installed, const QString &error);
 
   private:
-    AddonRegistry(const QString &builtins, const QString &installed, const QString &data,
-                  const QString &state, bool recovery, QObject *parent);
     struct Snapshot {
         QByteArray hash;
         QVariantMap row;
@@ -74,12 +74,15 @@ class AddonRegistry : public QObject {
     bool loadState();
     bool saveState();
     bool seedPackages();
+    bool migrateFlatPackages();
+    QString packagePath(const QString &id) const;
+    QStringList packagePaths() const;
     bool installPackage(const QUrl &package, const QString &id, const QString &version, const QString &sha256);
     QString m_restoring;
     QPointer<QNetworkReply> m_download;
     void rearmWatches();
     bool fail(const QString &message);
-    QString m_builtins, m_installed, m_data, m_error;
+    QString m_builtins, m_installed, m_error;
     bool m_recovery = false;
     QList<QVariantMap> m_rows;
     QHash<QString, Snapshot> m_snapshots;

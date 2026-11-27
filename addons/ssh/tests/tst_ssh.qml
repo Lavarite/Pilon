@@ -126,6 +126,29 @@ TestCase {
         contained(dialog, "sshCancelConnection")
         tabletInput.saveWindow(dialog.dialogWindow.contentItem, "/tmp/pilon-ssh-approval.png")
     }
+    function test_longLoginTextFitsAtNarrowTouchScale_data() {
+        return [{tag: "password", mode: "password-long"}, {tag: "host-key", mode: "host-long"},
+                {tag: "browser-approval", mode: "approval-long"}]
+    }
+    function test_longLoginTextFitsAtNarrowTouchScale(data) {
+        const dialog = openConnection(data.mode, {width: 400, height: 600, touch: true})
+        if (data.mode !== "approval-long") waitForConnectionPrompt(dialog)
+        else tryVerify(() => dialog.details.includes("x".repeat(250)))
+        renderConnectionDialog(dialog)
+        verify(dialog.dialogWindow.width < appWindow.width)
+        verify(dialog.dialogWindow.height < appWindow.height)
+        const body = findChild(dialog, "sshConnectionDetails")
+        if (data.mode !== "password-long") {
+            verify(body.contentWidth <= body.width + 1, "Long host and approval URL wrap without clipping")
+        } else {
+            const prompt = findChild(dialog,"sshConnectionPrompt")
+            verify(prompt !== null)
+            verify(prompt.contentWidth <= prompt.width + 1, "The full password prompt wraps without clipping")
+            contained(dialog,"sshPromptInput")
+        }
+        contained(dialog, "sshCancelConnection")
+        if (data.mode !== "approval-long") contained(dialog, "sshContinueConnection")
+    }
     function test_connectingFitsItsStatusAndCancelOnOneRow() {
         const dialog = openConnection("waiting", {width: 380, height: 760, touch: true})
         renderConnectionDialog(dialog)
@@ -138,6 +161,30 @@ TestCase {
         mouseClick(cancel)
         tryCompare(dialog, "opened", false)
         tryCompare(findChild(appWindow, "sshManager"), "running", false)
+    }
+    function test_passwordPromptExpandsAnOpenConnectionWindow_data() { return sizes() }
+    function test_passwordPromptExpandsAnOpenConnectionWindow(data) {
+        const dialog = openConnection("password-delayed", data)
+        const manager = findChild(appWindow, "sshManager")
+        renderConnectionDialog(dialog)
+        verify(!dialog.prompting)
+        const host = dialog.dialogWindow
+        const connectingHeight = host.height
+        manager.writeTerminalData("\n")
+        waitForConnectionPrompt(dialog)
+        renderConnectionDialog(dialog)
+        tryVerify(() => host.height > connectingHeight, 5000, "The password form expands the connecting window")
+        compare(host.minimumHeight, host.height, "Compositors receive the expanded form as the minimum window height")
+        compare(host.transientParent, appWindow)
+        const input = contained(dialog, "sshPromptInput")
+        compare(input.echoMode, TextInput.Password)
+        tryCompare(input, "activeFocus", true)
+        const submit = contained(dialog, "sshContinueConnection")
+        contained(dialog, "sshCancelConnection")
+        input.text = "test-password"
+        mouseClick(submit)
+        tryCompare(manager, "authenticated", true)
+        tryCompare(dialog, "visible", false)
     }
     function test_passwordActionsRemainReachableInShortWindow() {
         const dialog=openConnection("password",{width:800,height:600,touch:true})
@@ -181,6 +228,28 @@ TestCase {
         compare(result.shows,data.shows)
         if(data.shows) verify(result.focusAtShow)
         if(data.button===Qt.LeftButton) compare(result.bytes,data.active?"pwd\r":"")
+    }
+    function test_terminalCopyMenuKeepsSelection() {
+        const dialog = openConnection("host", {width: 800, height: 600, touch: false})
+        const manager = waitForConnectionPrompt(dialog)
+        renderConnectionDialog(dialog)
+        mouseClick(contained(dialog, "sshContinueConnection"))
+        tryCompare(manager, "authenticated", true)
+        tryCompare(dialog, "visible", false)
+        const terminal = tabletInput.terminalItem(appWindow)
+        tryCompare(terminal, "hasContent", true)
+        terminal.selectAll()
+
+        mouseClick(terminal, 45, 24, Qt.RightButton)
+        const menu = findChild(appWindow, "sshTerminalMenu")
+        tryCompare(menu, "opened", true)
+        verify(terminal.hasSelection)
+        const copy = findChild(menu, "sshTerminalCopy")
+        verify(copy.enabled)
+        mouseClick(copy)
+        tryVerify(() => tabletInput.clipboardText().startsWith("Connected"))
+        tryCompare(menu, "opened", false)
+        verify(manager.authenticated)
     }
     function test_terminalImeComposesVisiblyWithoutSendingUncommittedText() {
         const terminal = createTemporaryObject(terminalComponent, test)

@@ -28,6 +28,10 @@ QString serverQuotaPath(const QVariantMap &profile) {
         profile.value("baseUrl").toString(), profile.value("remoteModel").toString(),
         profile.value("protocol").toString(), profile.value("quotaRevision").toString()});
 }
+bool sameOrigin(const QUrl &first, const QUrl &second) {
+    const auto port = [](const QUrl &url) { return url.port(url.scheme() == "https" ? 443 : 80); };
+    return first.scheme() == second.scheme() && first.host() == second.host() && port(first) == port(second);
+}
 }
 
 AssistantConnections::AssistantConnections(QObject *parent) : QObject(parent)
@@ -237,8 +241,15 @@ void AssistantConnections::readModels(const QString &cursor, QVariantList accumu
                 reasoning.append(QVariantMap{{"id", effort}, {"name", effort}});
             }
             const auto modalities = entry.value("inputModalities").toArray();
+            QString fastTier;
+            for (const auto &option : entry.value("serviceTiers").toArray()) {
+                const auto tier = option.toObject().value("id").toString();
+                if (tier == "priority" || tier == "fast") { fastTier = tier; break; }
+            }
             accumulated.append(QVariantMap{{"id", "chatgpt/" + model}, {"name", entry.value("displayName").toString(model)},
-                {"provider", "chatgpt"}, {"remoteModel", model}, {"reasoning", reasoning}, {"vision", modalities.contains("image")}, {"audio", modalities.contains("audio")}});
+                {"provider", "chatgpt"}, {"remoteModel", model}, {"reasoning", reasoning},
+                {"vision", modalities.contains("image")}, {"audio", modalities.contains("audio")},
+                {"fastServiceTier", fastTier}, {"defaultServiceTier", entry.value("defaultServiceTier").toString()}});
         }
         const auto cursor = result.value("nextCursor").toString();
         if (!cursor.isEmpty()) { readModels(cursor, accumulated); return; }
@@ -279,13 +290,19 @@ bool AssistantConnections::keyring(const QString &action, const QString &id, QBy
     if (action == "lookup") *secret = process.readAllStandardOutput().trimmed();
     return true;
 }
-QByteArray AssistantConnections::apiKey(const QString &id)
+QByteArray AssistantConnections::apiKey(const QString &id, const QUrl &origin)
 {
     for (const auto &server : m_servers) {
         const auto entry = server.toMap();
-        if (entry.value("id") == id && !entry.value("hasKey",true).toBool()) return {};
+        if (entry.value("id") != id) continue;
+        if (!origin.isEmpty() && !sameOrigin(origin, QUrl(entry.value("baseUrl").toString()))) return {};
+        if (!entry.value("hasKey", true).toBool()) return {};
+        if (!m_keys.contains(id)) {
+            QByteArray key;
+            if (keyring("lookup", entry.value("keyringId", id).toString(), &key)) m_keys[id] = key;
+        }
+        break;
     }
-    if (!m_keys.contains(id)) { QByteArray key; if (keyring("lookup", id, &key)) m_keys[id] = key; }
     return m_keys.value(id);
 }
 bool AssistantConnections::saveServer(const QString &existingId, const QString &name, const QString &baseUrl,
@@ -298,57 +315,86 @@ bool AssistantConnections::saveServer(const QString &existingId, const QString &
         fail(tr("Enter a name, HTTP(S) base URL without credentials, model ID, and a context size between 2,048 and 2,097,152.")); return false;
     }
     QString path = url.path(); while (path.endsWith('/')) path.chop(1); url.setPath(path);
-    QString id = existingId;
-    if (id.isEmpty()) id = "api/" + QUuid::createUuid().toString(QUuid::WithoutBraces);
-    else if (std::none_of(m_servers.begin(), m_servers.end(), [&](const QVariant &v) { return v.toMap().value("id") == id; })) return false;
-    if (!existingId.isEmpty() && key.isEmpty()) {
-        for (const auto &value : m_servers) {
-            const auto old = value.toMap();
-            if (old.value("id") != existingId) continue;
-            const QUrl previous(old.value("baseUrl").toString());
-            if ((previous.scheme() != url.scheme() || previous.host() != url.host() || previous.port() != url.port())
-                && !apiKey(existingId).isEmpty()) {
-                fail(tr("Enter a new API key when changing the provider or server address.")); return false;
-            }
-        }
+    const auto match = std::find_if(m_servers.cbegin(), m_servers.cend(), [&](const QVariant &value) {
+        return value.toMap().value("id") == existingId;
+    });
+    const bool creating = existingId.isEmpty();
+    if (!creating && match == m_servers.cend()) return false;
+    const auto id = creating ? "api/" + QUuid::createUuid().toString(QUuid::WithoutBraces) : existingId;
+    const auto old = creating ? QVariantMap{} : match->toMap();
+    const auto oldKeyringId = old.value("keyringId", id).toString();
+    const bool hadKey = !creating && old.value("hasKey", true).toBool();
+    const QUrl previous(old.value("baseUrl").toString());
+    if (key.isEmpty() && hadKey && !sameOrigin(previous, url)) {
+        fail(tr("Enter a new API key when changing the provider or server address."));
+        return false;
     }
-    if (!key.isEmpty()) {
-        auto secret = key.toUtf8();
-        if (!keyring("store", id, &secret)) { fail(tr("The system keyring could not save the API key. Unlock your keyring and retry.")); return false; }
-        m_keys[id] = secret;
-    }
-    QVariant hasKey;
-    if (!key.isEmpty()) hasKey = true;
-    else if (existingId.isEmpty()) hasKey = false;
-    else for (const auto &value : m_servers)
-        if (value.toMap().value("id") == id) hasKey = value.toMap().value("hasKey");
     QVariantMap entry{{"id", id}, {"name", name.trimmed()}, {"baseUrl", url.toString()}, {"remoteModel", model.trimmed()},
                       {"protocol", protocol}, {"context", context}, {"vision", vision},
                       {"modalityOverrides", modalities}};
+    const auto hasKey = key.isEmpty() && !creating ? old.value("hasKey") : QVariant(!key.isEmpty());
     if (hasKey.isValid()) entry["hasKey"] = hasKey;
     for (const auto &kind : {"vision", "audio", "video"})
         if (modalities.contains(kind)) entry[kind] = modalities.value(kind).toInt() == 1;
-    bool replaced = false;
-    for (auto &value : m_servers) if (value.toMap().value("id") == id) {
-        const auto old = value.toMap();
-        if (!key.isEmpty()) entry["quotaRevision"] = QUuid::createUuid().toString(QUuid::WithoutBraces);
-        else if (old.contains("quotaRevision")) entry["quotaRevision"] = old.value("quotaRevision");
-        if (serverQuotaPath(old) != serverQuotaPath(entry)) {
-            QFile::remove(serverQuotaPath(old));
-            m_serverUsage.remove(id);
+    for (const auto *field : {"quotaRevision", "keyringId"})
+        if (old.contains(field)) entry[field] = old.value(field);
+    auto secret = key.toUtf8();
+    QString keyringId = id;
+    if (!secret.isEmpty()) {
+        if (!creating) {
+            const auto revision = QUuid::createUuid().toString(QUuid::WithoutBraces);
+            entry["quotaRevision"] = revision;
+            keyringId += '/' + revision;
+            entry["keyringId"] = keyringId;
         }
-        value = entry; replaced = true; break;
+        // Keep the current profile and key usable until the replacement reaches disk.
+        if (!keyring("store", keyringId, &secret)) {
+            fail(tr("The system keyring could not save the API key. Unlock your keyring and retry."));
+            return false;
+        }
     }
-    if (!replaced) m_servers.append(entry);
-    PilonSettings().setValue("assistant/apiServers", m_servers); m_error.clear(); emit modelsChanged(); emit stateChanged(); if (!key.isEmpty()) emit authenticationChanged();
+    auto updated = m_servers;
+    if (creating) updated.append(entry);
+    else updated[match - m_servers.cbegin()] = entry;
+    PilonSettings settings;
+    settings.setValue("assistant/apiServers", updated);
+    settings.sync();
+    QByteArray unused;
+    if (settings.status() != PilonSettings::NoError) {
+        settings.setValue("assistant/apiServers", m_servers);
+        settings.sync();
+        auto error = tr("Unable to save the server settings. Check your settings folder permissions.");
+        if (!secret.isEmpty() && !keyring("clear", keyringId, &unused))
+            error += '\n' + tr("The staged API key could not be removed from the system keyring.");
+        fail(error);
+        return false;
+    }
+    if (!creating && serverQuotaPath(old) != serverQuotaPath(entry)) {
+        QFile::remove(serverQuotaPath(old));
+        m_serverUsage.remove(id);
+    }
+    m_servers = updated;
+    m_error.clear();
+    if (!secret.isEmpty()) {
+        m_keys[id] = secret;
+        if (hadKey && !keyring("clear", oldKeyringId, &unused))
+            m_error = tr("The server was saved, but the previous API key could not be removed from the system keyring.");
+    }
+    emit modelsChanged(); emit stateChanged();
+    if (!secret.isEmpty()) emit authenticationChanged();
     if (!modalities.isEmpty()) detectModalities(id);
     return true;
 }
 bool AssistantConnections::removeServer(const QString &id)
 {
     bool hasKey = true;
+    QString keyringId = id;
     for (const auto &value : m_servers)
-        if (value.toMap().value("id") == id) hasKey = value.toMap().value("hasKey", true).toBool();
+        if (const auto entry = value.toMap(); entry.value("id") == id) {
+            hasKey = entry.value("hasKey", true).toBool();
+            keyringId = entry.value("keyringId", id).toString();
+            break;
+        }
     auto remaining = m_servers;
     remaining.removeIf([&](const QVariant &v) { return v.toMap().value("id") == id; });
     if (remaining.size() == m_servers.size()) return false;
@@ -359,9 +405,11 @@ bool AssistantConnections::removeServer(const QString &id)
         fail(tr("Unable to save the server removal. Check your settings folder permissions.")); return false;
     }
     QByteArray unused;
-    if (hasKey && !keyring("clear", id, &unused)) {
+    if (hasKey && !keyring("clear", keyringId, &unused)) {
         settings.setValue("assistant/apiServers", m_servers); settings.sync();
-        fail(tr("Unable to remove this server's API key. Unlock your system keyring and try again.")); return false;
+        auto error = tr("Unable to remove this server's API key. Unlock your system keyring and try again.");
+        if (settings.status() != PilonSettings::NoError) error += '\n' + tr("The previous server settings could not be restored.");
+        fail(error); return false;
     }
     for (const auto &value : m_servers)
         if (value.toMap().value("id") == id) QFile::remove(serverQuotaPath(value.toMap()));
@@ -433,7 +481,8 @@ QVariantList AssistantConnections::usage() const
             const auto remaining = qBound(0.0, 100.0 - window.value("usedPercent").toDouble(), 100.0);
             const auto reset = window.value("resetsAt").toInteger();
             const auto label = bucket.value("limitName").toString(it.key()) + ": " + period;
-            rows.append(QVariantMap{{"label", label}, {"remaining", remaining}, {"resetsAt", reset},
+            rows.append(QVariantMap{{"bucket", it.key()}, {"windowMinutes", minutes},
+                {"label", label}, {"remaining", remaining}, {"resetsAt", reset},
                 {"text", label + tr(": %1% remaining").arg(remaining, 0, 'f', 0)
                     + (reset ? tr(", resets %1").arg(QDateTime::fromSecsSinceEpoch(reset).toLocalTime().toString("ddd HH:mm")) : QString{})}});
         }
@@ -476,8 +525,8 @@ void AssistantConnections::detectModalities(const QString &id, bool catalogFallb
     QNetworkRequest request(url);
     request.setTransferTimeout(10000);
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::SameOriginRedirectPolicy);
-    const auto key = apiKey(id);
-    if (!catalogFallback && !key.isEmpty()) request.setRawHeader("Authorization", "Bearer " + key);
+    const auto key = catalogFallback ? QByteArray{} : apiKey(id, base);
+    if (!key.isEmpty()) request.setRawHeader("Authorization", "Bearer " + key);
     if (directModel) {
         request.setRawHeader("anthropic-version", "2023-06-01");
         if (!key.isEmpty()) request.setRawHeader("x-api-key", key);

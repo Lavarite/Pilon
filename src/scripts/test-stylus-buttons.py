@@ -21,6 +21,8 @@ import subprocess
 import sys
 import time
 
+from environment import development_root
+
 
 ROOT = Path(__file__).resolve().parents[2]
 EVENT = struct.Struct('@llHHi')  # Linux input_event, native timeval layout.
@@ -67,7 +69,7 @@ def build_probe():
                            text=True, capture_output=True)
     if flags.returncode:
         raise RuntimeError('Qt 6 development libraries are unavailable. Use --raw for kernel events.\n' + flags.stderr)
-    output = ROOT / 'build/stylus-diagnostics/stylus-button-probe'
+    output = development_root() / 'builds/work/stylus-diagnostics/stylus-button-probe'
     output.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(['c++', '-std=c++23', '-O2', '-fPIC',
                     str(ROOT / 'src/tests/core/stylus_button_probe.cpp'), '-o', str(output),
@@ -191,7 +193,7 @@ def main():
     parser.add_argument('--build-only', action='store_true', help='Compile the Qt probe and exit.')
     parser.add_argument('--verbose', action='store_true', help='Also log continuous motion and pressure samples.')
     parser.add_argument('--duration', type=float, help='Stop after this many seconds (otherwise close the window or press Ctrl+C).')
-    parser.add_argument('--log', type=Path, help='Log path; defaults to build/stylus-buttons-TIMESTAMP.log.')
+    parser.add_argument('--log', type=Path, help='Log path (default: a timestamped file in the development build directory).')
     args = parser.parse_args()
     if args.duration is not None and args.duration <= 0:
         parser.error('--duration must be greater than zero')
@@ -207,7 +209,7 @@ def main():
         print(probe)
         return 0
     stamp = datetime.datetime.now().strftime('%Y%m%d-%H%M%S-%f')
-    log_path = (args.log or ROOT / f'build/stylus-buttons-{stamp}.log').resolve()
+    log_path = (args.log or development_root() / f'builds/work/stylus-buttons-{stamp}.log').resolve()
     log_path.parent.mkdir(parents=True, exist_ok=True)
     start = time.monotonic()
     with log_path.open('w', buffering=1) as log, selectors.DefaultSelector() as selector:

@@ -73,6 +73,7 @@ private:
     int m_textIndex = -1;
     int m_reasoningIndex = -1;
     int m_cachedTokens = 0;
+    qsizetype m_streamBytes = 0;
     qint64 m_sequence = 0;
     bool m_done = false;
     bool m_retrying = false;

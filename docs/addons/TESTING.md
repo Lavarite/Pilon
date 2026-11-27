@@ -9,13 +9,12 @@ the real keyring.
 ## Source behavior loop
 
 Write the behavior/failure test first, run it to demonstrate the missing
-behavior, implement the smallest change, then run the focused suite. For this
-repository:
+behavior, implement the smallest change, then run the focused suite. Configure
+and build with tests enabled using the [contributor guide](../../CONTRIBUTING.md#build-from-source).
 
 ```sh
-cmake -S src -B build -DPILON_BUILD_TESTS=ON
-cmake --build build --parallel 4
-ctest --test-dir build --output-on-failure -R '^(addons|addons_ui|samples_ui)$'
+build_dir="${PILON_DEV_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/pilon-dev}/builds/work/linux"
+ctest --test-dir "$build_dir" --output-on-failure -R '^(addons|addons_ui|samples_ui)$'
 ```
 
 `addons` verifies real registry/package/storage behavior. `addons_ui` verifies
@@ -27,10 +26,10 @@ other agents to avoid simultaneous builds of shared targets.
 For a single Checklist function without rebuilding QML:
 
 ```sh
-PATH="$PWD/build/test-tools:$PATH" QT_QUICK_BACKEND=software \
+PATH="$build_dir/test-tools:$PATH" QT_QUICK_BACKEND=software \
   PILON_NOTES_HANDWRITING=0 PILON_EPHEMERAL_CHAT=1 PILON_CODEX=/nonexistent \
-  build/pilon_notes_ui_tests -platform offscreen \
-  -input build/test-fixtures/src/tests/tst_samples.qml Samples::test_addCompleteRemoveAndRecreate
+  "$build_dir/pilon_notes_ui_tests" -platform offscreen \
+  -input "$build_dir/test-fixtures/src/tests/tst_samples.qml" Samples::test_addCompleteRemoveAndRecreate
 ```
 
 The supported mock is a scoped object passed through the required `addon`
@@ -46,10 +45,7 @@ prove compiled package discovery or real filesystem persistence.
 
 ## Actual package loop
 
-```sh
-python3 src/scripts/compile-addon.py examples/counter --output build/counter.piext
-python3 src/scripts/compile-addon.py examples/checklist --output build/checklist.piext
-```
+Compile Counter and Checklist with the [add-on build commands](index.md#compile-and-install).
 
 Exercise the compiled bundles through the real registry in an isolated test
 profile: install, enable, use the page, change settings, disable/re-enable and
@@ -99,11 +95,6 @@ the package source folder by accident.
 - Inspect a native window and repeat ordinary pointer input. QtTest's synthetic
   offscreen events alone cannot detect every compositor/modal/input blocker.
 - Confirm background work stops when disabled and settings remain passive.
-- If modifying a built-in managed-file integration, run `git_sync` and the
-  domain's native suite, plus `git_workspace_ui`, `git_changes_ui`, `git_adopt_ui`
-  and `github_ui` for affected UI. Test incoming edits/deletions, invalid snapshots,
-  unresolved conflicts, restart/Abort and failed reloads. These native contracts
-  are not required for an independent Counter-style package.
 - For shared preview managers, show two instances selecting different files;
   asynchronous reads stay bounded and neither view replaces the other's cached
   result. A real status/file change must refresh both views.
@@ -125,7 +116,7 @@ native posture callbacks and system insets.
 For shared widget changes, the focused CTest selection is:
 
 ```sh
-ctest --test-dir build --output-on-failure \
+ctest --test-dir "$build_dir" --output-on-failure \
   -R '^(addons|addons_ui|widgets|widgets_ui|widget_package_ui|calendar_widgets|calendar_widget_runtime|main_ui|controls_ui)$'
 ```
 
@@ -178,13 +169,14 @@ nothing and creates no signing keys. Build from any working directory; the
 source/resource paths are resolved relative to the repository:
 
 ```sh
+pilon_dev="${PILON_DEV_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/pilon-dev}"
 python3 src/scripts/android/build-widget-probe.py \
   --sdk "${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}" \
   --jdk "${JAVA_HOME:-$HOME/Android/jdk-21}" \
-  --output build/android/pilon-widget-preview-probe.apk
+  --output "$pilon_dev/builds/work/android/pilon-widget-preview-probe.apk"
 adb devices -l
 pilon_serial=REPLACE_WITH_CHOSEN_DEVICE_SERIAL
-adb -s "$pilon_serial" install -r build/android/pilon-widget-preview-probe.apk
+adb -s "$pilon_serial" install -r "$pilon_dev/builds/work/android/pilon-widget-preview-probe.apk"
 adb -s "$pilon_serial" shell am instrument -w \
   org.pilon.widgetpreviewprobe/org.pilon.PilonWidgetPreviewProbe
 adb -s "$pilon_serial" uninstall org.pilon.widgetpreviewprobe
@@ -208,13 +200,14 @@ It preserves enabled accessibility services with
 `FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES`.
 
 ```sh
+pilon_dev="${PILON_DEV_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/pilon-dev}"
 python3 src/scripts/android/build-widget-probe.py --kind scroll \
   --sdk "${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}" \
   --jdk "${JAVA_HOME:-$HOME/Android/jdk-21}" \
-  --output build/android/pilon-widget-scroll-probe.apk
+  --output "$pilon_dev/builds/work/android/pilon-widget-scroll-probe.apk"
 adb devices -l
 pilon_serial=REPLACE_WITH_CHOSEN_DEVICE_SERIAL
-adb -s "$pilon_serial" install -r build/android/pilon-widget-scroll-probe.apk
+adb -s "$pilon_serial" install -r "$pilon_dev/builds/work/android/pilon-widget-scroll-probe.apk"
 adb -s "$pilon_serial" shell am instrument -w \
   org.pilon.widgetscrollprobe/org.pilon.PilonWidgetScrollProbe
 adb -s "$pilon_serial" uninstall org.pilon.widgetscrollprobe

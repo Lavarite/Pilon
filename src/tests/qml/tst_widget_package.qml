@@ -18,6 +18,7 @@ TestCase {
         property bool setupRequired: false
         property bool backgroundEnabled: false
         property bool trayEnabled: false
+        readonly property bool canHideToTray: trayEnabled
         property bool offline: true
         property string error: ""
         signal quitRequested()

@@ -5,6 +5,7 @@
 #include <QNetworkRequest>
 #include <QNetworkReply>
 #include <QTemporaryFile>
+#include <QTimer>
 #include <memory>
 
 bool AddonRegistry::downloadConfigured(const QUrl &source, const QString &id, const QString &version,
@@ -31,11 +32,15 @@ bool AddonRegistry::downloadConfigured(const QUrl &source, const QString &id, co
     m_download = reply;
     m_restoring = id;
     const auto failure = std::make_shared<QString>();
+    QTimer::singleShot(std::chrono::minutes(5), reply, [reply, failure] {
+        if (reply->isFinished()) return;
+        *failure = QObject::tr("The add-on download took too long. Try again.");
+        reply->abort();
+    });
     const auto consume = [reply, file, failure] {
-        constexpr qint64 limit = 128 * 1024 * 1024;
         while (failure->isEmpty() && reply->bytesAvailable()) {
             const auto bytes = reply->read(64 * 1024);
-            if (bytes.isEmpty() || file->size() + bytes.size() > limit || file->write(bytes) != bytes.size()) {
+            if (bytes.isEmpty() || file->size() + bytes.size() > MaxPackageBytes || file->write(bytes) != bytes.size()) {
                 *failure = QObject::tr("Cannot store the download. Packages must fit on disk and be at most 128 MiB.");
                 return false;
             }

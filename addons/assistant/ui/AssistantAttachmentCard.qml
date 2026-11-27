@@ -21,13 +21,47 @@ Rectangle {
     property bool removable: false
     property string warning: ""
     signal removeRequested()
+    signal playbackRequested()
     readonly property bool audio: (attachment.mime || "").startsWith("audio/")
     readonly property bool photo: (attachment.mime || "").startsWith("image/")
+    readonly property bool currentAudio: audio && String(player.source) === String(attachment.url)
+    property real pendingSeek: -1
     width: Math.min(280, parent ? parent.width : 280)
     height: photo ? 148 : 62
     radius: 9
     color: Qt.alpha(card.textColour, 0.08)
     clip: true
+
+    function seekAudio(fraction) {
+        if (!currentAudio || player.playbackState !== MediaPlayer.PlayingState)
+            playbackRequested()
+        pendingSeek = Math.max(0, Math.min(1, fraction))
+        if (!currentAudio)
+            player.source = attachment.url
+        applyPendingSeek()
+    }
+    function applyPendingSeek() {
+        if (pendingSeek < 0 || !currentAudio || !player.seekable || player.duration <= 0
+                || player.mediaStatus === MediaPlayer.LoadingMedia)
+            return
+        const position = Math.round(pendingSeek * player.duration)
+        pendingSeek = -1
+        if (player.playbackState !== MediaPlayer.PlayingState)
+            player.play()
+        player.setPosition(position)
+    }
+    Connections {
+        target: card.pendingSeek >= 0 ? card.player : null
+        function onSourceChanged() { if (!card.currentAudio) card.pendingSeek = -1 }
+        function onSeekableChanged() { card.applyPendingSeek() }
+        function onDurationChanged() { card.applyPendingSeek() }
+        function onMediaStatusChanged() {
+            if (card.player.mediaStatus === MediaPlayer.InvalidMedia)
+                card.pendingSeek = -1
+            else
+                card.applyPendingSeek()
+        }
+    }
 
     Image {
         anchors.fill: parent
@@ -44,37 +78,70 @@ Rectangle {
         anchors.verticalCenter: parent.verticalCenter
         visible: card.audio
         display: AbstractButton.IconOnly
-        text: card.player.playbackState === MediaPlayer.PlayingState
-              && card.player.source.toString() === String(card.attachment.url) ? qsTr("Stop audio") : qsTr("Play audio")
-        icon.source: card.player.playbackState === MediaPlayer.PlayingState
-                     && card.player.source.toString() === String(card.attachment.url) ? "icons/stop.svg" : "icons/play.svg"
+        readonly property bool playing: card.currentAudio && card.player.playbackState === MediaPlayer.PlayingState
+        text: playing ? qsTr("Stop audio") : qsTr("Play audio")
+        icon.source: playing ? "icons/stop.svg" : "icons/play.svg"
         onClicked: {
-            if (card.player.playbackState === MediaPlayer.PlayingState
-                    && card.player.source.toString() === String(card.attachment.url))
+            card.pendingSeek = -1
+            if (playing)
                 card.player.stop()
             else {
+                card.playbackRequested()
                 card.player.source = card.attachment.url
                 card.player.play()
             }
         }
     }
-    Row {
-        id: waveformRow
+    PilonSlider {
+        id: waveform
+        objectName: "assistantAudioSeek"
+        readonly property var peaks: card.attachment.waveform || []
         x: 48
         y: 10
         height: 28
-        width: card.width - 88
-        spacing: 2
+        width: Math.max(0, card.width - x - (card.removable ? 38 : 10))
+        padding: 0
         visible: card.audio
-        Repeater {
-            model: card.attachment.waveform || []
-            delegate: Rectangle {
-                required property real modelData
-                width: Math.max(1, (waveformRow.width - 47 * 2) / 48)
-                height: Math.max(2, modelData * 28)
-                anchors.verticalCenter: waveformRow.verticalCenter
-                radius: width / 2
-                color: card.textColour
+        enabled: !!card.attachment.url && peaks.length > 0 && width > 0
+        from: 0
+        to: 1
+        live: false
+        value: card.pendingSeek >= 0 ? card.pendingSeek
+            : card.currentAudio ? card.player.position / Math.max(1, card.player.duration) : 0
+        handle: null
+        Accessible.name: qsTr("Audio position")
+        onMoved: card.seekAudio(position)
+        TapHandler {
+            enabled: waveform.enabled
+            onTapped: point => {
+                if (!playAudio.playing && card.pendingSeek < 0)
+                    card.seekAudio(point.position.x / waveform.width)
+            }
+        }
+        background: Item {
+            Row {
+                id: waveformRow
+                anchors.fill: parent
+                spacing: Math.min(2, width / Math.max(1, waveform.peaks.length * 2))
+                Repeater {
+                    model: waveform.peaks
+                    delegate: Rectangle {
+                        required property int index
+                        required property real modelData
+                        width: (waveformRow.width - (waveform.peaks.length - 1) * waveformRow.spacing) / waveform.peaks.length
+                        height: Math.max(2, modelData * waveformRow.height)
+                        anchors.verticalCenter: waveformRow.verticalCenter
+                        radius: width / 2
+                        color: card.currentAudio && (index + .5) / waveform.peaks.length > waveform.value
+                            ? Qt.alpha(card.textColour, .55) : card.textColour
+                    }
+                }
+            }
+            Rectangle {
+                anchors.fill: parent
+                visible: waveform.activeFocus
+                color: "transparent"
+                border.color: card.textColour
             }
         }
     }

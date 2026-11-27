@@ -3,6 +3,7 @@ import importlib.util
 import os
 from pathlib import Path
 import unittest
+from types import SimpleNamespace
 from urllib.parse import parse_qs, urlparse
 from unittest.mock import Mock
 
@@ -25,6 +26,39 @@ class SearchTests(unittest.TestCase):
             worker.handle(page, {"name": "browser_search", "args": {"query": "fixture", "engine": "bing"}})
         page.goto.assert_not_called()
 
+    def test_open_bounds_navigation_and_selector_waits(self):
+        page = Mock()
+        page.evaluate.return_value = {"content": "Fixture", "links": [], "title": "Fixture"}
+        url = "https://example.org/fixture"
+        page.url = url
+        page.goto.return_value.status = 200
+        page.goto.return_value.request.url = url
+        page.goto.return_value.request.redirected_from = None
+        worker.handle(page, {"name": "browser_open", "args": {"url": url, "wait_for": "#ready"}})
+        page.goto.assert_called_once_with(url, wait_until="domcontentloaded", timeout=10000)
+        page.wait_for_selector.assert_called_once_with("#ready", timeout=10000)
+
+    def test_requires_web_urls_without_credentials(self):
+        page = Mock()
+        with self.assertRaisesRegex(ValueError, "without embedded credentials"):
+            worker.handle(page, {"name": "browser_open", "args": {"url": "https://fixture@example.org/page"}})
+        page.goto.assert_not_called()
+
+    def test_rejects_excess_redirects_and_https_downgrades(self):
+        page = Mock()
+        url = "https://example.org/fixture"
+        request = SimpleNamespace(url=url, redirected_from=None)
+        for index in range(5):
+            request = SimpleNamespace(url=f"https://example.org/{index}", redirected_from=request)
+        page.goto.return_value.request = request
+        self.assertIs(worker.navigate(page, url), page.goto.return_value)
+        page.goto.return_value.request = SimpleNamespace(url=url, redirected_from=request)
+        with self.assertRaisesRegex(ValueError, "five redirects"):
+            worker.navigate(page, url)
+        page.goto.return_value.request.url = "http://example.org/fixture"
+        with self.assertRaisesRegex(ValueError, "HTTPS to HTTP"):
+            worker.navigate(page, url)
+
 
 @unittest.skipUnless(os.environ.get("PILON_TEST_BROWSER"), "Set PILON_TEST_BROWSER=1 for Chromium integration.")
 class BrowserTests(unittest.TestCase):
@@ -40,7 +74,7 @@ class BrowserTests(unittest.TestCase):
         cls.playwright.stop()
 
     def setUp(self):
-        self.page = self.browser.new_page()
+        self.page = self.browser.new_page(accept_downloads=False)
         self.addCleanup(self.page.close)
         self.urls = []
 
@@ -87,6 +121,18 @@ class BrowserTests(unittest.TestCase):
         result = worker.handle(self.page, {"name": "browser_open", "args": {"url": "https://example.org/page"}})
         self.assertEqual(result["http_status"], 503)
         self.assertIn("error", result)
+
+    def test_snapshot_clearly_reports_a_bounded_large_document(self):
+        self.serve("<article>" + "a" * (512 * 1024 + 1000) + "</article>")
+        result = worker.handle(self.page, {"name": "browser_open", "args": {"url": "https://example.org/large"}})
+        self.assertTrue(result["extraction_limited"])
+        self.assertEqual(len(result["content"]), 512 * 1024)
+
+    def test_browser_reports_downloads_as_unsupported_pages(self):
+        self.page.route("**/*", lambda route: route.fulfill(status=200,
+            headers={"Content-Disposition": "attachment; filename=fixture.txt"}, body="fixture"))
+        with self.assertRaisesRegex(Exception, "Download"):
+            worker.handle(self.page, {"name": "browser_open", "args": {"url": "https://example.org/attachment"}})
 
     def test_main_content_excludes_navigation_scripts_and_fragment_links(self):
         self.serve("""<title>Primary evidence</title><nav>Site navigation<a href=/menu>Menu</a></nav>

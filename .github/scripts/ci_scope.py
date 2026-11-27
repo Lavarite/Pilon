@@ -5,7 +5,7 @@ import sys
 
 
 def is_documentation(path):
-    return path == b"README.md" or (
+    return path in (b"README.md", b"CONTRIBUTING.md") or (
         path.startswith(b"docs/") and path.endswith(b".md")
     ) or (
         path.startswith(b"docs/screenshots/") and path.endswith(b".png")

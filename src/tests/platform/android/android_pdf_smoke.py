@@ -7,9 +7,14 @@ import math
 from pathlib import Path
 import shlex
 import subprocess
+import sys
 import uuid
 
 ROOT = Path(__file__).resolve().parents[4]
+sys.path.insert(0, str(ROOT / "src/scripts"))
+from environment import development_root
+
+DEV = development_root()
 
 
 def run(*command, **kwargs):
@@ -28,7 +33,7 @@ def main():
     parser.add_argument("--ndk", type=Path, default=Path.home() / "Android/Sdk/ndk/27.2.12479018")
     parser.add_argument("--python", type=Path, default=ROOT / "runtime/documents/bin/python")
     args = parser.parse_args()
-    work = ROOT / "build/android/pdfium"
+    work = DEV / "dev-deps/android/pdfium"
     source, build, fixtures = work / "probe-source", work / "smoke-build", work / "fixtures"
     for folder in (source, fixtures):
         folder.mkdir(parents=True, exist_ok=True)
@@ -83,7 +88,7 @@ content="0 0 0 rg\\n"+"".join(f"{i%300} {i%500} 100 100 re f\\n" for i in range(
 heavy.update_stream(page.get_contents()[0],content.encode());heavy.save(out/"heavy.pdf")
 '''
     run(args.python, "-c", generate, fixtures)
-    libraries = [build / "pdf-probe", ROOT / "builds/android/runtime/arm64-v8a/libpdfium.so",
+    libraries = [build / "pdf-probe", DEV / "builds/android/runtime/arm64-v8a/libpdfium.so",
                  args.ndk / "toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so"]
     libraries += [args.qt / f"lib/libQt6{name}_arm64-v8a.so" for name in ("Core", "Gui", "Qml", "Network", "Concurrent")]
     for library in libraries:

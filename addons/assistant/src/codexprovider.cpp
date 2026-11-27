@@ -5,9 +5,14 @@
 #include <QRegularExpression>
 #include <QTcpSocket>
 #include <QUuid>
+#include <algorithm>
 #include <memory>
 
 namespace {
+constexpr qsizetype maximumStreamLineBytes = 16 * 1024 * 1024;
+constexpr qsizetype maximumStreamBytes = 64 * 1024 * 1024;
+constexpr qsizetype maximumErrorBytes = 64 * 1024;
+
 QString freshId(const QString &prefix) { return prefix + QUuid::createUuid().toString(QUuid::Id128); }
 QString qualified(const QJsonObject &item)
 {
@@ -230,6 +235,7 @@ QJsonArray CodexProvider::responseHistory(const QJsonArray &messages)
 void CodexProvider::accept()
 {
     while (auto *socket = m_server.nextPendingConnection()) {
+        socket->setReadBufferSize(128 * 1024);
         struct Request { QByteArray buffer; bool received = false; };
         auto request = std::make_shared<Request>();
         connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
@@ -242,15 +248,44 @@ void CodexProvider::accept()
                 socket->write("HTTP/1.1 " + QByteArray::number(code) + ' ' + reason + "\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
                 socket->disconnectFromHost();
             };
-            if (headerEnd < 0) { if (request->buffer.size() > 65536) reject(431, "Headers too large"); return; }
+            constexpr qsizetype maximumHeaderSize = 64 * 1024;
+            if (headerEnd > maximumHeaderSize
+                || (headerEnd < 0 && request->buffer.size() > maximumHeaderSize)) {
+                reject(431, "Headers too large");
+                return;
+            }
+            if (headerEnd < 0)
+                return;
             const auto lines = request->buffer.first(headerEnd).split('\n');
             if (lines.first().trimmed() != "POST /v1/responses HTTP/1.1") { reject(404, "Not found"); return; }
-            qint64 length = -1; bool authorized = false;
-            for (const auto &line : lines) {
-                const auto key = line.first(line.indexOf(':')).trimmed().toLower();
-                const auto value = line.sliced(line.indexOf(':') + 1).trimmed();
-                if (key == "content-length") { bool ok; length = value.toLongLong(&ok); if (!ok) length = -1; }
-                if (key == "authorization") authorized = value == "Bearer " + m_token;
+            qint64 length = -1;
+            bool authorized = false;
+            bool authorizationReceived = false;
+            static const QRegularExpression headerName(QStringLiteral("^[!#$%&'*+.^_`|~0-9A-Za-z-]+\\z"));
+            for (qsizetype index = 1; index < lines.size(); ++index) {
+                const auto &line = lines.at(index);
+                const auto separator = line.indexOf(':');
+                if (separator <= 0 || !headerName.match(QString::fromLatin1(line.first(separator))).hasMatch()) {
+                    reject(400, "Invalid header");
+                    return;
+                }
+                const auto key = line.first(separator).toLower();
+                const auto value = line.sliced(separator + 1).trimmed();
+                if (key == "content-length") {
+                    bool number = false;
+                    const qint64 parsed = value.toLongLong(&number);
+                    if (length >= 0 || !number || !std::all_of(value.cbegin(), value.cend(),
+                            [](char character) { return character >= '0' && character <= '9'; })) {
+                        reject(400, "Invalid content length");
+                        return;
+                    }
+                    length = parsed;
+                }
+                if (key == "authorization") {
+                    if (authorizationReceived) { reject(400, "Duplicate authorization"); return; }
+                    authorizationReceived = true;
+                    authorized = value == "Bearer " + m_token;
+                }
                 if (key == "transfer-encoding" || key == "content-encoding") { reject(415, "Unsupported encoding"); return; }
             }
             if (!authorized) { reject(401, "Unauthorized"); return; }
@@ -259,6 +294,7 @@ void CodexProvider::accept()
             if (active()) { reject(409, "Provider busy"); return; }
             QJsonParseError parse;
             const auto document = QJsonDocument::fromJson(request->buffer.mid(headerEnd + 4, length), &parse);
+            request->buffer.clear();
             if (parse.error != QJsonParseError::NoError || !document.isObject()) { reject(400, "Invalid JSON"); return; }
             QString error;
             auto response = document.object();
@@ -297,12 +333,14 @@ void CodexProvider::complete(const QJsonObject &body)
     m_usage = {}; m_timings = {}; m_finishReason.clear(); m_done = false; m_textIndex = -1; m_reasoningIndex = -1;
     m_retrying = false;
     m_cachedTokens = 0;
+    m_streamBytes = 0;
     event({{"type", "response.created"}, {"response", QJsonObject{{"id", m_responseId}, {"status", "in_progress"}, {"output", QJsonArray{}}}}});
     QNetworkRequest request(m_backendUrl);
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
     if (!m_backendKey.isEmpty()) request.setRawHeader("Authorization", "Bearer " + m_backendKey);
     m_reply = m_network.post(request, QJsonDocument(body).toJson(QJsonDocument::Compact));
+    m_reply->setReadBufferSize(256 * 1024);
     connect(m_reply, &QNetworkReply::metaDataChanged, this, [this, reply = m_reply, profile = m_remote ? m_remoteProfile : QVariantMap{}] {
         if (profile.isEmpty() || !reply || reply != m_reply) return;
         const auto status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
@@ -370,10 +408,27 @@ void CodexProvider::endText(bool reasoning)
 void CodexProvider::consume()
 {
     if (!m_reply) return;
-    m_buffer += m_reply->readAll();
-    if (m_reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() >= 400) return;
-    while (m_buffer.contains('\n')) {
+    const auto bytes = m_reply->readAll();
+    if (m_reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() >= 400) {
+        const auto remaining = maximumErrorBytes - m_buffer.size();
+        if (remaining > 0)
+            m_buffer.append(bytes.constData(), qMin(bytes.size(), remaining));
+        return;
+    }
+    m_streamBytes += bytes.size();
+    if (m_streamBytes > maximumStreamBytes) {
+        failure(tr("The model response is too large."));
+        return;
+    }
+    m_buffer += bytes;
+    for (;;) {
         const auto end = m_buffer.indexOf('\n');
+        if ((end < 0 ? m_buffer.size() : end) > maximumStreamLineBytes) {
+            failure(tr("A model stream message is too large."));
+            return;
+        }
+        if (end < 0)
+            return;
         const auto line = m_buffer.first(end).trimmed(); m_buffer.remove(0, end + 1);
         if (!line.startsWith("data:")) continue;
         const auto data = line.mid(5).trimmed();
@@ -463,7 +518,7 @@ void CodexProvider::finish()
     event({{"type", "response.completed"}, {"response", QJsonObject{{"id", m_responseId}, {"status", "completed"}, {"output", m_output},
         {"usage", QJsonObject{{"input_tokens", inputTokens}, {"output_tokens", outputTokens}, {"total_tokens", inputTokens + outputTokens},
             {"input_tokens_details", QJsonObject{{"cached_tokens", cached}}}}}}}});
-    if (m_socket) { auto socket = m_socket; m_socket = nullptr; socket->disconnectFromHost(); }
+    cancel();
 }
 
 bool CodexProvider::contextOverflow(const QString &message)
@@ -501,4 +556,10 @@ void CodexProvider::cancel()
 {
     if (m_reply) { m_reply->disconnect(this); m_reply->abort(); m_reply->deleteLater(); m_reply = nullptr; }
     if (m_socket) { auto socket = m_socket; m_socket = nullptr; socket->disconnectFromHost(); }
+    m_pendingBody = {};
+    m_buffer.clear();
+    m_output = {};
+    m_calls = {};
+    m_text.clear();
+    m_reasoning.clear();
 }

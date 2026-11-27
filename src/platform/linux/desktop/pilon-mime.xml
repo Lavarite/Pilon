@@ -19,6 +19,7 @@
     <comment>Pilon configuration</comment>
     <sub-class-of type="text/plain"/>
     <glob pattern="*.piconf"/>
+    <glob pattern="*.piconfpack"/>
     <icon name="application-x-pilon-config"/>
   </mime-type>
 </mime-info>

@@ -7,6 +7,8 @@ trap 'rm -rf -- "$work"' EXIT
 python3 src/tests/platform/android/android_packaging_tests.py
 python3 src/tests/platform/android/android_pdf_sharing_tests.py \
     src/platform/android/src/org/pilon/PilonSharing.java --jdk "$JAVA_HOME"
+python3 src/tests/platform/android/android_widget_tests.py --jdk "$JAVA_HOME"
+python3 src/tests/platform/android/android_reminder_tests.py --jdk "$JAVA_HOME"
 python3 addons/assistant/scripts/android-runtime-smoke.py --self-test
 cc -std=c17 -O2 -Wall -Wextra -Werror addons/assistant/platform/android/codex-dns.c -o "$work/dns"
 python3 addons/assistant/platform/android/tests/test-codex-dns.py "$work/dns"

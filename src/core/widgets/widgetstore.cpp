@@ -1,5 +1,6 @@
 #include "widgetstore.h"
 #include "widgetplatform.h"
+#include "widgetroute.h"
 #include <QCryptographicHash>
 #include <QDate>
 #include <QDateTime>
@@ -11,7 +12,6 @@
 #include <QRegularExpression>
 #include <QSaveFile>
 #include <QSet>
-#include <QUrlQuery>
 #include <cerrno>
 #include <cmath>
 #include <fcntl.h>
@@ -20,12 +20,10 @@
 
 namespace {
 constexpr qsizetype maximumBytes = 256 * 1024;
-constexpr double maximumGeneration = 9007199254740991.0;
-bool matches(const QString &s, const char *p) { return QRegularExpression(QString::fromLatin1(p)).match(s).hasMatch(); }
-bool addonId(const QString &s) { return s.size() <= 128 && matches(s, "\\A[a-z][a-z0-9-]*(?:\\.[a-z][a-z0-9-]*)*\\z"); }
-bool widgetId(const QString &s) { return matches(s, "\\A[a-z][a-z0-9-]{0,63}\\z"); }
-bool id(const QString &s) { return matches(s, "\\A[A-Za-z0-9_-]{1,128}\\z"); }
-bool workspace(const QString &s) { return matches(s, "\\A[0-9a-f]{64}\\z"); }
+using PilonWidgetRoute::addonId;
+using PilonWidgetRoute::widgetId;
+using PilonWidgetRoute::id;
+using PilonWidgetRoute::workspace;
 bool map(const QVariant &v) { return v.metaType().id() == QMetaType::QVariantMap; }
 bool list(const QVariant &v) { return v.metaType().id() == QMetaType::QVariantList; }
 bool keys(const QVariantMap &v, const QStringList &required, const QStringList &optional = {}) {
@@ -49,7 +47,8 @@ bool text(const QVariant &v, int limit, bool newline = false) {
     return true;
 }
 bool colour(const QVariant &v) {
-    return v.metaType().id() == QMetaType::QString && matches(v.toString(), "\\A#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})\\z");
+    static const QRegularExpression pattern(R"(\A#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})\z)");
+    return v.metaType().id() == QMetaType::QString && pattern.match(v.toString()).hasMatch();
 }
 bool number(const QVariant &v, double *result = nullptr) {
     switch (v.metaType().id()) {
@@ -62,7 +61,7 @@ bool number(const QVariant &v, double *result = nullptr) {
 }
 bool generationValue(const QVariant &v) {
     double n;
-    return number(v, &n) && n >= 1 && n <= maximumGeneration && std::floor(n) == n;
+    return number(v, &n) && n >= 1 && n <= PilonWidgetRoute::maximumGeneration && std::floor(n) == n;
 }
 bool minuteRange(const QVariant &v) {
     if (!map(v)) return false;
@@ -72,8 +71,8 @@ bool minuteRange(const QVariant &v) {
         && std::floor(start) == start && std::floor(end) == end;
 }
 bool date(const QVariant &v, qint64 *milliseconds = nullptr) {
-    if (v.metaType().id() != QMetaType::QString
-        || !matches(v.toString(), "\\A[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,3})?Z\\z")) return false;
+    static const QRegularExpression pattern(R"(\A[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,3})?Z\z)");
+    if (v.metaType().id() != QMetaType::QString || !pattern.match(v.toString()).hasMatch()) return false;
     const auto parsed = QDateTime::fromString(v.toString(), Qt::ISODateWithMs);
     if (!parsed.isValid() || parsed.timeSpec() != Qt::UTC) return false;
     if (milliseconds) *milliseconds = parsed.toMSecsSinceEpoch(); return true;
@@ -85,8 +84,10 @@ bool clock(const QVariant &v) {
         || value.value("timeZone").metaType().id() != QMetaType::QString) return false;
     const auto day = value.value("date").toString(), zone = value.value("timeZone").toString();
     const auto parsed = QDate::fromString(day, Qt::ISODate);
-    return matches(day, "\\A[0-9]{4}-[0-9]{2}-[0-9]{2}\\z") && parsed.isValid() && parsed.year() >= 1
-        && zone.size() <= 128 && matches(zone, "\\A[A-Za-z0-9_+-]+(?:/[A-Za-z0-9_+-]+)*\\z");
+    static const QRegularExpression datePattern(R"(\A[0-9]{4}-[0-9]{2}-[0-9]{2}\z)");
+    static const QRegularExpression zonePattern(R"(\A[A-Za-z0-9_+-]+(?:/[A-Za-z0-9_+-]+)*\z)");
+    return datePattern.match(day).hasMatch() && parsed.isValid() && parsed.year() >= 1
+        && zone.size() <= 128 && zonePattern.match(zone).hasMatch();
 }
 bool scalar(const QVariant &v) {
     return !v.isValid() || v.metaType().id() == QMetaType::Nullptr || v.metaType().id() == QMetaType::Bool || text(v, 1024) || number(v);
@@ -233,9 +234,13 @@ bool WidgetStore::currentCatalog() const {
     return catalog(json(m_directory + "/catalog.json"), &scope, &providers) && scope == m_workspace && providers == m_providers;
 }
 QVariantMap WidgetStore::read(const QString &provider) const {
-    if (!m_providers.contains(provider) || !currentCatalog()) return {};
-    const auto owner = m_providers.value(provider).toMap(), value = json(path(provider));
-    return snapshot(value, true, owner.value("addonId").toString(), owner.value("widgetId").toString(), m_workspace) ? value : QVariantMap{};
+    const auto owner = m_providers.value(provider).toMap();
+    if (owner.isEmpty() || !currentCatalog()) return {};
+    return readSnapshot(provider, owner.value("addonId").toString(), owner.value("widgetId").toString());
+}
+QVariantMap WidgetStore::readSnapshot(const QString &provider, const QString &owner, const QString &widget) const {
+    const auto value = json(path(provider));
+    return snapshot(value, true, owner, widget, m_workspace) ? value : QVariantMap{};
 }
 bool WidgetStore::configure(const QString &workspaceRoot, const QVariantList &providerList) {
     if (!QDir::isAbsolutePath(workspaceRoot) || workspaceRoot.contains(QChar::Null))
@@ -272,7 +277,8 @@ bool WidgetStore::publish(const QString &owner, const QString &widget, const QVa
     const auto provider = key(owner, widget);
     if (provider.isEmpty() || !m_providers.contains(provider) || !currentCatalog()) return fail(tr("This widget provider is not enabled for the current workspace."));
     if (!snapshot(value, false)) return fail(tr("The widget snapshot is invalid or exceeds its limits."));
-    if (value.value("generation").toDouble() <= generation(owner, widget)) return fail(tr("Publish a newer widget generation."));
+    if (value.value("generation").toDouble() <= readSnapshot(provider, owner, widget).value("generation").toDouble())
+        return fail(tr("Publish a newer widget generation."));
     auto stored = value; stored["workspaceId"] = m_workspace; stored["addonId"] = owner; stored["widgetId"] = widget;
     if (!save(path(provider), stored)) return fail(tr("The widget snapshot could not be saved or is too large."));
     m_error.clear(); emit changed(); refreshNative(); return true;
@@ -288,28 +294,17 @@ double WidgetStore::generation(const QString &owner, const QString &widget) cons
     const auto provider = key(owner, widget); return provider.isEmpty() ? 0 : read(provider).value("generation").toDouble();
 }
 QVariantMap WidgetStore::resolve(const QUrl &url, qint64 nowMs) {
-    if (!url.isValid() || url.toEncoded().size() > 2048 || url.scheme() != "pilon" || url.authority(QUrl::FullyEncoded) != "widget" || url.hasFragment()) {
-        fail(tr("The widget action address is invalid.")); return {};
-    }
-    const auto segments = url.path(QUrl::FullyEncoded).split('/');
-    if (segments.size() != 3 || !segments.first().isEmpty()) { fail(tr("The widget action address is invalid.")); return {}; }
-    const auto provider = key(segments.at(1), segments.at(2)); QMap<QString, QString> query;
-    const auto items = QUrlQuery(url).queryItems(QUrl::FullyDecoded);
-    for (const auto &item : items) {
-        if (query.contains(item.first) || (item.first != "workspace" && item.first != "action" && item.first != "generation")) {
-            fail(tr("The widget action parameters are invalid.")); return {};
-        }
-        query[item.first] = item.second;
-    }
-    if (items.size() != 3 || query.value("workspace") != m_workspace || !workspace(query.value("workspace")) || !id(query.value("action"))
-        || !matches(query.value("generation"), "\\A[1-9][0-9]{0,15}\\z")) { fail(tr("The widget action parameters are invalid.")); return {}; }
-    bool valid = false; const auto requested = query.value("generation").toULongLong(&valid); const auto current = read(provider);
-    if (!valid || requested > quint64(maximumGeneration) || current.isEmpty() || requested > current.value("generation").toDouble()
+    const auto route = PilonWidgetRoute::parse(url);
+    if (!route) { fail(tr("The widget action address is invalid.")); return {}; }
+    if (route->workspaceId != m_workspace) { fail(tr("The widget action parameters are invalid.")); return {}; }
+    const auto current = read(route->addon + '/' + route->widget);
+    // Older links use current action data while the action still exists.
+    if (current.isEmpty() || route->generation > current.value("generation").toDouble()
         || !active(current, nowMs == 0 ? QDateTime::currentMSecsSinceEpoch() : nowMs)
-        || !current.value("actions").toMap().contains(query.value("action"))) { fail(tr("This widget action is no longer available. Open Pilon to refresh it.")); return {}; }
+        || !current.value("actions").toMap().contains(route->actionId)) { fail(tr("This widget action is no longer available. Open Pilon to refresh it.")); return {}; }
     m_error.clear(); emit changed();
-    return {{"addonId", segments.at(1)}, {"widgetId", segments.at(2)}, {"actionId", query.value("action")},
-        {"data", current.value("actions").toMap().value(query.value("action")).toMap()}};
+    return {{"addonId", route->addon}, {"widgetId", route->widget}, {"actionId", route->actionId},
+        {"data", current.value("actions").toMap().value(route->actionId).toMap()}};
 }
 bool WidgetStore::requestAdd(const QString &owner, const QString &widget) {
     const auto provider = key(owner, widget);

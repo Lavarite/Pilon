@@ -43,7 +43,8 @@ protected:
 private:
     struct Action { QString id, label, group; QStringList defaults, contexts; };
     QString conflict(const Action &action, const QStringList &keys) const;
-    void clearStylusToolBinding(const QString &button);
+    void clearStylusToolBinding(QVariantMap &bindings, const QString &button) const;
+    QString saveBindings(QVariantMap bindings, QVariantMap stylus);
     QList<Action> m_actions;
     QVariantMap m_custom;
     QVariantMap m_stylusCustom;

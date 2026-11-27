@@ -28,5 +28,5 @@ Do not make functional changes until the repository is published and the user ex
 - Dialogs and task forms use separate windows with one close button inside the panel in the top right, without minimise/maximise buttons or an added title heading.
 - Prefer Qt APIs where appropriate.
 - Build after code changes and fix errors introduced by the change.
-- Install the verified latest executable into `builds/pilon` and refresh the desktop launcher after app changes, so the app launcher runs the current version.
+- Install the verified latest Linux build into `~/Pilon/.bin` and refresh the desktop launcher after app changes. Use `PILON_INSTALL_ROOT` for a different installation root.
 - Keep completion messages concise: changes, validation, blockers.

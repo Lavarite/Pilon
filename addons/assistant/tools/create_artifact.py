@@ -15,7 +15,6 @@ def create(kind, name, root, tools):
     if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}", name):
         raise ValueError("Use a short name containing letters, numbers, hyphens or underscores.")
     root, tools = Path(root).resolve(), Path(tools).resolve()
-    root.mkdir(parents=True, exist_ok=True)
     destination = root / name
     if destination.exists():
         raise ValueError("An artifact with this name already exists.")
@@ -38,6 +37,7 @@ def create(kind, name, root, tools):
                         "react": "19.1.1", "react-dom": "19.1.1", "vite": "6.4.1"}}, indent=2) + "\n")
                 if not (node / "node_modules/vite/bin/vite.js").exists():
                     subprocess.run(["npm", "install", "--prefix", str(node), "--no-audit", "--no-fund"], check=True, stdout=sys.stderr)
+    root.mkdir(parents=True, exist_ok=True)
     destination.mkdir()
     try:
         if kind == "python":
@@ -78,6 +78,10 @@ export default {
         (destination / ".gitignore").write_text("node_modules/\n.cache/\ndist/\n__pycache__/\n")
     except Exception:
         shutil.rmtree(destination)
+        try:
+            root.rmdir()
+        except OSError:
+            pass
         raise
     result = {"path": str(destination), "run": str(destination / "run"), "kind": kind}
     if android:

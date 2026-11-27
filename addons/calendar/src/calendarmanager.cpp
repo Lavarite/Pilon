@@ -1,7 +1,7 @@
-#include "../../git/src/gitfolderguard.h"
 #include "../../../src/core/workspace/pilonworkspace.h"
 #include "calendarmanager.h"
 #include "../../../src/core/workspace/piconfpreferences.h"
+#include "calendarfiles.h"
 #include "calendarformat.h"
 #if defined(Q_OS_ANDROID)
 #include <QJniObject>
@@ -17,12 +17,10 @@
 #endif
 #include <QDir>
 #include <QFile>
-#include <QFutureWatcher>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QLocale>
 #include <QNetworkInformation>
-#include <QNetworkReply>
 #include <QRegularExpression>
 #include <QScopeGuard>
 #include "../../../src/core/workspace/pilonsettings.h"
@@ -81,58 +79,16 @@ bool prepareCalendarTimezones(const QString &directory, QString *error) {
 }
 } // namespace
 CalendarManager::CalendarManager(QObject *parent)
-    : CalendarManager(PilonWorkspace::appDataDirectory() + "/calendar", parent, true) {}
-CalendarManager::CalendarManager(const QString &directory, QObject *parent, bool background) : QObject(parent), m_background(background) {
-    QString timezoneError;
-    if (!prepareCalendarTimezones(directory, &timezoneError)) { fail(timezoneError); return; }
-    QDir().mkpath(directory);
+    : CalendarManager(PilonWorkspace::appDataDirectory() + "/calendar", parent, true, false) {}
+CalendarManager::CalendarManager(const QString &directory, QObject *parent, bool background)
+    : CalendarManager(directory, parent, background, true) {}
+CalendarManager::CalendarManager(const QString &directory, QObject *parent, bool background, bool startActive)
+    : QObject(parent), m_active(false), m_background(background) {
+    m_preferences = defaultPreferences();
     m_db = QSqlDatabase::addDatabase("QSQLITE", "calendar-" + uuid());
     m_db.setDatabaseName(directory + "/calendar.sqlite");
-    if (!m_db.open()) {
-        fail(tr("Cannot open calendar storage: %1").arg(m_db.lastError().text()));
-        return;
-    }
-    QFile::setPermissions(m_db.databaseName(), QFile::ReadOwner | QFile::WriteOwner);
-    QSqlQuery q(m_db);
-    q.exec("PRAGMA journal_mode=WAL");
-    if (!q.exec("CREATE TABLE IF NOT EXISTS records(kind TEXT NOT NULL,id TEXT "
-                "NOT NULL,data TEXT NOT NULL,PRIMARY KEY(kind,id))")) {
-        fail(q.lastError().text());
-        return;
-    }
-    q.exec("SELECT kind,id,data FROM records");
-    QMap<QString, Records *> tables{
-        {"events", &m_events},       {"calendars", &m_calendars}, {"accounts", &m_accounts},  {"links", &m_links},
-        {"proposals", &m_proposals}, {"conflicts", &m_conflicts}, {"instances", &m_instances}, {"shares", &m_shares}};
-    while (q.next()) {
-        auto data = QJsonDocument::fromJson(q.value(2).toByteArray()).toVariant().toMap();
-        auto k = q.value(0).toString();
-        if (k == "preferences")
-            m_preferences = data;
-        else if (tables.contains(k))
-            (*tables[k])[q.value(1).toString()] = data;
-    }
-    if (m_preferences.isEmpty())
-        m_preferences = defaultPreferences();
-    if (m_background && PiconfPreferences::instance().active()) {
-        PilonSettings settings;
-        if (settings.value("calendar/portablePreferencesPending").toBool()) {
-            auto requested = defaultPreferences();
-            requested.insert(settings.value("calendar/portablePreferences").toMap());
-            QSqlQuery save(m_db);
-            save.prepare("INSERT OR REPLACE INTO records(kind,id,data) VALUES('preferences','main',?)");
-            save.addBindValue(QJsonDocument::fromVariant(requested).toJson(QJsonDocument::Compact));
-            if (!save.exec()) { fail(save.lastError().text()); return; }
-            m_preferences = requested;
-            settings.remove("calendar/portablePreferencesPending");
-        }
-        if (settings.value("calendar/portablePreferences").toMap() != m_preferences)
-            settings.setValue("calendar/portablePreferences", m_preferences);
-    }
-    m_calendars["pilon"] = {
-        {"id", "pilon"}, {"name", "Pilon"}, {"enabled", true}, {"writable", true}, {"provider", "local"}};
     // Explicit storage constructors (including tests) stay inside their own directory.
-    m_directory = background ? PilonSettings().value("calendar/directory", PilonWorkspace::publicDirectory("Calendar")).toString()
+    m_directory = background ? PilonSettings().value("calendar/directory", PilonWorkspace::publicDirectory("calendar")).toString()
                              : directory + "/events";
     connect(&m_fileWatcher, &QFileSystemWatcher::directoryChanged, this, [this] { if (m_active) m_fileTimer.start(); });
     m_fileTimer.setInterval(120);
@@ -171,17 +127,88 @@ CalendarManager::CalendarManager(const QString &directory, QObject *parent, bool
                         if (m_active && reachability == QNetworkInformation::Reachability::Online)
                             sync();
                     });
-        QTimer::singleShot(0, this, [this] { if (m_active) startActivities(); });
-    } else startActivities();
-}
-void CalendarManager::startActivities(bool reloadFiles) {
-    if (!m_active || m_activityStarted) return;
-    const auto blocked = reloadFiles ? GitFolderGuard::blockedReason(m_directory, m_directory) : QString{};
-    if (!blocked.isEmpty()) {
-        m_gitResumeActive = true; m_active = false; fail(blocked); emit activeChanged(); emit changed(); return;
     }
+    // Existing accounts and preferences remain available for cleanup while disabled.
+    if (!startActive) {
+        if (QFileInfo::exists(m_db.databaseName())) openStorage();
+        return;
+    }
+    if (!openStorage()) return;
+    m_active = true;
+    if (background) QTimer::singleShot(0, this, [this] { if (m_active) startActivities(); });
+    else startActivities();
+}
+bool CalendarManager::openStorage() {
+    if (m_db.isOpen()) return true;
+    const auto directory = QFileInfo(m_db.databaseName()).absolutePath();
+    QString timezoneError;
+    if (!prepareCalendarTimezones(directory, &timezoneError)) { fail(timezoneError); return false; }
+    QDir().mkpath(directory);
+    if (!m_db.open()) {
+        fail(tr("Cannot open calendar storage: %1").arg(m_db.lastError().text()));
+        return false;
+    }
+    auto closeOnFailure = qScopeGuard([this] { m_db.close(); });
+    QFile::setPermissions(m_db.databaseName(), QFile::ReadOwner | QFile::WriteOwner);
+    QSqlQuery q(m_db);
+    q.exec("PRAGMA journal_mode=WAL");
+    if (!q.exec("CREATE TABLE IF NOT EXISTS records(kind TEXT NOT NULL,id TEXT "
+                "NOT NULL,data TEXT NOT NULL,PRIMARY KEY(kind,id))")) {
+        fail(q.lastError().text());
+        return false;
+    }
+    if (!q.exec("SELECT kind,id,data FROM records")) {
+        fail(tr("Cannot read calendar storage: %1").arg(q.lastError().text()));
+        return false;
+    }
+    const QMap<QString, Records *> tables{
+        {"events", &m_events},       {"calendars", &m_calendars}, {"accounts", &m_accounts},  {"links", &m_links},
+        {"proposals", &m_proposals}, {"conflicts", &m_conflicts}, {"instances", &m_instances}, {"shares", &m_shares}};
+    for (auto *table : tables) table->clear();
+    m_preferences = defaultPreferences();
+    while (q.next()) {
+        const auto document = QJsonDocument::fromJson(q.value(2).toByteArray());
+        if (!document.isObject()) {
+            fail(tr("Calendar storage contains a damaged record. Reopen Pilon after restoring the database."));
+            return false;
+        }
+        const auto data = document.object().toVariantMap();
+        auto k = q.value(0).toString();
+        if (k == "preferences")
+            m_preferences = data;
+        else if (tables.contains(k))
+            (*tables[k])[q.value(1).toString()] = data;
+    }
+    if (q.lastError().isValid()) {
+        fail(tr("Cannot read calendar storage: %1").arg(q.lastError().text()));
+        return false;
+    }
+    if (m_preferences.isEmpty())
+        m_preferences = defaultPreferences();
+    if (m_background && PiconfPreferences::instance().active()) {
+        PilonSettings settings;
+        if (settings.value("calendar/portablePreferencesPending").toBool()) {
+            auto requested = defaultPreferences();
+            requested.insert(settings.value("calendar/portablePreferences").toMap());
+            QSqlQuery save(m_db);
+            save.prepare("INSERT OR REPLACE INTO records(kind,id,data) VALUES('preferences','main',?)");
+            save.addBindValue(QJsonDocument::fromVariant(requested).toJson(QJsonDocument::Compact));
+            if (!save.exec()) { fail(save.lastError().text()); return false; }
+            m_preferences = requested;
+            settings.remove("calendar/portablePreferencesPending");
+        }
+        if (settings.value("calendar/portablePreferences").toMap() != m_preferences)
+            settings.setValue("calendar/portablePreferences", m_preferences);
+    }
+    m_calendars["pilon"] = {
+        {"id", "pilon"}, {"name", "Pilon"}, {"enabled", true}, {"writable", true}, {"provider", "local"}};
+    closeOnFailure.dismiss();
+    return true;
+}
+void CalendarManager::startActivities() {
+    if (!m_active || m_activityStarted) return;
     m_activityStarted = true;
-    if (reloadFiles && loadEventFiles()) saveEventFiles();
+    if (loadEventFiles()) saveEventFiles();
     watchEventFiles(); m_lastReminder = QDateTime::currentDateTimeUtc();
     if (!m_background) return;
 #if defined(Q_OS_ANDROID)
@@ -197,7 +224,6 @@ QString CalendarManager::disableBlockedReason() const {
 #if defined(Q_OS_ANDROID)
     if (!m_active && !m_reminderFailure.isEmpty()) return m_reminderFailure;
 #endif
-    if (m_gitUpdating) return tr("Finish or abort Calendar's Git update first.");
     if (m_syncing || m_sharingBusy || m_sharingConfigurationBusy || accountOperationsBusy() || m_loginTimer.isActive())
         return tr("Wait for calendar sync, sharing or account operations to finish.");
     if (m_interactionActive) return tr("Finish the calendar edit before disabling Calendar.");
@@ -211,6 +237,7 @@ bool CalendarManager::resetPreferences(bool apply) {
     if (!path.startsWith(root + '/')) return true;
     for (QString part = path; part != "/"; part = QFileInfo(part).absolutePath())
         if (QFileInfo(part).isSymLink()) { fail(tr("Calendar preferences cannot be reset through symbolic links.")); return false; }
+    if (!m_db.isOpen() && !QFileInfo::exists(path)) return true;
     if (!m_db.isOpen() || !QFileInfo(path).isWritable() || !QFileInfo(QFileInfo(path).absolutePath()).isWritable()) {
         fail(tr("Check the calendar preferences file and folder permissions before resetting.")); return false;
     }
@@ -238,17 +265,14 @@ bool CalendarManager::resetPreferences(bool apply) {
 bool CalendarManager::prepareDisable() {
     const auto reason = disableBlockedReason();
     if (!reason.isEmpty()) { fail(reason); return false; }
+    if (!m_db.isOpen() && !QFileInfo::exists(m_db.databaseName())) return true;
     return persist();
 }
 void CalendarManager::setActive(bool active) {
-    if (active && !m_gitUpdating) {
-        const auto blocked = GitFolderGuard::blockedReason(m_directory, m_directory);
-        if (!blocked.isEmpty()) { m_gitResumeActive = true; fail(blocked); return; }
-    }
-    if (m_gitUpdating) { m_gitResumeActive = active; return; }
-    if (m_active == active) { m_gitResumeActive = active; return; }
+    if (m_active == active) return;
+    if (active && !openStorage()) return;
     if (!active && m_activityStarted && !prepareDisable()) return;
-    m_gitResumeActive = active; m_active = active; ++m_activationRevision;
+    m_active = active; ++m_activationRevision;
     if (active) startActivities();
     else stopActivities();
     emit activeChanged(); emit changed();
@@ -261,38 +285,6 @@ void CalendarManager::stopActivities() {
         QNativeInterface::QAndroidApplication::context().object(), false) ? QString{} : tr("Calendar reminders could not be stopped.");
 #endif
     watchEventFiles();
-}
-bool CalendarManager::beginGitUpdate() {
-    const auto reason = disableBlockedReason();
-    if (!reason.isEmpty()) { fail(reason); return false; }
-    if (m_batch || m_importingFiles || m_pendingRequests || m_callback.isListening() || !m_loginProvider.isEmpty()
-        || !m_network.findChildren<QNetworkReply *>().isEmpty() || !findChildren<QFutureWatcherBase *>().isEmpty()) {
-        fail(tr("Wait for Calendar's current operation to finish before updating its Git folder.")); return false;
-    }
-    for (const auto &link : m_links) {
-        const auto event = m_events.value(link.value("event").toString());
-        if (!event.isEmpty() && event.value("local", true).toBool() && !link.value("pending").toString().isEmpty()) {
-            fail(tr("Finish or cancel pending provider edits for local Calendar events before updating this Git folder.")); return false;
-        }
-    }
-    for (const auto &conflict : m_conflicts) {
-        const auto event = m_events.value(conflict.value("event").toString());
-        if (!event.isEmpty() && event.value("local", true).toBool()) {
-            fail(tr("Resolve Calendar's provider conflicts before updating this Git folder.")); return false;
-        }
-    }
-    Records snapshot; QString error;
-    if (!readGitSnapshot(m_directory, snapshot, error)) { fail(error); return false; }
-    if (!loadEventFiles() || !persist()) return false;
-    m_gitResumeActive = m_gitResumeActive || m_active;
-    m_gitUpdating = true;
-    const bool wasActive = m_active;
-    m_active = false; ++m_activationRevision;
-    stopActivities();
-    emit gitUpdatingChanged();
-    if (wasActive) emit activeChanged();
-    emit changed();
-    return true;
 }
 CalendarManager::~CalendarManager() {
     auto name = m_db.connectionName();
@@ -329,12 +321,9 @@ void CalendarManager::setInteractionActive(bool active) {
     }
 }
 bool CalendarManager::persist() {
-    if (m_gitUpdating && !m_importingFiles) { fail(tr("Finish or abort Calendar's Git update first.")); return false; }
     if (m_batch)
         return true;
-    if (m_active && !m_importingFiles && !saveEventFiles())
-        return false;
-    if (!m_db.isOpen()) { fail(tr("Calendar storage is not open.")); return false; }
+    if (!m_db.isOpen()) { if (m_active || m_error.isEmpty()) fail(tr("Calendar storage is not open.")); return false; }
     if (!m_db.transaction()) {
         fail(m_db.lastError().text());
         return false;
@@ -358,9 +347,33 @@ bool CalendarManager::persist() {
         q.bindValue(2, QJsonDocument::fromVariant(m_preferences).toJson(QJsonDocument::Compact));
         ok = q.exec();
     }
-    if (!ok || !m_db.commit()) {
+    if (!ok) {
         m_db.rollback();
         fail(tr("Calendar changes could not be saved: %1").arg(q.lastError().text()));
+        return false;
+    }
+    // Acquire SQLite's write lock before publishing portable changes.
+    const auto previousFiles = m_fileRecords;
+    if (m_active && !m_importingFiles && !saveEventFiles()) {
+        m_db.rollback();
+        return false;
+    }
+    if (!m_db.commit()) {
+        auto error = m_db.lastError().text();
+        if (m_fileRecords != previousFiles) {
+            CalendarFiles::Records published;
+            QString recoveryError;
+            // An external edit takes precedence over restoring these files.
+            if (CalendarFiles::read(m_directory, published, recoveryError) && published == m_fileRecords
+                && CalendarFiles::write(m_directory, previousFiles, recoveryError)) {
+                m_fileRecords = previousFiles;
+            } else {
+                if (recoveryError.isEmpty()) recoveryError = tr("The portable files changed during the save.");
+                error += '\n' + recoveryError;
+            }
+        }
+        m_db.rollback();
+        fail(tr("Calendar changes could not be saved: %1").arg(error));
         return false;
     }
     m_error.clear();
@@ -382,7 +395,8 @@ QVariantMap CalendarManager::newEvent(const QString &date, int minute) const {
     if (!d.isValid())
         d = QDate::currentDate();
     QTimeZone z(m_preferences.value("timeZone").toString().toUtf8());
-    auto start = QDateTime(d, QTime(0, 0), z).addSecs(minute * 60);
+    const auto slot = QDateTime(d, QTime(0, 0), QTimeZone::utc()).addSecs(qint64(minute) * 60);
+    const QDateTime start(slot.date(), slot.time(), z, QDateTime::TransitionResolution::RelativeToBefore);
     return {{"title", ""},
             {"start", start.toString(Qt::ISODate)},
             {"end", start.addSecs(3600).toString(Qt::ISODate)},
@@ -639,6 +653,10 @@ QString CalendarManager::saveEvent(const QVariantMap &input, const QString &scop
 }
 bool CalendarManager::deleteEvent(const QString &id, const QString &scope, const QString &occurrence) {
     if (!m_active) { fail(tr("Calendar is disabled.")); return false; }
+    if (!QStringList{"series", "one", "following"}.contains(scope)) {
+        fail(tr("Unknown recurrence delete scope."));
+        return false;
+    }
     if (!loadEventFiles()) return false;
     auto e = event(id);
     if (e.isEmpty() || !e.value("writable").toBool()) {
@@ -701,7 +719,7 @@ bool CalendarManager::moveEvent(const QString &id, const QString &occurrence, in
     return !saveEvent(e, recurring ? "one" : "series", occurrence).isEmpty();
 }
 void CalendarManager::setPreferences(const QVariantMap &v) {
-    if (m_gitUpdating) { fail(tr("Finish or abort Calendar's Git update first.")); return; }
+    if (!openStorage()) return;
     auto next = m_preferences;
     for (auto i = v.begin(); i != v.end(); ++i)
         next[i.key()] = i.value();
@@ -716,7 +734,6 @@ void CalendarManager::setPreferences(const QVariantMap &v) {
         PilonSettings().setValue("calendar/portablePreferences",next);
 }
 void CalendarManager::setCalendarEnabled(const QString &id, bool enabled) {
-    if (m_gitUpdating) { fail(tr("Finish or abort Calendar's Git update first.")); return; }
     if (id == "pilon" || !m_calendars.contains(id))
         return;
     m_calendars[id]["enabled"] = enabled;
@@ -738,6 +755,9 @@ void CalendarManager::resolveConflict(const QString &id, const QString &choice) 
     if (!m_active) { fail(tr("Calendar is disabled.")); return; }
     if (!m_conflicts.contains(id) || !m_links.contains(id))
         return;
+    const auto conflicts = m_conflicts;
+    const auto events = m_events;
+    const auto links = m_links;
     auto c = m_conflicts[id];
     auto &l = m_links[id];
     auto eventId = l.value("event").toString();
@@ -751,7 +771,10 @@ void CalendarManager::resolveConflict(const QString &id, const QString &choice) 
         m_events[eventId] = e;
     } else if (choice == "delete") {
         m_conflicts.remove(id);
-        deleteEvent(eventId);
+        if (!deleteEvent(eventId)) {
+            m_conflicts = conflicts;
+            emit changed();
+        }
         return;
     } else if (choice == "local") {
         l["pending"] = "save";
@@ -778,7 +801,13 @@ void CalendarManager::resolveConflict(const QString &id, const QString &choice) 
     } else
         return;
     m_conflicts.remove(id);
-    persist();
+    if (!persist()) {
+        m_conflicts = conflicts;
+        m_events = events;
+        m_links = links;
+        emit changed();
+        return;
+    }
     sync();
 }
 QVariantMap CalendarManager::propose(const QVariantList &changes, const QString &summary) {
@@ -831,7 +860,8 @@ bool CalendarManager::updateProposal(const QString &id, int index, const QVarian
     if (!m_active) { fail(tr("Calendar is disabled.")); return false; }
     if (!m_proposals.contains(id))
         return false;
-    auto changes = m_proposals[id].value("changes").toList();
+    const auto before = m_proposals.value(id);
+    auto changes = before.value("changes").toList();
     if (index < 0 || index >= changes.size())
         return false;
     auto why = checkEvent(e);
@@ -844,7 +874,9 @@ bool CalendarManager::updateProposal(const QString &id, int index, const QVarian
     changes[index] = action;
     m_proposals[id]["changes"] = changes;
     m_proposals[id]["warnings"] = proposalWarnings(changes);
-    return persist();
+    if (persist()) return true;
+    m_proposals[id] = before;
+    return false;
 }
 bool CalendarManager::applyProposal(const QString &id) {
     if (!m_active) { fail(tr("Calendar is disabled.")); return false; }
@@ -866,9 +898,13 @@ bool CalendarManager::applyProposal(const QString &id) {
         }
     }
     const auto warnings = proposalWarnings(changes);
-    if (warnings != m_proposals[id].value("warnings").toList()) {
+    const auto previousWarnings = m_proposals[id].value("warnings");
+    if (warnings != previousWarnings.toList()) {
         m_proposals[id]["warnings"] = warnings;
-        persist();
+        if (!persist()) {
+            m_proposals[id]["warnings"] = previousWarnings;
+            return false;
+        }
         fail(tr("Calendar availability changed. Review the updated overlap "
                 "warnings before applying again."));
         return false;
@@ -900,10 +936,13 @@ bool CalendarManager::applyProposal(const QString &id) {
     scheduleSync();
     return true;
 }
-void CalendarManager::discardProposal(const QString &id) {
-    if (!m_active) { fail(tr("Calendar is disabled.")); return; }
-    m_proposals.remove(id);
-    persist();
+bool CalendarManager::discardProposal(const QString &id) {
+    if (!m_active) { fail(tr("Calendar is disabled.")); return false; }
+    const auto before = m_proposals.take(id);
+    if (before.isEmpty()) return true;
+    if (persist()) return true;
+    m_proposals[id] = before;
+    return false;
 }
 QJsonObject CalendarManager::assistantTool(const QString &name, const QJsonObject &args) {
     if (!m_active) return {{"error", "Calendar is disabled."}};
@@ -1008,7 +1047,6 @@ void CalendarManager::reminders() {
 }
 
 void CalendarManager::setVisibleRange(const QString &from, const QString &to) {
-    if (m_gitUpdating) return;
     if (m_preferences.value("rangeFrom") == from && m_preferences.value("rangeTo") == to)
         return;
     m_preferences["rangeFrom"] = from;
@@ -1033,6 +1071,8 @@ bool CalendarManager::respondEvent(const QString &id, const QString &response) {
             v = g;
         }
     }
+    const auto before = m_events.value(id);
+    const auto links = m_links;
     m_events[id]["guests"] = guests;
     m_events[id]["version"] = e.value("version").toInt() + 1;
     for (auto &l : m_links)
@@ -1040,8 +1080,12 @@ bool CalendarManager::respondEvent(const QString &id, const QString &response) {
             l["pending"] = "save";
             l["response"] = response;
         }
-    if (!persist())
+    if (!persist()) {
+        m_events[id] = before;
+        m_links = links;
+        emit changed();
         return false;
+    }
     scheduleSync();
     return true;
 }

@@ -54,6 +54,7 @@ ColumnLayout {
             readonly property string source: view.declarations[modelData]?.source || "local"
             readonly property bool remote: source.startsWith("https://")
             readonly property bool asset: remote && /\.piext$/i.test(source)
+            readonly property bool bundled: source === "builtin" && view.registry.hasBundledPackage(modelData)
             Layout.fillWidth: true
             spacing: 8
             Label {
@@ -66,9 +67,7 @@ ColumnLayout {
                 Layout.maximumWidth: row.width
                 text: row.source
                 onClicked: {
-                    const repository = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/?$/.test(row.source)
-                    const link = repository ? row.source.replace(/\/$/, "") + "/releases" : row.source
-                    if (!Qt.openUrlExternally(link)) view.report(qsTr("Could not open the add-on source."))
+                    if (!Qt.openUrlExternally(row.source)) view.report(qsTr("Could not open the add-on source."))
                 }
             }
             PilonWrapButton {
@@ -77,12 +76,12 @@ ColumnLayout {
                 Layout.maximumWidth: row.width
                 enabled: !view.registry.restoringAddon || view.registry.restoringAddon === row.modelData
                 text: view.registry.restoringAddon === row.modelData ? qsTr("Cancel download")
-                    : row.source === "builtin" ? qsTr("Restore built-in add-on")
+                    : row.bundled ? qsTr("Restore built-in add-on")
                     : row.asset ? qsTr("Download package") : qsTr("Choose package…")
                 onClicked: {
                     view.report("")
                     if (view.registry.restoringAddon === row.modelData) view.registry.cancelConfiguredDownload()
-                    else if (row.asset || row.source === "builtin") view.review(row.modelData, "")
+                    else if (row.asset || row.bundled) view.review(row.modelData, "")
                     else {
                         const id = row.modelData
                         view.fileWorkspace.selectFiles(qsTr("Choose add-on package"), urls => {

@@ -6,11 +6,9 @@ Item {
     required property var addon
     readonly property string disableNotice: addon.calendarManager.shares.some(share => !!share.url)
         ? qsTr("Sharing updates are paused while Calendar is disabled. Published links remain available.") : ""
-    readonly property var owner: ({id:addon.addonId, name:qsTr("Calendar"), manager:addon.calendarManager,
-        errorText:() => addon.calendarManager.error})
     property bool completed: false
     readonly property bool widgetReady: !!addon.widgets && addon.widgets.available
-        && addon.calendarManager.active && !addon.calendarManager.gitUpdating
+        && addon.calendarManager.active
         && !addon.quiesced && addon.workspaceActive !== false
         && !addon.configurationOnly && !addon.cleanupOnly && !(addon.host && addon.host.preparing)
     readonly property var widgetPalette: ({background:String(addon.selectedMainColour),
@@ -79,13 +77,10 @@ Item {
     }
     function isQuiesced() { return !addon.calendarManager.active }
     function prepareDisable() {
-
         return addon.calendarManager.prepareDisable() || addon.calendarManager.disableBlockedReason() || qsTr("Unable to save the current work.")
     }
     Component.onCompleted: {
-        addon.registerWorkspaceOwner(owner)
         completed = true
         queueWidget()
     }
-    Component.onDestruction: addon.unregisterWorkspaceOwner(owner)
 }

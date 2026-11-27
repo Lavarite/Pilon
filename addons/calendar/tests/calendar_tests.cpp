@@ -30,14 +30,6 @@ class CalendarTests : public QObject {
                              {"name", id},      {"provider", provider}, {"enabled", true},
                              {"writable", true}};
     }
-    static bool writeGuardFile(const QString &path, const QByteArray &bytes) {
-        if (!QDir().mkpath(QFileInfo(path).absolutePath())) return false;
-        QFile file(path); return file.open(QIODevice::WriteOnly) && file.write(bytes) == bytes.size();
-    }
-    static bool createGuardMetadata(const QString &path) {
-        return QDir().mkpath(path + "/objects") && QDir().mkpath(path + "/refs")
-            && writeGuardFile(path + "/HEAD", "ref: refs/heads/main\n");
-    }
     static QMap<QString, QByteArray> guardSnapshot(const QString &path) {
         QMap<QString, QByteArray> result;
         QDirIterator entries(path, QDir::AllEntries | QDir::Hidden | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
@@ -50,6 +42,43 @@ class CalendarTests : public QObject {
         return result;
     }
   private slots:
+    void defaultStorageWaitsForActivation() {
+        QTemporaryDir workspace;
+        QSettings settings;
+        const auto previous = settings.value("workspace/root");
+        const auto restore = qScopeGuard([&] {
+            if (previous.isValid()) settings.setValue("workspace/root", previous);
+            else settings.remove("workspace/root");
+        });
+        settings.setValue("workspace/root", workspace.path());
+        const auto database = PilonWorkspace::appDataDirectory() + "/calendar";
+        const auto events = workspace.filePath("calendar");
+        QVERIFY(!QFileInfo::exists(database));
+        QString eventId;
+        {
+            CalendarManager manager;
+            QCoreApplication::processEvents();
+            QVERIFY(!QFileInfo::exists(database));
+            QVERIFY(!QFileInfo::exists(events));
+            QVERIFY(manager.prepareDisable());
+            QVERIFY(manager.resetPreferences(false));
+            QVERIFY(!QFileInfo::exists(database));
+            manager.setActive(true);
+            QVERIFY(manager.active());
+            QVERIFY(QFileInfo::exists(database + "/calendar.sqlite"));
+            QVERIFY(QFileInfo::exists(events));
+            auto event = manager.newEvent("2026-11-26");
+            event["title"] = "Keep when disabled";
+            eventId = manager.saveEvent(event);
+            QVERIFY(!eventId.isEmpty());
+            manager.setActive(false);
+            QVERIFY(!manager.active());
+            QVERIFY(QFileInfo::exists(events + "/Keep when disabled.pical"));
+        }
+        CalendarManager reopened;
+        QVERIFY(!reopened.active());
+        QCOMPARE(reopened.event(eventId).value("title").toString(), QString("Keep when disabled"));
+    }
     void mobileAuthorizationValidatesScopesAndBoundAccount() {
         QVariantMap google{{"native_provider", "google"}, {"access_token", "fixture"}, {"native_account", "owner@example.test"},
             {"scope", "openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.calendarlist.readonly"}};
@@ -110,6 +139,35 @@ class CalendarTests : public QObject {
         QCOMPARE(manager.m_accounts, before); QCOMPARE(manager.m_calendars, calendars);
         QCOMPARE(manager.m_tokens["account"].value("access_token").toString(), QString("existing"));
         QVERIFY(manager.error().contains("identity"));
+    }
+    void desktopSignInDoesNotPublishUnverifiedAccount_data() {
+        QTest::addColumn<int>("status");
+        QTest::addColumn<QByteArray>("identity");
+        QTest::newRow("failed") << 503 << QByteArray("{}");
+        QTest::newRow("blank") << 200 << QByteArray("{}");
+        QTest::newRow("unverified") << 200 << QByteArray(R"({"id":"subject","email":"owner@example.com","verified_email":false})");
+    }
+    void desktopSignInDoesNotPublishUnverifiedAccount() {
+        QFETCH(int, status);
+        QFETCH(QByteArray, identity);
+        QTemporaryDir directory; CalendarManager manager(directory.path());
+        source(manager, "existing");
+        manager.m_tokens["account"] = {{"access_token", "old-fixture"}};
+        const auto before = manager.m_accounts, tokens = manager.m_tokens;
+        int lookups = 0, discoveries = 0;
+        manager.m_transport = [&](auto, auto, QUrl url, auto, auto, auto done) {
+            if (url.path() == "/token") done(200, R"({"access_token":"new-fixture"})", {});
+            else if (url.path().endsWith("/userinfo")) { ++lookups; done(status, identity, {}); }
+            else { ++discoveries; done(200, R"({"items":[]})", {}); }
+        };
+        manager.m_loginProvider = "google"; manager.m_state = "fixture-authorization";
+        manager.completeLogin("fixture-code");
+        QCOMPARE(lookups, 1);
+        QCOMPARE(discoveries, 0);
+        QCOMPARE(manager.m_accounts, before);
+        QCOMPARE(manager.m_tokens, tokens);
+        QVERIFY(manager.m_credentialWrites.isEmpty());
+        QVERIFY(!manager.error().isEmpty());
     }
     void mobileRefreshCoalescesAndCannotReplaceNewerAuthorization() {
         QTemporaryDir directory;
@@ -260,6 +318,318 @@ class CalendarTests : public QObject {
         QVERIFY(query.next()); QCOMPARE(query.value(0).toString(), "{");
     }
 
+    void corruptDatabaseDoesNotAllowCalendarWrites() {
+        QTemporaryDir fixture;
+        {
+            CalendarManager manager(fixture.path());
+            auto event = manager.newEvent("2026-11-10"); event["title"] = "Keep this event";
+            QVERIFY(!manager.saveEvent(event).isEmpty());
+            QSqlQuery query(manager.m_db);
+            QVERIFY(query.exec("INSERT INTO records(kind,id,data) VALUES('events','corrupt','{')"));
+        }
+        CalendarManager reopened(fixture.path());
+        QVERIFY2(!reopened.active(), qPrintable(reopened.error()));
+        QVERIFY(!reopened.error().isEmpty());
+        reopened.setActive(true);
+        QVERIFY(!reopened.active());
+        reopened.setPreferences({{"reminder", 183}});
+        const QString connection = QStringLiteral("calendar-corrupt-database-proof");
+        const auto removeConnection = qScopeGuard([&] { QSqlDatabase::removeDatabase(connection); });
+        {
+            auto db = QSqlDatabase::addDatabase("QSQLITE", connection);
+            db.setDatabaseName(fixture.filePath("calendar.sqlite"));
+            QVERIFY(db.open());
+            QSqlQuery persisted(db);
+            QVERIFY(persisted.exec("SELECT id,data FROM records WHERE kind='events' ORDER BY id"));
+            QMap<QString, QString> rows;
+            while (persisted.next()) rows.insert(persisted.value(0).toString(), persisted.value(1).toString());
+            QCOMPARE(rows.size(), 2);
+            QCOMPARE(rows.value("corrupt"), "{");
+        }
+    }
+
+    void microsoftSingleEventUploadsWithoutRecurrence() {
+        QTemporaryDir fixture;
+        CalendarManager manager(fixture.path());
+        source(manager, "microsoft-calendar", "microsoft");
+        manager.m_accounts["account"]["scope"] = "User.Read Calendars.ReadWrite";
+        auto event = manager.newEvent("2026-11-10");
+        event["title"] = "One appointment";
+        event["destinations"] = QVariantList{"microsoft-calendar"};
+        const QString id = manager.saveEvent(event);
+        QVERIFY2(!id.isEmpty(), qPrintable(manager.error()));
+        QCOMPARE(CalendarFormat::microsoftUnsupported(event), QString{});
+        QVERIFY(!CalendarFormat::toMicrosoft(event).contains("recurrence"));
+        int requests = 0;
+        manager.m_transport = [&](auto, auto method, auto, auto body, auto, auto done) {
+            ++requests;
+            QCOMPARE(method, QByteArray("POST"));
+            const auto payload = QJsonDocument::fromJson(body).object();
+            QCOMPARE(payload.value("subject").toString(), "One appointment");
+            QVERIFY(!payload.contains("recurrence"));
+            QVERIFY(!payload.value("transactionId").toString().isEmpty());
+            done(201, R"({"id":"provider-event"})", {});
+        };
+        manager.m_editSyncTimer.stop();
+        manager.uploadNext("microsoft-calendar", [] {});
+        QCOMPARE(requests, 1);
+        QVERIFY(!manager.event(id).value("pending").toBool());
+        event["recurrence"] = "FREQ=DAILY;COUNT=2";
+        QVERIFY(CalendarFormat::toMicrosoft(event).value("recurrence").toMap().contains("pattern"));
+    }
+
+    void invalidEventPagePreservesProviderCacheAndCursor_data() {
+        QTest::addColumn<QString>("provider");
+        QTest::addColumn<QByteArray>("badReply");
+        QTest::newRow("google-missing-array") << QString("google") << QByteArray(R"({"nextSyncToken":"untrusted"})");
+        QTest::newRow("google-bad-entry") << QString("google") << QByteArray(R"({"items":[{}]})");
+        QTest::newRow("microsoft-wrong-array-type") << QString("microsoft") << QByteArray(R"({"value":{}})");
+    }
+    void invalidEventPagePreservesProviderCacheAndCursor() {
+        QFETCH(QString, provider);
+        QFETCH(QByteArray, badReply);
+        QTemporaryDir fixture; CalendarManager manager(fixture.path());
+        source(manager, "provider-calendar", provider);
+        auto value = manager.newEvent("2026-11-10"); value["title"] = "Previously synced";
+        manager.ingest("provider-calendar", {QVariantMap{{"remoteId", "owned-fixture"}, {"event", value}}}, true);
+        const auto before = manager.m_events;
+        QVERIFY(!before.isEmpty());
+        int requests = 0;
+        manager.m_transport = [&](auto, auto, auto, auto, auto, auto done) {
+            ++requests;
+            done(200, badReply, {});
+        };
+        manager.fetchCalendar("provider-calendar", [] {});
+        QCOMPARE(requests, 1);
+        QCOMPARE(manager.m_events, before);
+        QVERIFY(!manager.m_calendars["provider-calendar"].contains("syncToken"));
+        QVERIFY(!manager.m_calendars["provider-calendar"].value("syncError").toString().isEmpty());
+    }
+
+    void failedInvitationSaveLeavesTheOriginalResponseAndQueue() {
+        QTemporaryDir fixture; CalendarManager manager(fixture.path());
+        source(manager, "inbox");
+        auto value = manager.newEvent("2026-11-10"); value["title"] = "Invitation";
+        value["organizer"] = "organizer@example.com";
+        value["guests"] = QVariantList{QVariantMap{{"email", "owner@example.com"}, {"status", "needsAction"}}};
+        manager.ingest("inbox", {QVariantMap{{"remoteId", "invitation"}, {"event", value}}}, true);
+        const auto events = manager.m_events, links = manager.m_links;
+        QVERIFY(manager.event(events.firstKey()).value("canRespond").toBool());
+        manager.m_db.close();
+        QVERIFY(!manager.respondEvent(events.firstKey(), "accepted"));
+        QCOMPARE(manager.m_events, events);
+        QCOMPARE(manager.m_links, links);
+        QVERIFY(!manager.m_editSyncTimer.isActive());
+    }
+
+    void invitationAcknowledgementKeepsNewerResponseQueued() {
+        QTemporaryDir fixture; CalendarManager manager(fixture.path());
+        source(manager, "inbox", "microsoft");
+        auto event = manager.newEvent("2026-11-10"); event["title"] = "Invitation";
+        event["organizer"] = "organizer@example.com";
+        event["guests"] = QVariantList{QVariantMap{{"email", "owner@example.com"}, {"status", "needsAction"}}};
+        manager.ingest("inbox", {QVariantMap{{"remoteId", "invitation"}, {"event", event}}}, true);
+        const auto id = manager.m_events.firstKey();
+        QVERIFY(manager.respondEvent(id, "accepted"));
+
+        QList<CalendarManager::Reply> replies;
+        QStringList actions;
+        manager.m_transport = [&](auto, QByteArray method, QUrl url, auto, auto, auto done) {
+            QCOMPARE(method, QByteArray("POST"));
+            actions.append(url.path().section('/', -1));
+            replies.append(std::move(done));
+        };
+        manager.m_editSyncTimer.stop();
+        manager.uploadNext("inbox", [] {});
+        QCOMPARE(actions, QStringList{"accept"});
+
+        QVERIFY(manager.respondEvent(id, "declined"));
+        replies.takeFirst()(202, {}, {});
+        QVERIFY(manager.event(id).value("pending").toBool());
+        manager.m_editSyncTimer.stop();
+        manager.uploadNext("inbox", [] {});
+        QCOMPARE(actions, (QStringList{"accept", "decline"}));
+        replies.takeFirst()(202, {}, {});
+        QVERIFY(!manager.event(id).value("pending").toBool());
+    }
+
+    void missingCreationIdKeepsUploadQueued_data() {
+        QTest::addColumn<QString>("provider");
+        QTest::addColumn<QByteArray>("invalidResponse");
+        QTest::newRow("google-missing-id") << QString("google") << QByteArray("{}");
+        QTest::newRow("microsoft-missing-id") << QString("microsoft") << QByteArray("{}");
+        QTest::newRow("google-numeric-id") << QString("google") << QByteArray(R"({"id":17})");
+        QTest::newRow("microsoft-broken-json") << QString("microsoft") << QByteArray("{");
+    }
+
+    void missingCreationIdKeepsUploadQueued() {
+        QFETCH(QString, provider);
+        QFETCH(QByteArray, invalidResponse);
+        QTemporaryDir fixture;
+        QString id;
+        {
+            CalendarManager manager(fixture.path());
+            source(manager, "remote", provider);
+            auto event = manager.newEvent("2026-11-10"); event["title"] = "Pending event";
+            event["destinations"] = QVariantList{"remote"};
+            id = manager.saveEvent(event);
+            QVERIFY(!id.isEmpty());
+            manager.m_transport = [&](auto, QByteArray method, auto, auto, auto, auto done) {
+                QCOMPARE(method, QByteArray("POST"));
+                done(201, invalidResponse, {});
+            };
+            manager.m_editSyncTimer.stop();
+            manager.uploadNext("remote", [] {});
+            QVERIFY(manager.event(id).value("pending").toBool());
+            QVERIFY(!manager.m_calendars["remote"].value("syncError").toString().isEmpty());
+        }
+        CalendarManager restored(fixture.path());
+        QVERIFY(restored.event(id).value("pending").toBool());
+    }
+
+    void timedCreationUsesTheClockSlotAcrossDaylightChanges() {
+        QTemporaryDir fixture; CalendarManager manager(fixture.path());
+        manager.setPreferences({{"timeZone", "Europe/London"}});
+        const auto spring = manager.newEvent("2026-03-29", 540);
+        const auto autumn = manager.newEvent("2026-10-25", 540);
+        QCOMPARE(spring.value("start").toString(), "2026-03-29T09:00:00+01:00");
+        QCOMPARE(autumn.value("start").toString(), "2026-10-25T09:00:00+00:00");
+    }
+
+    void lockedDatabaseDoesNotPublishPortableEdits() {
+        QTemporaryDir fixture; CalendarManager manager(fixture.path());
+        auto event = manager.newEvent("2026-11-10"); event["title"] = "Original";
+        const auto id = manager.saveEvent(event);
+        QVERIFY(!id.isEmpty());
+        const auto before = guardSnapshot(manager.storageDirectory());
+        QSqlQuery query(manager.m_db);
+        QVERIFY(query.exec("PRAGMA busy_timeout=0"));
+        const QString connection = QStringLiteral("calendar-locked-database-proof");
+        const auto remove = qScopeGuard([&] { QSqlDatabase::removeDatabase(connection); });
+        auto blocker = QSqlDatabase::addDatabase("QSQLITE", connection);
+        blocker.setDatabaseName(fixture.filePath("calendar.sqlite"));
+        QVERIFY(blocker.open());
+        QSqlQuery lock(blocker);
+        QVERIFY(lock.exec("BEGIN IMMEDIATE"));
+        event = manager.event(id); event["title"] = "Unsaved";
+        QVERIFY(manager.saveEvent(event).isEmpty());
+        QCOMPARE(guardSnapshot(manager.storageDirectory()), before);
+        QVERIFY(lock.exec("ROLLBACK"));
+        CalendarManager reopened(fixture.path());
+        QCOMPARE(reopened.event(id).value("title").toString(), "Original");
+    }
+
+    void failedDatabaseCommitRestoresPortableFiles() {
+        QTemporaryDir fixture; CalendarManager manager(fixture.path());
+        auto event = manager.newEvent("2026-11-10"); event["title"] = "Original";
+        const auto id = manager.saveEvent(event);
+        QVERIFY(!id.isEmpty());
+        const auto before = guardSnapshot(manager.storageDirectory());
+        QSqlQuery query(manager.m_db);
+        QVERIFY(query.exec("PRAGMA foreign_keys=ON"));
+        QVERIFY(query.exec("CREATE TABLE required_parent (id INTEGER PRIMARY KEY)"));
+        QVERIFY(query.exec("CREATE TABLE check_commit (ref INTEGER REFERENCES required_parent(id) DEFERRABLE INITIALLY DEFERRED)"));
+        QVERIFY(query.exec("CREATE TRIGGER fail_on_commit AFTER INSERT ON records WHEN NEW.kind='events' BEGIN INSERT INTO check_commit VALUES(42); END"));
+        event = manager.event(id); event["title"] = "Unsaved after commit";
+        QVERIFY(manager.saveEvent(event).isEmpty());
+        QCOMPARE(guardSnapshot(manager.storageDirectory()), before);
+        QVERIFY(query.exec("DROP TRIGGER fail_on_commit"));
+        CalendarManager reopened(fixture.path());
+        QCOMPARE(reopened.event(id).value("title").toString(), "Original");
+    }
+
+    void failedPortableBatchDoesNotPublishEarlierChanges() {
+        QTemporaryDir fixture; CalendarManager manager(fixture.path());
+        auto event = manager.newEvent("2026-11-10"); event["title"] = "Earlier file";
+        const auto id = manager.saveEvent(event);
+        QVERIFY(!id.isEmpty());
+        auto next = manager.newEvent("2026-11-11"); next["title"] = "Z blocked destination";
+        const QString proposal = manager.propose({QVariantMap{{"operation", "delete"}, {"event", manager.event(id)}},
+                                                  QVariantMap{{"operation", "create"}, {"event", next}}},
+                                                 "Review").value("proposalId").toString();
+        QVERIFY(!proposal.isEmpty());
+        QVERIFY(QDir(manager.storageDirectory()).mkdir("Z blocked destination.pical"));
+        const auto before = guardSnapshot(manager.storageDirectory());
+        QVERIFY(!manager.applyProposal(proposal));
+        QCOMPARE(guardSnapshot(manager.storageDirectory()), before);
+        CalendarManager reopened(fixture.path());
+        QCOMPARE(reopened.event(id).value("title").toString(), "Earlier file");
+    }
+
+    void failedConflictSaveRetainsTheOriginalConflict_data() {
+        QTest::addColumn<QString>("choice");
+        for (const QString choice : {QString("unlink"), QString("local"), QString("delete")})
+            QTest::newRow(qPrintable(choice)) << choice;
+    }
+    void failedConflictSaveRetainsTheOriginalConflict() {
+        QFETCH(QString, choice);
+        QTemporaryDir fixture; CalendarManager manager(fixture.path());
+        source(manager, "linked");
+        auto event = manager.newEvent("2026-11-10"); event["title"] = "Owned"; event["destinations"] = QVariantList{"linked"};
+        QVERIFY(!manager.saveEvent(event).isEmpty());
+        manager.m_editSyncTimer.stop();
+        const auto link = manager.m_links.firstKey();
+        manager.conflict(link, {}, true);
+        const auto events = manager.m_events, links = manager.m_links, conflicts = manager.m_conflicts;
+        int requests = 0;
+        manager.m_transport = [&](auto, auto, auto, auto, auto, auto done) { ++requests; done(200, {}, {}); };
+        manager.m_db.close();
+        manager.resolveConflict(link, choice);
+        QCOMPARE(manager.m_events, events);
+        QCOMPARE(manager.m_links, links);
+        QCOMPARE(manager.m_conflicts, conflicts);
+        QCOMPARE(requests, 0);
+    }
+
+    void activeStorageChangeKeepsOriginalFolderWhenSettingsCannotSave() {
+        QTemporaryDir fixture, target;
+        CalendarManager manager(fixture.path());
+        auto entry = manager.newEvent("2026-11-10"); entry["title"] = "Original local event";
+        const auto id = manager.saveEvent(entry);
+        QVERIFY(!id.isEmpty());
+        const auto original = manager.storageDirectory();
+        const auto previous = QCoreApplication::applicationName();
+        QCoreApplication::setApplicationName("CalendarFolderSettingProof");
+        const auto restoreName = qScopeGuard([&] { QCoreApplication::setApplicationName(previous); });
+        QSettings settings;
+        settings.setValue("calendar/directory", original); settings.sync();
+        QCOMPARE(settings.status(), QSettings::NoError);
+        const QString directory = QFileInfo(settings.fileName()).absolutePath();
+        const auto permission = QFileInfo(directory).permissions();
+        QVERIFY(QFile::setPermissions(directory, QFile::ReadOwner | QFile::ExeOwner));
+        const auto unlock = qScopeGuard([&] { QFile::setPermissions(directory, permission); });
+        QVERIFY(!manager.setStorageDirectory(target.path()));
+        QCOMPARE(manager.storageDirectory(), original);
+        QVERIFY(manager.m_fileWatcher.directories().contains(original));
+        QCOMPARE(manager.event(id).value("title").toString(), "Original local event");
+    }
+
+    void failedProposalWriteRetainsThePreviousDraft() {
+        QTemporaryDir fixture; CalendarManager manager(fixture.path());
+        auto event = manager.newEvent("2026-11-10"); event["title"] = "Previous draft";
+        const QString id = manager.propose({QVariantMap{{"operation", "create"}, {"event", event}}}, "Review").value("proposalId").toString();
+        QVERIFY(!id.isEmpty());
+        const auto previous = manager.proposals();
+        manager.m_db.close();
+        event["title"] = "Unsaved update";
+        QVERIFY(!manager.updateProposal(id, 0, event));
+        QCOMPARE(manager.proposals(), previous);
+        QVERIFY(!manager.discardProposal(id));
+        QCOMPARE(manager.proposals(), previous);
+    }
+
+    void unknownDeleteScopeCannotChangeRecurringSeries() {
+        QTemporaryDir fixture; CalendarManager manager(fixture.path());
+        auto event = manager.newEvent("2026-11-10"); event["title"] = "Recurring";
+        event["recurrence"] = "FREQ=DAILY;COUNT=4";
+        const auto id = manager.saveEvent(event);
+        QVERIFY(!id.isEmpty());
+        const auto before = manager.events("2026-11-10", "2026-11-15");
+        QCOMPARE(before.size(), 4);
+        QVERIFY(!manager.deleteEvent(id, "unknown", before.at(1).toMap().value("occurrence").toString()));
+        QCOMPARE(manager.events("2026-11-10", "2026-11-15"), before);
+    }
+
     void reminderSnapshotKeepsPartialProviderCacheAuthoritative() {
         QTemporaryDir fixture; CalendarManager manager(fixture.path()); manager.m_events.clear();
         manager.m_preferences["timeZone"] = "UTC"; source(manager, "work", "microsoft");
@@ -322,453 +692,6 @@ class CalendarTests : public QObject {
         QCOMPARE(manager.event(id),before);
     }
 
-    void unfinishedCheckoutStaysInactiveWithoutAnAddon() {
-        QTemporaryDir fixture;
-        const auto directory = fixture.filePath("library");
-        const auto metadata = directory + "/events/.git";
-        QVERIFY(createGuardMetadata(metadata));
-        QVERIFY(writeGuardFile(metadata + "/MERGE_HEAD", QByteArray(40, 'a') + '\n'));
-        CalendarManager manager(directory);
-        QVERIFY(!manager.active()); QVERIFY(!manager.error().isEmpty());
-        manager.setActive(true); QVERIFY(!manager.active());
-        QVERIFY(QFile::remove(metadata + "/MERGE_HEAD"));
-        manager.setActive(true); QVERIFY(manager.active());
-    }
-    void gitFolderChangesRequireRecovery_data() {
-        QTest::addColumn<bool>("adopt"); QTest::addColumn<bool>("sourceGuard"); QTest::addColumn<QString>("problem");
-        for (const bool adopt : {false, true}) for (const bool sourceGuard : {false, true})
-            for (const auto *problem : {"MERGE_HEAD", "rebase-merge", "rebase-apply", "CHERRY_PICK_HEAD", "REVERT_HEAD", "reload", "missing-root", "worktree", "broken-pointer", "corrupt-head"}) {
-                const auto name = QString("%1_%2_%3").arg(adopt ? "adopt" : "copy", sourceGuard ? "source" : "target", problem).toUtf8();
-                QTest::newRow(name.constData()) << adopt << sourceGuard << QString::fromLatin1(problem);
-            }
-    }
-    void gitFolderChangesRequireRecovery() {
-        QFETCH(bool, adopt); QFETCH(bool, sourceGuard); QFETCH(QString, problem);
-        QTemporaryDir fixture; const auto target = fixture.filePath("checkout"); QVERIFY(QDir().mkpath(target));
-        QSettings settings; const auto pending = settings.value("Git/pendingWorktrees");
-        const auto restore = qScopeGuard([&] { if (pending.isValid()) settings.setValue("Git/pendingWorktrees", pending); else settings.remove("Git/pendingWorktrees"); });
-        CalendarManager manager(fixture.filePath("original")); auto event = manager.newEvent("2026-11-01"); event["title"] = "Retained";
-        const auto id = manager.saveEvent(event); QVERIFY(!id.isEmpty());
-        const auto guardRoot = sourceGuard ? manager.storageDirectory() : target;
-        auto metadata = QDir(guardRoot).filePath(".git");
-        QString marker;
-        if (problem == "reload" || problem == "missing-root") {
-            const auto root = problem == "reload" ? guardRoot : QDir(guardRoot).filePath("missing-checkout");
-            settings.setValue("Git/pendingWorktrees", QVariantMap{{root, QVariantMap{{"outcome", "applied"}}}});
-        } else if (problem == "broken-pointer") {
-            metadata = fixture.filePath("absent-metadata");
-            QVERIFY(writeGuardFile(QDir(guardRoot).filePath(".git"), "gitdir: " + metadata.toUtf8() + '\n'));
-        } else if (problem == "worktree") {
-            const auto common = fixture.filePath("common"); QVERIFY(createGuardMetadata(common));
-            metadata = common + "/worktrees/linked";
-            QVERIFY(writeGuardFile(metadata + "/HEAD", "ref: refs/heads/linked\n"));
-            QVERIFY(writeGuardFile(metadata + "/commondir", "../..\n"));
-            QVERIFY(writeGuardFile(QDir(guardRoot).filePath(".git"), "gitdir: " + QDir(guardRoot).relativeFilePath(metadata).toUtf8() + '\n'));
-            marker = metadata + "/MERGE_HEAD"; QVERIFY(writeGuardFile(marker, QByteArray(40,'a') + '\n'));
-        } else {
-            QVERIFY(createGuardMetadata(metadata));
-            if (problem == "corrupt-head") QVERIFY(writeGuardFile(metadata + "/HEAD", "corrupt metadata\n"));
-            else {
-                marker = metadata + '/' + problem;
-                if (problem.startsWith("rebase-")) QVERIFY(QDir().mkpath(marker));
-                else QVERIFY(writeGuardFile(marker, QByteArray(40,'a') + '\n'));
-            }
-        }
-        const auto sourceBytes = guardSnapshot(manager.storageDirectory()), targetBytes = guardSnapshot(target);
-        const auto directory = manager.storageDirectory(); const auto directorySetting = settings.value("calendar/directory");
-        const auto pendingBefore = settings.value("Git/pendingWorktrees");
-        const auto events = manager.m_events, records = manager.m_fileRecords; const auto preferences = manager.preferences(); const auto revision = manager.revision();
-        QVERIFY(!(adopt ? manager.adoptGitDirectory(target) : manager.setStorageDirectory(target)));
-        QVERIFY(manager.error().contains("Git")); QVERIFY(manager.active()); QVERIFY(!manager.gitUpdating());
-        QCOMPARE(manager.m_events, events); QCOMPARE(manager.m_fileRecords, records); QCOMPARE(manager.preferences(), preferences); QCOMPARE(manager.revision(), revision);
-        QCOMPARE(manager.storageDirectory(), directory); QCOMPARE(settings.value("calendar/directory"), directorySetting);
-        QCOMPARE(settings.value("Git/pendingWorktrees"), pendingBefore);
-        QCOMPARE(guardSnapshot(directory), sourceBytes); QCOMPARE(guardSnapshot(target), targetBytes);
-        if (problem == "reload" || problem == "missing-root") settings.remove("Git/pendingWorktrees");
-        else if (problem == "broken-pointer") QVERIFY(createGuardMetadata(metadata));
-        else if (problem == "corrupt-head") QVERIFY(writeGuardFile(metadata + "/HEAD", "ref: refs/heads/main\n"));
-        else if (QFileInfo(marker).isDir()) QVERIFY(QDir(marker).removeRecursively());
-        else QVERIFY(QFile::remove(marker));
-        QVERIFY2(adopt ? manager.adoptGitDirectory(target) : manager.setStorageDirectory(target), qPrintable(manager.error()));
-        QCOMPARE(manager.storageDirectory(), target);
-    }
-    void gitPendingTargetIsNotCreated() {
-        QTemporaryDir fixture;
-        CalendarManager manager(fixture.filePath("original")); auto event = manager.newEvent("2026-11-01"); event["title"] = "Retained";
-        QVERIFY(!manager.saveEvent(event).isEmpty());
-        const auto root = fixture.filePath("missing-checkout"), target = root + "/nested/library";
-        QSettings settings; const auto pending = settings.value("Git/pendingWorktrees");
-        const auto restore = qScopeGuard([&] { if (pending.isValid()) settings.setValue("Git/pendingWorktrees",pending); else settings.remove("Git/pendingWorktrees"); });
-        settings.setValue("Git/pendingWorktrees",QVariantMap{{root,QVariantMap{{"outcome","applied"}}}});
-        const auto before = guardSnapshot(manager.storageDirectory());
-        QVERIFY(!manager.setStorageDirectory(target)); QVERIFY(!QFileInfo::exists(root));
-        QCOMPARE(guardSnapshot(manager.storageDirectory()),before);
-        settings.remove("Git/pendingWorktrees");
-        QVERIFY(manager.setStorageDirectory(target)); QVERIFY(QFileInfo(target).isDir());
-    }
-    void gitFolderGuardResolvesAncestorAliases_data() {
-        QTest::addColumn<bool>("adopt"); QTest::addColumn<bool>("parentTraversal");
-        QTest::newRow("copy_alias") << false << false;
-        QTest::newRow("adopt_alias") << true << false;
-        QTest::newRow("adopt_alias_parent") << true << true;
-    }
-    void gitFolderGuardResolvesAncestorAliases() {
-        QFETCH(bool,adopt); QFETCH(bool,parentTraversal); QTemporaryDir fixture;
-        CalendarManager manager(fixture.filePath("original")); auto event = manager.newEvent("2026-11-01"); event["title"] = "Retained";
-        QVERIFY(!manager.saveEvent(event).isEmpty());
-        const auto repository = fixture.filePath("repository"), alias = fixture.filePath("alias");
-        QVERIFY(QDir().mkpath(repository + "/library")); QVERIFY(QDir().mkpath(repository + "/subfolder"));
-        QVERIFY(createGuardMetadata(repository + "/.git"));
-        const auto marker = repository + "/.git/MERGE_HEAD"; QVERIFY(writeGuardFile(marker,QByteArray(40,'a') + '\n'));
-        QVERIFY(QFile::link(parentTraversal ? repository + "/subfolder" : repository,alias));
-        const auto target = alias + (parentTraversal ? "/../library" : "/library");
-        const auto before = guardSnapshot(manager.storageDirectory()), targetBefore = guardSnapshot(repository);
-        QVERIFY(!(adopt ? manager.adoptGitDirectory(target) : manager.setStorageDirectory(target)));
-        QCOMPARE(guardSnapshot(manager.storageDirectory()),before); QCOMPARE(guardSnapshot(repository),targetBefore);
-        QVERIFY(QFile::remove(marker));
-        QVERIFY(adopt ? manager.adoptGitDirectory(target) : manager.setStorageDirectory(target));
-        QCOMPARE(manager.storageDirectory(),adopt ? repository + "/library" : target);
-    }
-    void gitFolderGuardAcceptsCurrentReftableRepositories_data() {
-        QTest::addColumn<bool>("adopt"); QTest::addColumn<bool>("sourceGuard");
-        for (const bool adopt : {false,true}) for (const bool sourceGuard : {false,true})
-            QTest::newRow(QString("%1_%2").arg(adopt ? "adopt" : "copy", sourceGuard ? "source" : "target").toUtf8().constData()) << adopt << sourceGuard;
-    }
-    void gitFolderGuardAcceptsCurrentReftableRepositories() {
-        QFETCH(bool,adopt); QFETCH(bool,sourceGuard); QTemporaryDir fixture;
-        CalendarManager manager(fixture.filePath("original")); auto event = manager.newEvent("2026-11-01"); event["title"] = "Retained";
-        QVERIFY(!manager.saveEvent(event).isEmpty());
-        const auto target = fixture.filePath("checkout"); QVERIFY(QDir().mkpath(target));
-        const auto root = sourceGuard ? manager.storageDirectory() : target;
-        QProcess git; auto environment = QProcessEnvironment::systemEnvironment();
-        environment.insert("GIT_CONFIG_GLOBAL","/dev/null"); environment.insert("GIT_CONFIG_SYSTEM","/dev/null"); git.setProcessEnvironment(environment);
-        git.start("git",{"-c","core.hooksPath=/dev/null","-c","init.defaultBranch=main","init","--ref-format=reftable",root});
-        QVERIFY(git.waitForFinished()); QVERIFY2(git.exitCode() == 0,git.readAllStandardError().constData());
-        QVERIFY(QFileInfo(root + "/.git/reftable/tables.list").isFile());
-        QVERIFY(writeGuardFile(root + "/.git/MERGE_HEAD",QByteArray(40,'a') + '\n'));
-        const auto before = guardSnapshot(manager.storageDirectory()), targetBefore = guardSnapshot(target);
-        QVERIFY(!(adopt ? manager.adoptGitDirectory(target) : manager.setStorageDirectory(target)));
-        QCOMPARE(guardSnapshot(manager.storageDirectory()),before); QCOMPARE(guardSnapshot(target),targetBefore);
-        QVERIFY(QFile::remove(root + "/.git/MERGE_HEAD"));
-        QVERIFY2(adopt ? manager.adoptGitDirectory(target) : manager.setStorageDirectory(target),qPrintable(manager.error()));
-    }
-    void gitAdoptionReplacesLocalLibraryWithoutChangingFilesOrProviderWork_data() {
-        QTest::addColumn<bool>("passive"); QTest::newRow("active") << false; QTest::newRow("passive") << true;
-    }
-    void gitAdoptionReplacesLocalLibraryWithoutChangingFilesOrProviderWork() {
-        QFETCH(bool, passive); QTemporaryDir original, checkout; CalendarManager manager(original.path()); source(manager, "remote");
-        auto event = manager.newEvent("2026-11-01"); event["title"] = "Retained identity"; event["destinations"] = QVariantList{"remote"}; event["organizerCalendar"] = "remote";
-        const auto retained = manager.saveEvent(event); QVERIFY(!retained.isEmpty()); event.remove("id"); event["title"] = "Previous library only";
-        const auto removed = manager.saveEvent(event); QVERIFY(!removed.isEmpty());
-        for (auto &link : manager.m_links) { link["pending"] = ""; link["remoteId"] = "acknowledged"; }
-        const auto remoteId = QString(32, 'c'); manager.m_events[remoteId] = {{"id", remoteId}, {"title", "Device remote cache"}, {"local", false}, {"source", "remote"}};
-        manager.m_links["remote-link"] = {{"event", remoteId}, {"calendar", "remote"}, {"pending", "save"}};
-        manager.m_tokens["account"] = {{"access_token", "device-local"}};
-        const auto accounts = manager.m_accounts, calendars = manager.m_calendars, tokens = manager.m_tokens;
-        const auto remote = manager.m_events[remoteId];
-        const auto links = manager.m_links;
-        auto incoming = manager.m_fileRecords[retained]; auto changed = incoming.value("event").toMap(); changed["title"] = "From checkout"; incoming["event"] = changed;
-        auto added = manager.newEvent("2026-11-02"); const auto addedId = QString(32, 'a'); added["id"] = addedId; added["title"] = "Checkout only"; added["destinations"] = QVariantList{"remote"};
-        CalendarFiles::Records records{{retained, incoming}, {addedId, {{"format", "pilon-calendar-event"}, {"change", QString(32, 'b')}, {"revision", 1}, {"event", added}}}};
-        QString error; QVERIFY2(CalendarFiles::write(checkout.path(), records, error), qPrintable(error));
-        QMap<QString, QByteArray> sourceBytes, targetBytes;
-        for (const auto &name : CalendarFiles::files(manager.storageDirectory())) { QFile file(QDir(manager.storageDirectory()).filePath(name)); QVERIFY(file.open(QIODevice::ReadOnly)); sourceBytes[name] = file.readAll(); }
-        for (const auto &name : CalendarFiles::files(checkout.path())) { QFile file(checkout.filePath(name)); QVERIFY(file.open(QIODevice::ReadOnly)); targetBytes[name] = file.readAll(); }
-        const auto sourceDirectory = manager.storageDirectory();
-        if (passive) manager.setActive(false);
-        int requests = 0; manager.m_transport = [&](auto, auto, auto, auto, auto, auto) { ++requests; };
-        QVERIFY2(manager.adoptGitDirectory(checkout.path()), qPrintable(manager.error()));
-        QCOMPARE(manager.active(), !passive); QVERIFY(!manager.gitUpdating()); QCOMPARE(manager.storageDirectory(), checkout.path());
-        QCOMPARE(manager.event(retained).value("title").toString(), QString("From checkout")); QVERIFY(!manager.m_events.contains(removed));
-        QCOMPARE(manager.m_events[remoteId], remote); QCOMPARE(manager.m_accounts, accounts); QCOMPARE(manager.m_calendars, calendars); QCOMPARE(manager.m_tokens, tokens);
-        QCOMPARE(manager.m_events[retained].value("destinations").toList(), QVariantList{"remote"});
-        QVERIFY(manager.m_events[addedId].value("destinations").toList().isEmpty());
-        for (auto it = links.cbegin(); it != links.cend(); ++it) {
-            if (it->value("event") == removed) QVERIFY(!manager.m_links.contains(it.key()));
-            else QCOMPARE(manager.m_links.value(it.key()), it.value());
-        }
-        QCOMPARE(manager.m_fileRecords, records); QCOMPARE(QSettings().value("calendar/directory").toString(), checkout.path());
-        QTest::qWait(180); QCOMPARE(requests, 0);
-        for (auto it = sourceBytes.cbegin(); it != sourceBytes.cend(); ++it) { QFile file(QDir(sourceDirectory).filePath(it.key())); QVERIFY(file.open(QIODevice::ReadOnly)); QCOMPARE(file.readAll(), it.value()); }
-        QCOMPARE(CalendarFiles::files(checkout.path()).size(), targetBytes.size());
-        for (auto it = targetBytes.cbegin(); it != targetBytes.cend(); ++it) { QFile file(checkout.filePath(it.key())); QVERIFY(file.open(QIODevice::ReadOnly)); QCOMPARE(file.readAll(), it.value()); }
-        QVERIFY(manager.prepareDisable()); QVERIFY(!manager.m_events.contains(removed));
-    }
-    void gitAdoptionRejectsInvalidCurrentTargetAndOverlap() {
-        QTemporaryDir original, checkout; CalendarManager manager(original.path());
-        auto event = manager.newEvent("2026-11-01"); event["title"] = "Retain on failure"; const auto retained = manager.saveEvent(event);
-        const auto folder = manager.storageDirectory();
-        QFile broken(checkout.filePath("Broken.pical")); QVERIFY(broken.open(QIODevice::WriteOnly)); broken.write("invalid"); broken.close();
-        QVERIFY(!manager.adoptGitDirectory(checkout.path())); QCOMPARE(manager.storageDirectory(), folder); QVERIFY(manager.active());
-        QVERIFY(broken.remove()); QFile current(QDir(folder).filePath("Broken.pical")); QVERIFY(current.open(QIODevice::WriteOnly)); current.write("invalid"); current.close();
-        QVERIFY(!manager.adoptGitDirectory(checkout.path())); QVERIFY(current.remove());
-        const auto nested = QDir(folder).filePath("checkout"); QVERIFY(QDir().mkpath(nested));
-        QVERIFY(!manager.adoptGitDirectory(nested)); QVERIFY(!manager.adoptGitDirectory(original.path()));
-        manager.m_interactionActive = true; QVERIFY(!manager.adoptGitDirectory(checkout.path())); manager.m_interactionActive = false;
-        QVERIFY(manager.beginGitUpdate()); QVERIFY(!manager.adoptGitDirectory(checkout.path())); QVERIFY(manager.finishGitUpdate());
-        QCOMPARE(manager.event(retained).value("title"), event.value("title"));
-    }
-    void gitAdoptionRollsBackDatabaseAndSettingsFailures_data() {
-        QTest::addColumn<QString>("failure"); QTest::newRow("current-database") << QString("current-database");
-        QTest::newRow("incoming-database") << QString("incoming-database"); QTest::newRow("settings") << QString("settings");
-    }
-    void gitAdoptionRollsBackDatabaseAndSettingsFailures() {
-        QFETCH(QString, failure); QTemporaryDir original, checkout; CalendarManager manager(original.path());
-        auto event = manager.newEvent("2026-11-01"); event["title"] = "Original"; const auto retained = manager.saveEvent(event); QVERIFY(!retained.isEmpty());
-        const auto before = manager.m_events, records = manager.m_fileRecords; const auto folder = manager.storageDirectory();
-        const auto application = QCoreApplication::applicationName(); QCoreApplication::setApplicationName("CalendarAdoptionBlocked");
-        const auto restoreApplication = qScopeGuard([&] { QCoreApplication::setApplicationName(application); });
-        QSettings settings; settings.setValue("calendar/directory", folder); settings.sync(); QVERIFY(settings.status() == QSettings::NoError);
-        const auto settingsDirectory = QFileInfo(settings.fileName()).absolutePath();
-        const auto permissions = QFileInfo(settingsDirectory).permissions();
-        const auto restorePermissions = qScopeGuard([&] { QFile::setPermissions(settingsDirectory, permissions); });
-        if (failure == "settings") QVERIFY(QFile::setPermissions(settingsDirectory, QFile::ReadOwner | QFile::ExeOwner));
-        if (failure == "current-database") manager.m_db.close();
-        const auto connection = connect(&manager, &CalendarManager::gitUpdatingChanged, &manager, [&] { if (failure == "incoming-database" && manager.gitUpdating()) manager.m_db.close(); });
-        QVERIFY(!manager.adoptGitDirectory(checkout.path())); disconnect(connection);
-        QCOMPARE(manager.storageDirectory(), folder); QCOMPARE(manager.m_events, before); QCOMPARE(manager.m_fileRecords, records);
-        QVERIFY(manager.active()); QVERIFY(!manager.gitUpdating()); QVERIFY(!manager.error().isEmpty());
-        QCOMPARE(QSettings().value("calendar/directory").toString(), folder);
-        QVERIFY(QDir(checkout.path()).entryList(QDir::AllEntries | QDir::Hidden | QDir::NoDotAndDotDot).isEmpty());
-        QVERIFY(QFile::setPermissions(settingsDirectory, permissions));
-        if (!manager.m_db.isOpen()) QVERIFY(manager.m_db.open());
-    }
-    void gitUpdatePausesActivityAndBlocksMutations() {
-        QTemporaryDir directory, destination;
-        CalendarManager manager(directory.path());
-        auto event=manager.newEvent("2026-11-01"); event["title"]="Before Git";
-        const auto id=manager.saveEvent(event); QVERIFY(!id.isEmpty());
-        manager.m_reminderTimer.start(30); manager.m_shareTimer.start(600); manager.m_fileTimer.start();
-        QVERIFY(manager.beginGitUpdate()); QVERIFY(manager.gitUpdating()); QVERIFY(!manager.active());
-        QVERIFY(manager.m_fileWatcher.directories().isEmpty()); QVERIFY(!manager.m_fileTimer.isActive());
-        QVERIFY(!manager.m_editSyncTimer.isActive()); QVERIFY(!manager.m_shareTimer.isActive()); QVERIFY(!manager.m_reminderTimer.isActive());
-        manager.setActive(true); QVERIFY(!manager.active());
-        QVERIFY(manager.saveEvent(event).isEmpty());
-        QVERIFY(!manager.setStorageDirectory(destination.path()));
-        QCOMPARE(manager.event(id).value("title").toString(),QString("Before Git"));
-    }
-    void gitUpdateVetoesBusyWorkAndSaveFailure() {
-        QTemporaryDir directory;
-        CalendarManager manager(directory.path());
-        for(bool *busy:{&manager.m_syncing,&manager.m_sharingBusy,&manager.m_sharingConfigurationBusy,
-                       &manager.m_interactionActive,&manager.m_batch,&manager.m_importingFiles}) {
-            *busy=true; QVERIFY(!manager.beginGitUpdate()); QVERIFY(!manager.gitUpdating()); QVERIFY(manager.active()); *busy=false;
-        }
-        manager.m_credentialWrites.insert("pending"); QVERIFY(!manager.beginGitUpdate()); manager.m_credentialWrites.clear();
-        manager.m_loginTimer.start(); QVERIFY(!manager.beginGitUpdate()); manager.m_loginTimer.stop();
-        manager.m_db.close(); QVERIFY(!manager.beginGitUpdate()); QVERIFY(!manager.gitUpdating()); QVERIFY(manager.active());
-        QVERIFY(!manager.error().isEmpty());
-    }
-    void gitSnapshotReplacesCacheWithoutRewritingFilesOrProviderRouting() {
-        QTemporaryDir directory;
-        CalendarManager manager(directory.path()); source(manager,"remote");
-        auto event=manager.newEvent("2026-11-01"); event["title"]="Original";
-        event["destinations"]=QVariantList{"remote"}; event["organizerCalendar"]="remote";
-        const auto id=manager.saveEvent(event); QVERIFY(!id.isEmpty());
-        for(auto &link:manager.m_links) { link["pending"]=""; link["remoteId"]="acknowledged"; }
-        manager.m_tokens["account"]={{"access_token","device-local"}};
-        const auto links=manager.m_links, accounts=manager.m_accounts, calendars=manager.m_calendars;
-        const auto tokens=manager.m_tokens;
-        manager.m_fileRecords[id]["revision"]=50;
-        QVERIFY(manager.beginGitUpdate());
-        auto records=manager.m_fileRecords;
-        auto incoming=records[id].value("event").toMap(); incoming["title"]="Incoming title"; incoming.remove("location");
-        records[id]["event"]=incoming; records[id]["revision"]=1;
-        auto added=manager.newEvent("2026-11-02"); added["id"]=QString(32,'a'); added["title"]="New incoming event";
-        added["destinations"]=QVariantList{"remote"}; added["organizerCalendar"]="remote";
-        records[added.value("id").toString()]={{"format","pilon-calendar-event"},{"change",QString(32,'b')},{"revision",1},{"event",added}};
-        QString error; QVERIFY2(CalendarFiles::write(manager.storageDirectory(),records,error),qPrintable(error));
-        QMap<QString,QByteArray> bytes;
-        for(const auto &name:CalendarFiles::files(manager.storageDirectory())) {
-            QFile file(QDir(manager.storageDirectory()).filePath(name)); QVERIFY(file.open(QIODevice::ReadOnly)); bytes[name]=file.readAll();
-        }
-        int requests=0; manager.m_transport=[&](auto,auto,auto,auto,auto,auto){++requests;};
-        QVERIFY2(manager.finishGitUpdate(),qPrintable(manager.error()));
-        QVERIFY(manager.active()); QVERIFY(!manager.gitUpdating());
-        QCOMPARE(manager.event(id).value("title").toString(),QString("Incoming title"));
-        QVERIFY(!manager.m_events[id].contains("location"));
-        QCOMPARE(manager.m_events[id].value("organizerCalendar").toString(),QString("remote"));
-        QVERIFY(manager.m_events[added.value("id").toString()].value("destinations").toList().isEmpty());
-        QCOMPARE(manager.m_links,links); QCOMPARE(manager.m_accounts,accounts); QCOMPARE(manager.m_calendars,calendars); QCOMPARE(manager.m_tokens,tokens);
-        QCOMPARE(CalendarFiles::files(manager.storageDirectory()).size(),bytes.size());
-        for(auto it=bytes.cbegin();it!=bytes.cend();++it) {
-            QFile file(QDir(manager.storageDirectory()).filePath(it.key())); QVERIFY(file.open(QIODevice::ReadOnly)); QCOMPARE(file.readAll(),it.value());
-        }
-        QTest::qWait(180); QCOMPARE(requests,0);
-    }
-    void gitSnapshotRequiresExplicitPersistentTombstones() {
-        QTemporaryDir directory; CalendarManager manager(directory.path());
-        auto event=manager.newEvent("2026-11-01"); event["title"]="Keep deletion history";
-        const auto id=manager.saveEvent(event); QVERIFY(!id.isEmpty());
-        auto record=manager.m_fileRecords[id];
-        QVERIFY(manager.beginGitUpdate());
-        QString error; QVERIFY(CalendarFiles::write(manager.storageDirectory(),{},error));
-        QVERIFY(!manager.finishGitUpdate()); QVERIFY(manager.gitUpdating()); QVERIFY(!manager.active());
-        QCOMPARE(manager.event(id).value("title"),event.value("title"));
-        QVERIFY(QDir(manager.storageDirectory()).entryList({"*.pical"}).isEmpty());
-        auto deleted=record.value("event").toMap(); deleted["deleted"]=true; record["event"]=deleted;
-        QVERIFY(CalendarFiles::write(manager.storageDirectory(),{{id,record}},error));
-        QVERIFY2(manager.finishGitUpdate(),qPrintable(manager.error())); QVERIFY(manager.event(id).value("deleted").toBool());
-        QVERIFY(manager.beginGitUpdate()); QVERIFY(CalendarFiles::write(manager.storageDirectory(),{},error));
-        QVERIFY(!manager.finishGitUpdate());
-        auto live=record; deleted["deleted"]=false; live["event"]=deleted;
-        QVERIFY(CalendarFiles::write(manager.storageDirectory(),{{id,live}},error)); QVERIFY(!manager.finishGitUpdate());
-        QVERIFY(CalendarFiles::write(manager.storageDirectory(),{{id,record}},error)); QVERIFY(manager.finishGitUpdate());
-    }
-    void gitSnapshotInvalidAndDuplicateDataStaysRecoverable_data() {
-        QTest::addColumn<QString>("problem");
-        for(const auto *problem:{"json","format","event","duplicate","duplicate-tombstone","metadata","symlink","provider-collision","hidden"})
-            QTest::newRow(problem)<<QString::fromLatin1(problem);
-    }
-    void gitSnapshotInvalidAndDuplicateDataStaysRecoverable() {
-        QFETCH(QString,problem);
-        QTemporaryDir directory; CalendarManager manager(directory.path());
-        auto event=manager.newEvent("2026-11-01"); event["title"]="Recoverable";
-        const auto id=manager.saveEvent(event); QVERIFY(!id.isEmpty()); QVERIFY(manager.beginGitUpdate());
-        const auto before=manager.m_events;
-        const auto record=manager.m_fileRecords[id];
-        auto invalid=record;
-        if(problem=="format") invalid["format"]="unknown";
-        if(problem=="event") { auto value=invalid.value("event").toMap(); value["end"]="invalid"; invalid["event"]=value; }
-        if(problem=="provider-collision") {
-            manager.m_events[QString(32,'c')]={{"id",QString(32,'c')},{"local",false},{"title","Remote cached event"}};
-            auto value=invalid.value("event").toMap(); value["id"]=QString(32,'c'); invalid["event"]=value;
-        }
-        if(problem=="hidden") { auto value=invalid.value("event").toMap(); value["id"]=QString(32,'d'); invalid["event"]=value; }
-        const auto path=QDir(manager.storageDirectory()).filePath(problem=="metadata" ? CalendarFiles::deletionsFile
-            : problem=="hidden" ? QString(".Incoming.pical") : QString("Incoming.pical"));
-        if(problem=="symlink") {
-            const auto original=QDir(manager.storageDirectory()).filePath(CalendarFiles::files(manager.storageDirectory()).filter(".pical").first());
-            QVERIFY(QFile::link(original,path));
-        } else {
-            QFile file(path); QVERIFY(file.open(QIODevice::WriteOnly));
-            auto value=QJsonDocument::fromVariant(invalid).toJson();
-            if(problem=="json") value="<<<<<<< current\ninvalid conflict markers";
-            if(problem=="metadata") value=R"({"format":"pilon-calendar-deletions","records":{}})";
-            if(problem=="duplicate-tombstone") {
-                auto deleted=record.value("event").toMap(); deleted["deleted"]=true; invalid["event"]=deleted;
-                value=QJsonDocument::fromVariant(invalid).toJson();
-            }
-            QCOMPARE(file.write(value),value.size());
-        }
-        QVERIFY(!manager.finishGitUpdate()); QVERIFY(manager.gitUpdating()); QVERIFY(!manager.active()); QVERIFY(!manager.error().isEmpty());
-        for(auto it=before.cbegin();it!=before.cend();++it) QCOMPARE(manager.m_events.value(it.key()),it.value());
-        QVERIFY(QFile::exists(path));
-    }
-    void gitSnapshotDatabaseFailureKeepsPauseAndCanRetry() {
-        QTemporaryDir directory; CalendarManager manager(directory.path());
-        auto event=manager.newEvent("2026-11-01"); event["title"]="Before database failure";
-        const auto id=manager.saveEvent(event); QVERIFY(!id.isEmpty()); QVERIFY(manager.beginGitUpdate());
-        auto records=manager.m_fileRecords;
-        auto incoming=records[id].value("event").toMap(); incoming["title"]="After recovery"; records[id]["event"]=incoming;
-        QString error; QVERIFY(CalendarFiles::write(manager.storageDirectory(),records,error));
-        manager.m_db.close(); QVERIFY(!manager.finishGitUpdate());
-        QVERIFY(manager.gitUpdating()); QVERIFY(!manager.active()); QCOMPARE(manager.event(id).value("title"),event.value("title"));
-        QVERIFY(manager.m_db.open()); QVERIFY(manager.finishGitUpdate()); QCOMPARE(manager.event(id).value("title"),incoming.value("title"));
-    }
-    void gitSnapshotRespectsLatestRequestedActiveState() {
-        QTemporaryDir directory; CalendarManager manager(directory.path());
-        QVERIFY(manager.beginGitUpdate()); manager.setActive(false); QVERIFY(manager.finishGitUpdate()); QVERIFY(!manager.active());
-        QVERIFY(manager.beginGitUpdate()); manager.setActive(true); QVERIFY(!manager.active());
-        QVERIFY(manager.finishGitUpdate()); QVERIFY(manager.active()); QVERIFY(!manager.m_fileWatcher.directories().isEmpty());
-    }
-    void gitSnapshotValidationIsReadOnlyAndUsesKnownHistory() {
-        QTemporaryDir directory, candidate;
-        CalendarManager manager(directory.path());
-        auto event=manager.newEvent("2026-11-01"); event["title"]="Local history";
-        const auto id=manager.saveEvent(event); QVERIFY(!id.isEmpty());
-        const auto before=manager.m_events, records=manager.m_fileRecords;
-        const auto revision=manager.revision();
-        int requests=0; manager.m_transport=[&](auto,auto,auto,auto,auto,auto){++requests;};
-        auto incoming=records;
-        auto value=incoming[id].value("event").toMap(); value["title"]="Candidate only"; incoming[id]["event"]=value;
-        QString error; QVERIFY(CalendarFiles::write(candidate.path(),incoming,error));
-        QVERIFY(manager.validateGitSnapshot(candidate.path()));
-        QCOMPARE(manager.m_events,before); QCOMPARE(manager.m_fileRecords,records); QCOMPARE(manager.revision(),revision);
-        QVERIFY(manager.active()); QVERIFY(!manager.gitUpdating()); QCOMPARE(requests,0);
-        QVERIFY(CalendarFiles::write(candidate.path(),{},error)); QVERIFY(!manager.validateGitSnapshot(candidate.path()));
-        QCOMPARE(manager.m_events,before); QCOMPARE(manager.m_fileRecords,records); QVERIFY(!manager.error().isEmpty());
-    }
-    void gitBeginRejectsDuplicateSnapshotBeforeWriting() {
-        QTemporaryDir directory; CalendarManager manager(directory.path());
-        auto event=manager.newEvent("2026-11-01"); event["title"]="Do not drop duplicate";
-        QVERIFY(!manager.saveEvent(event).isEmpty());
-        const auto file=QDir(manager.storageDirectory()).entryList({"*.pical"}).first();
-        QVERIFY(QFile::copy(QDir(manager.storageDirectory()).filePath(file),QDir(manager.storageDirectory()).filePath("Duplicate.pical")));
-        QVERIFY(!manager.beginGitUpdate()); QVERIFY(!manager.gitUpdating()); QVERIFY(manager.active());
-        QCOMPARE(QDir(manager.storageDirectory()).entryList({"*.pical"}).size(),2);
-    }
-    void gitUpdateVetoesLocalProviderPendingWork_data() {
-        QTest::addColumn<QString>("pending");
-        for(const auto *pending:{"save","delete","conflict"}) QTest::newRow(pending)<<QString::fromLatin1(pending);
-    }
-    void gitUpdateVetoesLocalProviderPendingWork() {
-        QFETCH(QString,pending);
-        QTemporaryDir directory; CalendarManager manager(directory.path()); source(manager,"remote");
-        auto event=manager.newEvent("2026-11-01"); event["title"]="Pending provider change"; event["destinations"]=QVariantList{"remote"};
-        const auto id=manager.saveEvent(event); QVERIFY(!id.isEmpty());
-        manager.m_links.first()["pending"]=pending;
-        QVERIFY(!manager.beginGitUpdate()); QVERIFY(!manager.gitUpdating()); QVERIFY(manager.active()); QVERIFY(!manager.error().isEmpty());
-        QCOMPARE(manager.m_links.first().value("pending").toString(),pending);
-    }
-    void gitUpdateLeavesRemoteOnlyPendingEventsAlone() {
-        QTemporaryDir directory; CalendarManager manager(directory.path());
-        manager.m_events["remote-event"]={{"id","remote-event"},{"local",false},{"title","Provider cache"}};
-        manager.m_links["remote-link"]={{"event","remote-event"},{"pending","save"}};
-        const auto events=manager.m_events, links=manager.m_links;
-        QVERIFY(manager.beginGitUpdate()); QVERIFY(manager.finishGitUpdate());
-        QCOMPARE(manager.m_events,events); QCOMPARE(manager.m_links,links);
-    }
-    void gitPauseBlocksAccountAndSharingMutations_data() {
-        QTest::addColumn<QString>("action");
-        for(const auto *action:{"connect","feed","disconnect","retry","revoke","load-sharing","save-sharing","clear-sharing"})
-            QTest::newRow(action)<<QString::fromLatin1(action);
-    }
-    void gitPauseBlocksAccountAndSharingMutations() {
-        QFETCH(QString,action);
-        QTemporaryDir directory, tools;
-        const auto previousPath=qgetenv("PATH"), previousMarker=qgetenv("PILON_TEST_KEYRING_CALLS");
-        auto restore=qScopeGuard([&]{ QThreadPool::globalInstance()->waitForDone(); qputenv("PATH",previousPath); qputenv("PILON_TEST_KEYRING_CALLS",previousMarker); });
-        const auto marker=tools.filePath("calls");
-        QFile script(tools.filePath("secret-tool")); QVERIFY(script.open(QIODevice::WriteOnly));
-        script.write("#!/bin/sh\nprintf x >> \"$PILON_TEST_KEYRING_CALLS\"\nexit 1\n"); script.close();
-        QVERIFY(script.setPermissions(QFile::ReadOwner|QFile::WriteOwner|QFile::ExeOwner));
-        qputenv("PATH",tools.path().toUtf8()+':'+previousPath); qputenv("PILON_TEST_KEYRING_CALLS",marker.toUtf8());
-        CalendarManager manager(directory.path()); source(manager,"remote");
-        manager.m_accounts["account"]["credentialWarning"]="Retry credentials";
-        manager.m_tokens["account"]={{"access_token","test-token"}};
-        manager.m_tokens["calendar-sharing"]={{"server","https://calendar.example.test"},{"key",QString(32,'k')}};
-        manager.m_shares["share"]={{"id","share"},{"name","Saved link"}};
-        int requests=0; manager.m_transport=[&](auto,auto,auto,auto,auto,auto){++requests;};
-        QVERIFY(manager.beginGitUpdate());
-        const auto accounts=manager.m_accounts, shares=manager.m_shares;
-        const auto tokens=manager.m_tokens;
-        if(action=="connect") manager.connectAccount("icloud","person@example.test","test-password");
-        if(action=="feed") manager.addFeed("https://calendar.example.test/feed.ics","Feed");
-        if(action=="disconnect") manager.disconnectAccount("account");
-        if(action=="retry") manager.retrySync();
-        if(action=="revoke") manager.revokeShare("share");
-        if(action=="load-sharing") manager.loadSharingConfiguration();
-        if(action=="save-sharing") manager.saveSharingConfiguration("https://calendar.example.test",QString(32,'k'));
-        if(action=="clear-sharing") manager.clearSharingConfiguration();
-        QThreadPool::globalInstance()->waitForDone();
-        QCOMPARE(manager.m_accounts,accounts); QCOMPARE(manager.m_shares,shares); QCOMPARE(manager.m_tokens,tokens);
-        QCOMPARE(requests,0); QVERIFY(!QFile::exists(marker)); QVERIFY(!manager.sharingBusy()); QVERIFY(!manager.sharingConfigurationBusy());
-        QVERIFY(manager.gitUpdating()); QVERIFY(!manager.active());
-        QVERIFY((manager.error()+manager.sharingError()+manager.sharingConfigurationError()).contains("Git"));
-    }
-    void gitUpdateVetoesInFlightTransportWithoutCancellingIt() {
-        QTemporaryDir directory; CalendarManager manager(directory.path()); source(manager,"remote");
-        CalendarManager::Reply reply;
-        manager.m_transport=[&](auto,auto,auto,auto,auto,auto done){ reply=done; };
-        int completed=0;
-        manager.request("account","GET",QUrl("https://www.googleapis.com/calendar/v3/users/me/calendarList"),{}, {},
-            [&](int,QByteArray,QVariantMap){++completed;});
-        QVERIFY(bool(reply));
-        QVERIFY(!manager.beginGitUpdate()); QVERIFY(!manager.gitUpdating()); QVERIFY(manager.active()); QCOMPARE(completed,0);
-        reply(200,"{}",{}); QCOMPARE(completed,1);
-        QVERIFY(manager.beginGitUpdate()); QVERIFY(manager.finishGitUpdate());
-    }
     void inactiveCalendarKeepsConfigurationWithoutAutomaticJobs() {
         QTemporaryDir database, events, destination;
         const auto previous = QSettings().value("calendar/directory");
@@ -987,6 +910,11 @@ class CalendarTests : public QObject {
         QCOMPARE(shared.size(), 1);
         const auto cached = shared.first().toMap().value("instances").toMap().value("events").toList();
         QCOMPARE(cached.size(), 1); QCOMPARE(cached.first().toMap().value("start").toString(), QString("2026-10-02T11:00:00Z"));
+        auto cancelled = instances.at(1).toMap();
+        cancelled["cancelled"] = true;
+        instances[1] = cancelled;
+        manager.m_instances["work"]["events"] = instances;
+        QVERIFY(manager.shareSnapshot({"work"}, {"title"}, "2026-10-02", "2026-10-02").value("events").toList().isEmpty());
         manager.m_instances["work"]["events"] = QVariantList{};
         QVERIFY(manager.shareSnapshot({"work"}, {"title"}, "2026-10-02", "2026-10-02").value("events").toList().isEmpty());
     }

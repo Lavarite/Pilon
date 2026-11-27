@@ -4,16 +4,17 @@ pilon_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 if [[ "${PILON_ENV_LOADED:-0}" != 1 ]]; then
     exec python3 "$pilon_root/src/scripts/environment.py" bash "${BASH_SOURCE[0]}" "$@"
 fi
-pilon_source="$pilon_root/build/android/media-runtime/whisper.cpp-b4938"
-pilon_build="$pilon_root/build/android/media-runtime/whisper-variants-build"
+pilon_dev="${PILON_DEV_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/pilon-dev}"
+pilon_source="$pilon_dev/dev-deps/android/media-runtime/whisper.cpp-b4938"
+pilon_build="$pilon_dev/dev-deps/android/media-runtime/whisper-variants-build"
 pilon_kleidiai="${PILON_WHISPER_KLEIDIAI:-OFF}"
-if [[ "$pilon_kleidiai" == ON ]]; then pilon_build="$pilon_root/build/android/media-runtime/whisper-kleidiai-variants-build"; fi
-pilon_kleidiai_source="$pilon_root/build/android/media-runtime/kleidiai-v1.24.0"
+if [[ "$pilon_kleidiai" == ON ]]; then pilon_build="$pilon_dev/dev-deps/android/media-runtime/whisper-kleidiai-variants-build"; fi
+pilon_kleidiai_source="$pilon_dev/dev-deps/android/media-runtime/kleidiai-v1.24.0"
 if [[ "$pilon_kleidiai" == ON ]]; then
-    pilon_archive="$pilon_root/build/android/media-runtime/downloads/kleidiai-v1.24.0-src.tar.gz"
-    if [[ ! -f "$pilon_archive" ]]; then pilon_archive="$pilon_root/build/android/runtime/downloads/kleidiai-v1.24.0-src.tar.gz"; fi
+    pilon_archive="$pilon_dev/dev-deps/android/media-runtime/downloads/kleidiai-v1.24.0-src.tar.gz"
+    if [[ ! -f "$pilon_archive" ]]; then pilon_archive="$pilon_dev/dev-deps/android/runtime/downloads/kleidiai-v1.24.0-src.tar.gz"; fi
     printf '%s  %s\n' 9348b969e042d8890a54b01a463dbe71f5a4c074b5329e9c26a85ef3b68aa19b "$pilon_archive" | sha256sum --check
-    if [[ ! -f "$pilon_kleidiai_source/CMakeLists.txt" ]]; then tar -xzf "$pilon_archive" -C "$pilon_root/build/android/media-runtime"; fi
+    if [[ ! -f "$pilon_kleidiai_source/CMakeLists.txt" ]]; then tar -xzf "$pilon_archive" -C "$pilon_dev/dev-deps/android/media-runtime"; fi
 fi
 pilon_ndk="${ANDROID_NDK_ROOT:-${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}/ndk/27.2.12479018}"
 pilon_linker_flags="-Wl,-z,max-page-size=16384,-z,common-page-size=16384 -Wl,-rpath,'\$ORIGIN'"

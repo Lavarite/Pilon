@@ -16,10 +16,12 @@ class PiconfDocument {
     static constexpr int MaxFiles = 256;
 
     static bool validPath(const QString &relative);
+    static QString storagePath(const QString &relative);
     static QByteArray encode(const QVariantMap &values);
     bool load(const QString &workspace, QString &error);
     bool parse(const Files &files, QString &error);
     const Files &files() const;
+    QStringList missingAddonConfigs() const;
     QString addonFile(const QString &id) const;
     QVariantMap values(const QString &path = MainPath) const;
     bool setValue(const QString &path, const QStringList &keys, const QVariant &value, QString &error);

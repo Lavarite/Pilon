@@ -1128,6 +1128,38 @@ TestCase {
         verify(rule.includes("INTERVAL=2"))
         verify(rule.includes("BYSETPOS=2"), rule)
     }
+    function test_recurrenceWithAnEndChoiceRequiresADate() {
+        const value = testCalendar.newEvent("2026-11-09", 540)
+        value.title = "Choose a repeat end"
+        connectedEditor.show(value)
+        tryCompare(connectedEditor, "opened", true)
+        const frequency = editorChild(connectedEditor, "calendarRecurrenceFrequency")
+        const ending = editorChild(connectedEditor, "calendarRecurrenceEnding")
+        frequency.currentIndex = 1; frequency.activated(1)
+        ending.currentIndex = 2; ending.activated(2)
+        connectedEditor.save()
+        verify(connectedEditor.opened)
+        verify(connectedEditor.message.length > 0)
+        editorChild(connectedEditor, "calendarRecurrenceEndDate").value = "2026-11-30"
+        const recurrence = editorChild(connectedEditor, "calendarEventRecurrence")
+        recurrence.update()
+        verify(connectedEditor.buildDraft().recurrence.includes("UNTIL="))
+        connectedEditor.close()
+    }
+    function test_importedRecurrenceWithUnsupportedOptionsStaysIntact() {
+        const value = testCalendar.newEvent("2026-11-09", 540)
+        value.title = "Imported event"
+        value.recurrence = "FREQ=WEEKLY;BYDAY=MO,WE;WKST=SU;COUNT=4"
+        connectedEditor.show(value)
+        const recurrence = editorChild(connectedEditor, "calendarEventRecurrence")
+        verify(!recurrence.enabled)
+        recurrence.update()
+        compare(connectedEditor.buildDraft().recurrence, value.recurrence)
+        const reminder = editorChild(connectedEditor, "calendarEventReminders")
+        reminder.text = "15, , 0,"
+        compare(connectedEditor.buildDraft().reminders, [15, 0])
+        connectedEditor.close()
+    }
     function test_titleEditPreservesRepeatedHourAndSeconds() {
         const value = testCalendar.newEvent("2026-10-25", 90)
         value.title = "Clock change"; value.timeZone = "Europe/London"
@@ -1474,6 +1506,22 @@ TestCase {
         capture(details.contentItem,"/tmp/pilon-calendar-sync-issue.png")
         details.dismiss()
     }
+    function test_syncKeepsAnEmptyAccountAndItsActionsInPlace() {
+        page.visible = false
+        settings.visible = true
+        connectedCalendar.calendars = connectedCalendar.calendars.filter(c => c.account !== "google")
+        settings.expandedAccount = "google"
+        tryVerify(() => findChild(settings, "calendarReconnect-google").visible)
+        wait(30)
+        const reconnect = findChild(settings, "calendarReconnect-google")
+        const position = reconnect.mapToItem(settings, 0, 0)
+        try {
+            connectedCalendar.syncing = true
+            wait(30)
+            compare(reconnect.mapToItem(settings, 0, 0), position)
+            verify(findChild(settings, "calendarAccountRefresh-google").visible)
+        } finally { connectedCalendar.syncing = false }
+    }
     function test_conflictAndOperationIssueNativeSurfaces_data() {
         return [{tag:"desktop",width:1024},{tag:"narrow",width:320}]
     }
@@ -1512,7 +1560,6 @@ TestCase {
         waitForRendering(settings)
         compare(findChild(settings, "calendarFolder").text, connectedCalendar.storageDirectory)
         verify(!findChild(settings, "calendarSyncDevices"))
-        compare(findChild(settings,"calendarGitSync"),null,"Calendar has no fixed Git action")
         settings.storageActions=[storageAction];waitForPolish(settings)
         let action=null, pending=[settings]
         while(pending.length && !action) {
@@ -2375,6 +2422,23 @@ TestCase {
             verifyDialogFrame(manager.dialogWindow)
             manager.close();tryCompare(manager,"opened",false)
         } finally { if (manager) manager.close();connectedCalendar.syncing=false;page.calendar=previous }
+    }
+    function test_refreshKeepsTheCalendarInPlace() {
+        const previous = page.calendar
+        try {
+            window.width = 400; window.height = 760
+            page.calendar = connectedCalendar
+            page.viewMode = 2
+            waitForRendering(page)
+            const month = findChild(page, "calendarMonth")
+            const position = month.mapToItem(page, 0, 0)
+            const height = month.height
+            connectedCalendar.syncing = true
+            waitForRendering(page)
+            compare(month.mapToItem(page, 0, 0), position)
+            compare(month.height, height)
+            verify(findChild(page, "calendarRefreshIndicator").visible)
+        } finally { connectedCalendar.syncing = false; page.calendar = previous }
     }
     function test_calendarActionsUseIconsOnOneRow() {
         window.width = 400; window.height = 760

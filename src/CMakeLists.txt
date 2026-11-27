@@ -1,6 +1,18 @@
-cmake_minimum_required(VERSION 3.21)
+cmake_minimum_required(VERSION 3.24)
 
-project(Pilon VERSION 1.0.1 LANGUAGES C CXX)
+project(Pilon VERSION 1.0.0 LANGUAGES C CXX)
+
+set(pilon_default_dev_dir "$ENV{PILON_DEV_DIR}")
+if(pilon_default_dev_dir STREQUAL "")
+    set(pilon_default_dev_dir "$ENV{XDG_CACHE_HOME}")
+    if(pilon_default_dev_dir STREQUAL "")
+        set(pilon_default_dev_dir "$ENV{HOME}/.cache")
+    endif()
+    string(APPEND pilon_default_dev_dir "/pilon-dev")
+endif()
+set(PILON_DEV_DIR "${pilon_default_dev_dir}" CACHE PATH "Pilon development build and dependency directory")
+cmake_path(ABSOLUTE_PATH PILON_DEV_DIR NORMALIZE)
+unset(pilon_default_dev_dir)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -64,7 +76,7 @@ endif()
 
 # iCalendar recurrence and CalDAV payloads use a standards implementation.
 if(NOT ANDROID)
-    pkg_check_modules(LIBICAL QUIET IMPORTED_TARGET libical)
+    pkg_check_modules(LIBICAL QUIET IMPORTED_TARGET "libical<4")
 endif()
 if(LIBICAL_FOUND)
     set(PILON_ICAL_TARGET PkgConfig::LIBICAL)
@@ -122,10 +134,10 @@ add_library(pilon_documents STATIC core/documents/noteimport.cpp core/documents/
 target_include_directories(pilon_documents PUBLIC ${PILON_INCLUDE_DIRECTORIES})
 target_link_libraries(pilon_documents PUBLIC Qt6::Gui Qt6::Qml Qt6::Concurrent)
 if(ANDROID)
-    set(PDFium_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../build/android/pdfium/sdk/include" CACHE PATH "" FORCE)
-    set(PDFium_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/../builds/android/runtime/arm64-v8a/libpdfium.so" CACHE FILEPATH "" FORCE)
+    set(PDFium_INCLUDE_DIR "${PILON_DEV_DIR}/dev-deps/android/pdfium/sdk/include" CACHE PATH "" FORCE)
+    set(PDFium_LIBRARY "${PILON_DEV_DIR}/builds/android/runtime/arm64-v8a/libpdfium.so" CACHE FILEPATH "" FORCE)
     find_package(PDFium CONFIG REQUIRED
-        PATHS "${CMAKE_CURRENT_SOURCE_DIR}/../build/android/pdfium/sdk" NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
+        PATHS "${PILON_DEV_DIR}/dev-deps/android/pdfium/sdk" NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
     target_link_libraries(pilon_documents PRIVATE pdfium)
 endif()
 
@@ -135,6 +147,9 @@ target_link_libraries(pilon_devices PUBLIC Qt6::Gui Qt6::Qml Qt6::Network Qt6::C
 
 add_library(pilon_files STATIC ../addons/files/src/remotefilemanager.cpp ../addons/files/src/remotefilemanager.h
     ../addons/files/src/foldersizecache.cpp ../addons/files/src/foldersizecache.h)
+set(PILON_ARCHIVE_WORKER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../addons/files/workers")
+qt_add_resources(pilon_files files_archive PREFIX "/pilon-files" BASE "${PILON_ARCHIVE_WORKER_DIR}"
+    FILES "${PILON_ARCHIVE_WORKER_DIR}/archive_worker.py")
 include(cmake/Phosphor.cmake)
 target_include_directories(pilon_files PUBLIC ${PILON_INCLUDE_DIRECTORIES})
 target_link_libraries(pilon_files PUBLIC pilon_documents Qt6::Network ${PILON_SSH2_TARGET} PRIVATE Qt6::Quick)
@@ -149,9 +164,11 @@ add_library(pilon_notes STATIC
 target_include_directories(pilon_notes PUBLIC ${PILON_INCLUDE_DIRECTORIES})
 target_link_libraries(pilon_notes PUBLIC pilon_documents pilon_assistant_models Qt6::Quick)
 
-add_library(pilon_assistant_models STATIC ../addons/assistant/src/assistantmodels.cpp ../addons/assistant/src/assistantmodels.h)
+add_library(pilon_assistant_models STATIC
+    ../addons/assistant/src/assistantmodels.cpp ../addons/assistant/src/assistantmodels.h
+    ../addons/assistant/src/assistanthubcredentials.cpp ../addons/assistant/src/assistanthubcredentials.h)
 target_include_directories(pilon_assistant_models PUBLIC ${PILON_INCLUDE_DIRECTORIES})
-target_link_libraries(pilon_assistant_models PUBLIC Qt6::Gui Qt6::Qml Qt6::Network)
+target_link_libraries(pilon_assistant_models PUBLIC Qt6::Gui Qt6::Qml Qt6::Network PRIVATE Qt6::Concurrent)
 
 add_library(pilon_assistant STATIC
     ../addons/assistant/src/assistantmanager.cpp ../addons/assistant/src/assistantmanager.h ../addons/assistant/src/assistantcodex.cpp ../addons/assistant/src/assistantcache.cpp
@@ -160,16 +177,9 @@ add_library(pilon_assistant STATIC
     ../addons/assistant/src/codexruntime.cpp ../addons/assistant/src/codexruntime.h ../addons/assistant/src/codexclient.cpp ../addons/assistant/src/codexclient.h ../addons/assistant/src/codexprovider.cpp ../addons/assistant/src/codexprovider.h)
 target_include_directories(pilon_assistant PUBLIC ${PILON_INCLUDE_DIRECTORIES})
 target_link_libraries(pilon_assistant PUBLIC
-    pilon_calendar pilon_devices pilon_assistant_models Qt6::Concurrent Qt6::Multimedia PRIVATE Qt6::Quick)
+    pilon_calendar pilon_devices pilon_assistant_models Qt6::Concurrent Qt6::Multimedia PRIVATE Qt6::Quick Qt6::Sql)
 if(ANDROID)
     target_link_libraries(pilon_assistant PRIVATE pilon_documents)
-endif()
-
-add_library(pilon_git STATIC ../addons/git/src/githubmanager.cpp ../addons/git/src/githubmanager.h ../addons/git/src/gitcredentials.cpp ../addons/git/src/gitcredentials.h ../addons/git/src/gitmanagedfiles.cpp ../addons/git/src/gitmanagedfiles.h)
-target_include_directories(pilon_git PUBLIC ${PILON_INCLUDE_DIRECTORIES})
-target_link_libraries(pilon_git PUBLIC Qt6::Gui Qt6::Qml Qt6::Concurrent)
-if(ANDROID)
-    target_link_libraries(pilon_git PUBLIC Qt6::Network)
 endif()
 
 add_library(pilon_addons STATIC core/addons/addonregistry.cpp core/addons/addonregistry.h
@@ -185,7 +195,7 @@ if(ANDROID)
 endif()
 
 set(PILON_FEATURE_TARGETS pilon_addons pilon_widgets pilon_calendar pilon_documents pilon_devices pilon_files
-    pilon_notes pilon_assistant_models pilon_assistant pilon_git)
+    pilon_notes pilon_assistant_models pilon_assistant)
 set_target_properties(${PILON_FEATURE_TARGETS} PROPERTIES POSITION_INDEPENDENT_CODE ON)
 foreach(feature IN LISTS PILON_FEATURE_TARGETS)
     target_link_libraries(${feature} PUBLIC pilon_workspace)
@@ -212,6 +222,7 @@ set(PILON_UI_FILES
     ui/controls/AppShortcut.qml
     ../addons/assistant/ui/AssistantActionButton.qml
     ui/controls/RoundedCheckBox.qml
+    ui/controls/PilonAddTile.qml
     ui/controls/PilonButton.qml
     ui/controls/PilonWrapButton.qml
     ui/controls/PilonCloseButton.qml
@@ -392,7 +403,7 @@ if(ANDROID)
     file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/platform/android/" DESTINATION "${PILON_ANDROID_PACKAGE_DIR}")
     # Platform implementations stay with their add-on; assemble Qt's package without changing Java/JNI paths.
     set(PILON_ANDROID_ADDON_COPY_COMMANDS)
-    foreach(addon IN ITEMS assistant calendar devices git notes ssh)
+    foreach(addon IN ITEMS assistant calendar devices notes ssh)
         set(android_sources "${CMAKE_CURRENT_SOURCE_DIR}/../addons/${addon}/platform/android")
         if(IS_DIRECTORY "${android_sources}")
             file(COPY "${android_sources}/" DESTINATION "${PILON_ANDROID_PACKAGE_DIR}")
@@ -400,22 +411,22 @@ if(ANDROID)
                 COMMAND "${CMAKE_COMMAND}" -E copy_directory "${android_sources}" "${PILON_ANDROID_PACKAGE_DIR}")
         endif()
     endforeach()
-    file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/../builds/android/office/assets/"
+    file(COPY "${PILON_DEV_DIR}/builds/android/office/assets/"
         DESTINATION "${PILON_ANDROID_PACKAGE_DIR}/assets")
-    set(PILON_ANDROID_AGENT_RUNTIME_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../builds/android/agent-runtime")
+    set(PILON_ANDROID_AGENT_RUNTIME_DIR "${PILON_DEV_DIR}/builds/android/agent-runtime")
     file(COPY "${PILON_ANDROID_AGENT_RUNTIME_DIR}/assets/"
         DESTINATION "${PILON_ANDROID_PACKAGE_DIR}/assets")
     file(MAKE_DIRECTORY "${PILON_ANDROID_PACKAGE_DIR}/tests/assets/agent-runtime")
     file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/../addons/assistant/tests/android/android_agent_runtime_smoke.py"
         "${CMAKE_CURRENT_SOURCE_DIR}/../addons/assistant/tools/create_artifact.py"
         DESTINATION "${PILON_ANDROID_PACKAGE_DIR}/tests/assets/agent-runtime")
-    set(PILON_ANDROID_TAILSCALE_AAR "${CMAKE_CURRENT_SOURCE_DIR}/../builds/android/java/libtailscale.aar")
+    set(PILON_ANDROID_TAILSCALE_AAR "${PILON_DEV_DIR}/builds/android/java/libtailscale.aar")
     if(NOT EXISTS "${PILON_ANDROID_TAILSCALE_AAR}")
         message(FATAL_ERROR "The Android Tailscale SDK is missing. Run src/scripts/android/build.sh first.")
     endif()
     file(MAKE_DIRECTORY "${PILON_ANDROID_PACKAGE_DIR}/libs")
     file(COPY "${PILON_ANDROID_TAILSCALE_AAR}" DESTINATION "${PILON_ANDROID_PACKAGE_DIR}/libs")
-    set(PILON_ANDROID_QT_PLATFORM_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../builds/android/qt-platform")
+    set(PILON_ANDROID_QT_PLATFORM_DIR "${PILON_DEV_DIR}/builds/android/qt-platform")
     set(PILON_ANDROID_QT_PLATFORM_PLUGIN "${PILON_ANDROID_QT_PLATFORM_DIR}/plugins/libplugins_platforms_qtforandroid_arm64-v8a.so")
     set(PILON_ANDROID_QT_PLATFORM_JAR "${PILON_ANDROID_QT_PLATFORM_DIR}/pilon-Qt6Android.jar")
     foreach(artifact IN ITEMS "${PILON_ANDROID_QT_PLATFORM_PLUGIN}" "${PILON_ANDROID_QT_PLATFORM_JAR}")
@@ -424,7 +435,8 @@ if(ANDROID)
         endif()
     endforeach()
     add_custom_command(OUTPUT "${PILON_ANDROID_QT_PLATFORM_PLUGIN}" "${PILON_ANDROID_QT_PLATFORM_JAR}"
-        COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/../src/scripts/android/build-qt-platform.sh"
+        COMMAND "${CMAKE_COMMAND}" -E env "PILON_DEV_DIR=${PILON_DEV_DIR}"
+            bash "${CMAKE_CURRENT_SOURCE_DIR}/../src/scripts/android/build-qt-platform.sh"
         DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/../src/scripts/android/build-qt-platform.sh"
             "${CMAKE_CURRENT_SOURCE_DIR}/platform/android/qt-platform/CMakeLists.txt"
             "${CMAKE_CURRENT_SOURCE_DIR}/platform/android/qt-platform/surface-lifecycle.patch"
@@ -437,19 +449,14 @@ if(ANDROID)
     file(COPY "${PILON_ANDROID_QT_PLATFORM_JAR}" DESTINATION "${PILON_ANDROID_PACKAGE_DIR}/libs")
     file(MAKE_DIRECTORY "${PILON_ANDROID_PACKAGE_DIR}/qt-platform-native")
     file(COPY "${PILON_ANDROID_QT_PLATFORM_PLUGIN}" DESTINATION "${PILON_ANDROID_PACKAGE_DIR}/qt-platform-native")
-    add_executable(pilon_android_git_credential ../addons/git/platform/android/gitcredential.c)
-    set_target_properties(pilon_android_git_credential PROPERTIES
-        OUTPUT_NAME "libpilon_git_credential" SUFFIX ".so" AUTOMOC OFF AUTOUIC OFF)
-    target_link_options(pilon_android_git_credential PRIVATE
-        -Wl,-z,max-page-size=16384,-z,common-page-size=16384)
     set(PILON_ANDROID_NETWORK_HELPERS
-        "${CMAKE_CURRENT_SOURCE_DIR}/../builds/android/runtime/arm64-v8a/libpilon_ssh.so"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../builds/android/runtime/arm64-v8a/libpilon_scp.so")
-    set(PILON_ANDROID_SSH_LICENSE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../builds/android/licenses/ssh")
+        "${PILON_DEV_DIR}/builds/android/runtime/arm64-v8a/libpilon_ssh.so"
+        "${PILON_DEV_DIR}/builds/android/runtime/arm64-v8a/libpilon_scp.so")
+    set(PILON_ANDROID_SSH_LICENSE_DIR "${PILON_DEV_DIR}/builds/android/licenses/ssh")
     set(PILON_ANDROID_SSH_LICENSES "${PILON_ANDROID_SSH_LICENSE_DIR}/OpenSSH-LICENCE.txt"
         "${PILON_ANDROID_SSH_LICENSE_DIR}/ldns-LICENSE.txt")
     add_custom_command(OUTPUT ${PILON_ANDROID_NETWORK_HELPERS} ${PILON_ANDROID_SSH_LICENSES}
-        COMMAND "${CMAKE_COMMAND}" -E env "ANDROID_NDK_ROOT=${ANDROID_NDK_ROOT}"
+        COMMAND "${CMAKE_COMMAND}" -E env "ANDROID_NDK_ROOT=${ANDROID_NDK_ROOT}" "PILON_DEV_DIR=${PILON_DEV_DIR}"
             "PILON_ANDROID_BUILD_DIR=${CMAKE_CURRENT_BINARY_DIR}"
             bash "${CMAKE_CURRENT_SOURCE_DIR}/../addons/ssh/scripts/android/build-network-runtime.sh"
         DEPENDS pilon_android_openssl ${PILON_ANDROID_OPENSSL_LIBRARIES}
@@ -457,65 +464,38 @@ if(ANDROID)
             "${CMAKE_CURRENT_SOURCE_DIR}/../addons/ssh/platform/android/openssh.patch" VERBATIM)
     add_custom_target(pilon_android_network_runtime
         DEPENDS ${PILON_ANDROID_NETWORK_HELPERS} ${PILON_ANDROID_SSH_LICENSES})
-    set(PILON_ANDROID_GIT_HELPERS
-        "${CMAKE_CURRENT_SOURCE_DIR}/../builds/android/runtime/arm64-v8a/libpilon_git.so"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../builds/android/runtime/arm64-v8a/libpilon_git_remote_http.so")
-    set(PILON_ANDROID_GIT_LICENSE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../builds/android/licenses/git")
-    set(PILON_ANDROID_GIT_LICENSES "${PILON_ANDROID_GIT_LICENSE_DIR}/Git-COPYING.txt"
-        "${PILON_ANDROID_GIT_LICENSE_DIR}/SHA1DC-LICENSE.txt" "${PILON_ANDROID_GIT_LICENSE_DIR}/curl-COPYING.txt")
-    add_custom_command(OUTPUT ${PILON_ANDROID_GIT_HELPERS} ${PILON_ANDROID_GIT_LICENSES}
-        COMMAND "${CMAKE_COMMAND}" -E env "ANDROID_NDK_ROOT=${ANDROID_NDK_ROOT}"
-            "PILON_ANDROID_BUILD_DIR=${CMAKE_CURRENT_BINARY_DIR}"
-            bash "${CMAKE_CURRENT_SOURCE_DIR}/../addons/git/scripts/android/build-git-runtime.sh"
-        DEPENDS pilon_android_openssl ${PILON_ANDROID_OPENSSL_LIBRARIES}
-            "${CMAKE_CURRENT_SOURCE_DIR}/../addons/git/scripts/android/build-git-runtime.sh"
-            "${CMAKE_CURRENT_SOURCE_DIR}/../addons/git/platform/android/git.patch" VERBATIM)
-    add_custom_target(pilon_android_git_runtime
-        DEPENDS ${PILON_ANDROID_GIT_HELPERS} ${PILON_ANDROID_GIT_LICENSES})
-    set(PILON_ANDROID_PROVIDER_HELPERS
-        "${CMAKE_CURRENT_SOURCE_DIR}/../builds/android/runtime/arm64-v8a/libpilon_gh.so"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../builds/android/runtime/arm64-v8a/libpilon_glab.so")
-    add_custom_command(OUTPUT ${PILON_ANDROID_PROVIDER_HELPERS}
-        COMMAND "${CMAKE_COMMAND}" -E env "ANDROID_NDK_ROOT=${ANDROID_NDK_ROOT}"
-            bash "${CMAKE_CURRENT_SOURCE_DIR}/../addons/git/scripts/android/build-git-providers.sh"
-        DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/../addons/git/scripts/android/build-git-providers.sh"
-            "${CMAKE_CURRENT_SOURCE_DIR}/../addons/git/platform/android/provider-gh.patch"
-            "${CMAKE_CURRENT_SOURCE_DIR}/../addons/git/platform/android/provider-glab.patch"
-            "${CMAKE_CURRENT_SOURCE_DIR}/../addons/git/platform/android/provider_keyring.go" VERBATIM)
-    add_custom_target(pilon_android_git_providers DEPENDS ${PILON_ANDROID_PROVIDER_HELPERS})
     set_target_properties(pilon PROPERTIES
         QT_ANDROID_PACKAGE_SOURCE_DIR "${PILON_ANDROID_PACKAGE_DIR}"
         QT_ANDROID_PACKAGE_NAME "org.pilon.Pilon"
         QT_ANDROID_APP_NAME "Pilon"
         QT_ANDROID_VERSION_NAME "${PROJECT_VERSION}"
-        QT_ANDROID_VERSION_CODE 3
+        QT_ANDROID_VERSION_CODE 4
         QT_ANDROID_MIN_SDK_VERSION 28
         QT_ANDROID_TARGET_SDK_VERSION 37
         QT_ANDROID_COMPILE_SDK_VERSION "37.0"
         QT_ANDROID_SDK_BUILD_TOOLS_REVISION "37.0.0"
         QT_ANDROID_LEGACY_PACKAGING TRUE
-        QT_ANDROID_EXTRA_LIBS "${PILON_ANDROID_OPENSSL_LIBRARIES};${CMAKE_CURRENT_SOURCE_DIR}/../builds/android/runtime/arm64-v8a/libonnxruntime.so;${PDFium_LIBRARY};${CMAKE_CURRENT_SOURCE_DIR}/../builds/android/runtime/arm64-v8a/libaudiocpp.so")
-    set(PILON_ANDROID_RUNTIME_HELPERS ${PILON_ANDROID_NETWORK_HELPERS} ${PILON_ANDROID_GIT_HELPERS} ${PILON_ANDROID_PROVIDER_HELPERS}
-        $<TARGET_FILE:pilon_android_git_credential>)
+        QT_ANDROID_EXTRA_LIBS "${PILON_ANDROID_OPENSSL_LIBRARIES};${PDFium_LIBRARY}")
+    set(PILON_ANDROID_RUNTIME_HELPERS ${PILON_ANDROID_NETWORK_HELPERS})
     file(GLOB PILON_ANDROID_AGENT_RUNTIME_LIBRARIES CONFIGURE_DEPENDS
         "${PILON_ANDROID_AGENT_RUNTIME_DIR}/runtime/arm64-v8a/*.so")
     if(NOT PILON_ANDROID_AGENT_RUNTIME_LIBRARIES)
         message(FATAL_ERROR "The Android project runtimes are missing. Run src/scripts/android/build.sh first.")
     endif()
     list(APPEND PILON_ANDROID_RUNTIME_HELPERS ${PILON_ANDROID_AGENT_RUNTIME_LIBRARIES})
-    set(PILON_ANDROID_OFFICE_ASSETS "${CMAKE_CURRENT_SOURCE_DIR}/../builds/android/office/assets")
-    foreach(library IN ITEMS lo-native-code freebl3 nspr4 nss3 nssckbi nssdbm3 nssutil3
+    set(PILON_ANDROID_OFFICE_ASSETS "${PILON_DEV_DIR}/builds/android/office/assets")
+    foreach(library IN ITEMS onnxruntime audiocpp lo-native-code freebl3 nspr4 nss3 nssckbi nssdbm3 nssutil3
             plc4 plds4 smime3 softokn3 sqlite3 ssl3 pilon_office ggml-base ggml whisper
             ggml-cpu-android_armv8.0_1 ggml-cpu-android_armv8.2_1 ggml-cpu-android_armv8.2_2
             ggml-cpu-android_armv8.6_1)
-        set(library_path "${CMAKE_CURRENT_SOURCE_DIR}/../builds/android/runtime/arm64-v8a/lib${library}.so")
+        set(library_path "${PILON_DEV_DIR}/builds/android/runtime/arm64-v8a/lib${library}.so")
         if(NOT EXISTS "${library_path}")
             message(FATAL_ERROR "Android runtime library is missing: ${library_path}. Run src/scripts/android/build.sh first.")
         endif()
         list(APPEND PILON_ANDROID_RUNTIME_HELPERS "${library_path}")
     endforeach()
-    foreach(runtime IN ITEMS codex dns llama ocr ffmpeg ffprobe whisper-cli breeze)
-        set(helper "${CMAKE_CURRENT_SOURCE_DIR}/../builds/android/runtime/arm64-v8a/libpilon_${runtime}.so")
+    foreach(runtime IN ITEMS codex dns llama ocr ffmpeg ffprobe whisper-cli speech)
+        set(helper "${PILON_DEV_DIR}/builds/android/runtime/arm64-v8a/libpilon_${runtime}.so")
         if(NOT EXISTS "${helper}")
             message(FATAL_ERROR "Android runtime helper is missing: ${helper}. Run src/scripts/android/build.sh first.")
         endif()
@@ -549,8 +529,7 @@ if(ANDROID)
             "${PILON_ANDROID_PACKAGE_DIR}/qt-platform-native/libplugins_platforms_qtforandroid_arm64-v8a.so"
         DEPENDS ${PILON_ANDROID_RUNTIME_HELPERS} "${PILON_ANDROID_TAILSCALE_AAR}"
             "${PILON_ANDROID_QT_PLATFORM_JAR}" "${PILON_ANDROID_QT_PLATFORM_PLUGIN}" VERBATIM)
-    add_dependencies(pilon_android_runtimes pilon_android_network_runtime pilon_android_git_runtime pilon_android_git_providers
-        pilon_android_git_credential pilon_android_qt_platform)
+    add_dependencies(pilon_android_runtimes pilon_android_network_runtime pilon_android_qt_platform)
     add_dependencies(pilon pilon_android_runtimes)
 endif()
 # Foreign-type wrappers are generated here and included by qmltyperegistrar.
@@ -561,7 +540,7 @@ endforeach()
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 set(PILON_PACKAGES)
-foreach(addon IN ITEMS files ssh assistant notes calendar git devices)
+foreach(addon IN ITEMS files ssh assistant notes calendar devices)
     file(GLOB_RECURSE package_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/../addons/${addon}/package/*")
     set(package "${CMAKE_CURRENT_BINARY_DIR}/addons/${addon}.piext")
     add_custom_command(OUTPUT "${package}"
@@ -586,63 +565,52 @@ if(ANDROID)
     set_source_files_properties("${libssh2_SOURCE_DIR}/COPYING" PROPERTIES QT_RESOURCE_ALIAS "libssh2.txt")
     qt_add_resources(pilon android_dependency_licenses PREFIX "/licenses"
         FILES "${pilon_openssl_SOURCE_DIR}/LICENSE.txt" "${libssh2_SOURCE_DIR}/COPYING")
-    set(PILON_ANDROID_OCR_LICENSE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../builds/android/licenses/ocr")
+    set(PILON_ANDROID_OCR_LICENSE_DIR "${PILON_DEV_DIR}/builds/android/licenses/ocr")
     file(GLOB_RECURSE PILON_ANDROID_OCR_LICENSES CONFIGURE_DEPENDS "${PILON_ANDROID_OCR_LICENSE_DIR}/*")
     qt_add_resources(pilon android_ocr_licenses PREFIX "/licenses/ocr"
         BASE "${PILON_ANDROID_OCR_LICENSE_DIR}" FILES ${PILON_ANDROID_OCR_LICENSES})
-    set(PILON_ANDROID_PDF_LICENSE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../builds/android/licenses/pdfium")
+    set(PILON_ANDROID_PDF_LICENSE_DIR "${PILON_DEV_DIR}/builds/android/licenses/pdfium")
     file(GLOB_RECURSE PILON_ANDROID_PDF_LICENSES CONFIGURE_DEPENDS "${PILON_ANDROID_PDF_LICENSE_DIR}/*")
     qt_add_resources(pilon android_pdf_licenses PREFIX "/licenses/pdfium"
         BASE "${PILON_ANDROID_PDF_LICENSE_DIR}" FILES ${PILON_ANDROID_PDF_LICENSES})
     set_source_files_properties(${PILON_ANDROID_SSH_LICENSES} PROPERTIES GENERATED TRUE)
     qt_add_resources(pilon android_ssh_licenses PREFIX "/licenses/ssh"
         BASE "${PILON_ANDROID_SSH_LICENSE_DIR}" FILES ${PILON_ANDROID_SSH_LICENSES})
-    set_source_files_properties(${PILON_ANDROID_GIT_LICENSES} PROPERTIES GENERATED TRUE)
-    qt_add_resources(pilon android_git_licenses PREFIX "/licenses/git"
-        BASE "${PILON_ANDROID_GIT_LICENSE_DIR}" FILES ${PILON_ANDROID_GIT_LICENSES})
-    set(PILON_ANDROID_OFFICE_LICENSE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../builds/android/licenses/office")
+    set(PILON_ANDROID_OFFICE_LICENSE_DIR "${PILON_DEV_DIR}/builds/android/licenses/office")
     file(GLOB_RECURSE PILON_ANDROID_OFFICE_LICENSES CONFIGURE_DEPENDS "${PILON_ANDROID_OFFICE_LICENSE_DIR}/*")
     qt_add_resources(pilon android_office_licenses PREFIX "/licenses/office"
         BASE "${PILON_ANDROID_OFFICE_LICENSE_DIR}" FILES ${PILON_ANDROID_OFFICE_LICENSES})
-    set(PILON_ANDROID_AI_LICENSE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../builds/android/licenses/runtime")
+    set(PILON_ANDROID_AI_LICENSE_DIR "${PILON_DEV_DIR}/builds/android/licenses/runtime")
     file(GLOB_RECURSE PILON_ANDROID_AI_LICENSES CONFIGURE_DEPENDS "${PILON_ANDROID_AI_LICENSE_DIR}/*")
     qt_add_resources(pilon android_ai_licenses PREFIX "/licenses/runtime"
         BASE "${PILON_ANDROID_AI_LICENSE_DIR}" FILES ${PILON_ANDROID_AI_LICENSES})
-    set(PILON_ANDROID_MEDIA_LICENSE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../builds/android/licenses/media")
+    set(PILON_ANDROID_MEDIA_LICENSE_DIR "${PILON_DEV_DIR}/builds/android/licenses/media")
     file(GLOB_RECURSE PILON_ANDROID_MEDIA_LICENSES CONFIGURE_DEPENDS "${PILON_ANDROID_MEDIA_LICENSE_DIR}/*")
     qt_add_resources(pilon android_media_licenses PREFIX "/licenses/media"
         BASE "${PILON_ANDROID_MEDIA_LICENSE_DIR}" FILES ${PILON_ANDROID_MEDIA_LICENSES})
-    set(PILON_ANDROID_BREEZE_LICENSE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../builds/android/licenses/breeze")
+    set(PILON_ANDROID_BREEZE_LICENSE_DIR "${PILON_DEV_DIR}/builds/android/licenses/breeze")
     file(GLOB_RECURSE PILON_ANDROID_BREEZE_LICENSES CONFIGURE_DEPENDS "${PILON_ANDROID_BREEZE_LICENSE_DIR}/*")
     qt_add_resources(pilon android_breeze_licenses PREFIX "/licenses/breeze"
         BASE "${PILON_ANDROID_BREEZE_LICENSE_DIR}" FILES ${PILON_ANDROID_BREEZE_LICENSES})
-    set(PILON_ANDROID_PROVIDER_LICENSE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../builds/android/licenses/git-providers")
-    file(GLOB_RECURSE PILON_ANDROID_PROVIDER_LICENSES CONFIGURE_DEPENDS "${PILON_ANDROID_PROVIDER_LICENSE_DIR}/*")
-    qt_add_resources(pilon android_provider_licenses PREFIX "/licenses/git-providers"
-        BASE "${PILON_ANDROID_PROVIDER_LICENSE_DIR}" FILES ${PILON_ANDROID_PROVIDER_LICENSES})
-    set(PILON_ANDROID_QT_PLATFORM_LICENSE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../builds/android/licenses/qt-platform")
+    set(PILON_ANDROID_QT_PLATFORM_LICENSE_DIR "${PILON_DEV_DIR}/builds/android/licenses/qt-platform")
     file(GLOB_RECURSE PILON_ANDROID_QT_PLATFORM_LICENSES CONFIGURE_DEPENDS "${PILON_ANDROID_QT_PLATFORM_LICENSE_DIR}/*")
     qt_add_resources(pilon android_qt_platform_licenses PREFIX "/licenses/qt-platform"
         BASE "${PILON_ANDROID_QT_PLATFORM_LICENSE_DIR}" FILES ${PILON_ANDROID_QT_PLATFORM_LICENSES})
-    set(PILON_ANDROID_AGENT_LICENSE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../builds/android/licenses/agent-runtime")
+    set(PILON_ANDROID_AGENT_LICENSE_DIR "${PILON_DEV_DIR}/builds/android/licenses/agent-runtime")
     file(GLOB_RECURSE PILON_ANDROID_AGENT_LICENSES CONFIGURE_DEPENDS "${PILON_ANDROID_AGENT_LICENSE_DIR}/*")
     qt_add_resources(pilon android_agent_runtime_licenses PREFIX "/licenses/agent-runtime"
         BASE "${PILON_ANDROID_AGENT_LICENSE_DIR}" FILES ${PILON_ANDROID_AGENT_LICENSES})
-    set(PILON_ANDROID_TAILSCALE_LICENSE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../builds/android/licenses/tailscale")
+    set(PILON_ANDROID_TAILSCALE_LICENSE_DIR "${PILON_DEV_DIR}/builds/android/licenses/tailscale")
     file(GLOB_RECURSE PILON_ANDROID_TAILSCALE_LICENSES CONFIGURE_DEPENDS "${PILON_ANDROID_TAILSCALE_LICENSE_DIR}/*")
     qt_add_resources(pilon android_tailscale_licenses PREFIX "/licenses/tailscale"
         BASE "${PILON_ANDROID_TAILSCALE_LICENSE_DIR}" FILES ${PILON_ANDROID_TAILSCALE_LICENSES})
 endif()
-install(FILES ${PILON_PACKAGES} DESTINATION addons)
-install(FILES ../src/platform/linux/desktop/pilon-mime.xml DESTINATION share/mime/packages)
-install(FILES ../addons/notes/assets/icons/application-x-pilon-note.svg ../addons/calendar/assets/icons/application-x-pilon-calendar.svg
-    assets/icons/application-x-pilon-extension.svg DESTINATION share/icons/hicolor/scalable/mimetypes)
-install(FILES assets/icons/cog-6-tooth.svg DESTINATION share/icons/hicolor/scalable/mimetypes
-    RENAME application-x-pilon-config.svg)
+install(FILES ${PILON_PACKAGES} DESTINATION addons COMPONENT Pilon)
+install(CODE [[file(TOUCH "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/addons/.install-packages")]] COMPONENT Pilon)
 
 install(TARGETS pilon
-    RUNTIME DESTINATION .
-    LIBRARY DESTINATION .
+    RUNTIME DESTINATION . COMPONENT Pilon
+    LIBRARY DESTINATION . COMPONENT Pilon
 )
 
 option(PILON_BUILD_TESTS "Build Pilon's regression tests" OFF)
@@ -681,28 +649,6 @@ if(PILON_BUILD_TESTS)
     file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/ssh-test-bin")
     configure_file(../addons/ssh/tests/fixtures/ssh.py "${CMAKE_CURRENT_BINARY_DIR}/ssh-test-bin/ssh" COPYONLY)
     file(CHMOD "${CMAKE_CURRENT_BINARY_DIR}/ssh-test-bin/ssh" PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
-    qt_add_executable(pilon_github_tests ../addons/git/tests/github_tests.cpp)
-    target_link_libraries(pilon_github_tests PRIVATE pilon_git Qt6::Test)
-    add_test(NAME github COMMAND pilon_github_tests -platform offscreen)
-    qt_add_executable(pilon_gitcredentials_tests ../addons/git/tests/gitcredentials_tests.cpp)
-    add_executable(pilon_gitcredential_test_helper ../addons/git/platform/android/gitcredential.c)
-    set_target_properties(pilon_gitcredential_test_helper PROPERTIES AUTOMOC OFF AUTOUIC OFF)
-    target_compile_definitions(pilon_gitcredentials_tests PRIVATE
-        PILON_GIT_CREDENTIAL_HELPER="$<TARGET_FILE:pilon_gitcredential_test_helper>")
-    add_dependencies(pilon_gitcredentials_tests pilon_gitcredential_test_helper)
-    target_link_libraries(pilon_gitcredentials_tests PRIVATE pilon_git Qt6::Test Qt6::Network)
-    add_test(NAME git_credentials COMMAND pilon_gitcredentials_tests)
-    if(NOT ANDROID)
-        add_test(NAME git_credential_transport COMMAND ${Python3_EXECUTABLE}
-            ${CMAKE_CURRENT_SOURCE_DIR}/../addons/git/tests/gitcredential_transport_tests.py)
-    endif()
-    qt_add_executable(pilon_gitmanagedfiles_tests ../addons/git/tests/gitmanagedfiles_tests.cpp)
-    target_link_libraries(pilon_gitmanagedfiles_tests PRIVATE pilon_git Qt6::Test)
-    add_test(NAME git_managed_files COMMAND pilon_gitmanagedfiles_tests)
-    qt_add_executable(pilon_gitsync_tests ../addons/git/tests/gitsync_tests.cpp)
-    target_link_libraries(pilon_gitsync_tests PRIVATE pilon_git pilon_notes pilon_calendar Qt6::Test)
-    add_test(NAME git_sync COMMAND pilon_gitsync_tests -platform offscreen)
-    set_tests_properties(git_sync PROPERTIES ENVIRONMENT "QT_QUICK_BACKEND=software;PILON_NOTES_HANDWRITING=0")
     qt_add_executable(pilon_device_tests ../addons/devices/tests/tailscale_tests.cpp)
     target_link_libraries(pilon_device_tests PRIVATE pilon_devices Qt6::Test)
     add_test(NAME devices COMMAND pilon_device_tests)
@@ -757,17 +703,22 @@ if(PILON_BUILD_TESTS)
     qt_add_executable(pilon_assistant_tests ../addons/assistant/tests/assistant_tests.cpp)
     target_link_libraries(pilon_assistant_tests PRIVATE pilon_assistant pilon_files Qt6::Test Qt6::Quick)
     qt_add_resources(pilon_assistant_tests assistant_test_skills
-        PREFIX "/qt/qml/Pilon" FILES ${PILON_SKILL_FILES} ${PILON_AGENT_FILES})
+        PREFIX "/qt/qml/Pilon" FILES ${PILON_SKILL_FILES} ${PILON_AGENT_FILES}
+        ../addons/assistant/config/assistant-models.json)
     add_test(NAME assistant COMMAND pilon_assistant_tests -platform offscreen)
     # This suite includes the implementation to exercise its private traversal helpers.
     qt_add_executable(pilon_file_tests ../addons/files/tests/remotefile_tests.cpp ../addons/files/src/remotefilemanager.h
         ../addons/files/src/foldersizecache.cpp)
+    qt_add_resources(pilon_file_tests files_archive_test PREFIX "/pilon-files" BASE "${PILON_ARCHIVE_WORKER_DIR}"
+        FILES "${PILON_ARCHIVE_WORKER_DIR}/archive_worker.py")
     target_link_libraries(pilon_file_tests PRIVATE pilon_documents Qt6::Test
         Qt6::Network Qt6::Concurrent Qt6::Quick ${PILON_SSH2_TARGET})
     if(NOT ANDROID)
         target_link_libraries(pilon_file_tests PRIVATE Qt6::DBus)
     endif()
     add_test(NAME files COMMAND pilon_file_tests -platform offscreen)
+    add_test(NAME files_archive COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_CURRENT_SOURCE_DIR}/../addons/files/tests/archive_worker_tests.py")
     qt_add_executable(pilon_notes_tests ../addons/notes/tests/notes_tests.cpp)
     target_link_libraries(pilon_notes_tests PRIVATE pilon_notes Qt6::Test)
     qt_add_resources(pilon_notes_tests notes_ocr_test PREFIX "/qt/qml/Pilon" FILES ../addons/notes/workers/handwriting_worker.py)
@@ -782,7 +733,7 @@ if(PILON_BUILD_TESTS)
     add_custom_command(OUTPUT "${PILON_EXAMPLE_PACKAGE}"
         COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/../src/scripts/compile-addon.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/../examples/counter" --output "${PILON_EXAMPLE_PACKAGE}" --rcc $<TARGET_FILE:Qt6::rcc>
-        DEPENDS ../examples/counter/manifest.json ../examples/counter/Page.qml ../examples/counter/Settings.qml ../examples/counter/Lifecycle.qml ../src/scripts/compile-addon.py
+        DEPENDS ${PILON_counter_FILES} "${PILON_counter_MANIFEST}" ../src/scripts/compile-addon.py
         VERBATIM)
     add_custom_target(pilon_example_package DEPENDS "${PILON_EXAMPLE_PACKAGE}")
     add_dependencies(pilon_notes_ui_tests pilon_example_package)
@@ -790,7 +741,7 @@ if(PILON_BUILD_TESTS)
     add_custom_command(OUTPUT "${PILON_CHECKLIST_PACKAGE}"
         COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/../src/scripts/compile-addon.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/../examples/checklist" --output "${PILON_CHECKLIST_PACKAGE}" --rcc $<TARGET_FILE:Qt6::rcc>
-        DEPENDS ../examples/checklist/manifest.json ../examples/checklist/Page.qml ../examples/checklist/Settings.qml ../src/scripts/compile-addon.py
+        DEPENDS ${PILON_checklist_FILES} "${PILON_checklist_MANIFEST}" ../src/scripts/compile-addon.py
         VERBATIM)
     add_custom_target(pilon_checklist_package DEPENDS "${PILON_CHECKLIST_PACKAGE}")
     add_dependencies(pilon_notes_ui_tests pilon_checklist_package)
@@ -846,25 +797,32 @@ if(PILON_BUILD_TESTS)
     set_property(TEST main_ui APPEND PROPERTY ENVIRONMENT "PILON_EPHEMERAL_CHAT=1;PILON_CODEX=/nonexistent")
     add_test(NAME assistant_ui COMMAND pilon_notes_ui_tests -platform offscreen -input ${PILON_TEST_SOURCE_DIR}/tests/tst_assistant.qml)
     set_tests_properties(assistant_ui PROPERTIES ENVIRONMENT "QT_QUICK_BACKEND=software")
-    add_test(NAME github_ui COMMAND pilon_notes_ui_tests -platform offscreen -input ${PILON_TEST_SOURCE_DIR}/tests/tst_github.qml)
-    add_test(NAME git_workspace_ui COMMAND pilon_notes_ui_tests -platform offscreen -input ${PILON_TEST_SOURCE_DIR}/tests/tst_git_workspace.qml)
-    add_test(NAME git_adopt_ui COMMAND pilon_notes_ui_tests -platform offscreen -input ${PILON_TEST_SOURCE_DIR}/tests/tst_git_adopt.qml)
-    add_test(NAME git_changes_ui COMMAND pilon_notes_ui_tests -platform offscreen -input ${PILON_TEST_SOURCE_DIR}/tests/tst_git_changes.qml)
-    set_tests_properties(github_ui git_workspace_ui git_adopt_ui git_changes_ui PROPERTIES ENVIRONMENT "QT_QUICK_BACKEND=software;PILON_NOTES_HANDWRITING=0")
     add_test(NAME files_ui COMMAND pilon_notes_ui_tests -platform offscreen -input ${PILON_TEST_SOURCE_DIR}/tests/tst_files.qml)
     set_tests_properties(files_ui PROPERTIES ENVIRONMENT "QT_QUICK_BACKEND=software;PILON_NOTES_HANDWRITING=0")
+    # Developer test executables live deeper than the installed app.
+    set(pilon_test_runtime_dir "$ENV{PILON_RUNTIME_DIR}")
+    if(pilon_test_runtime_dir STREQUAL "")
+        set(pilon_test_runtime_dir "$ENV{PILON_INSTALL_ROOT}")
+        if(pilon_test_runtime_dir STREQUAL "")
+            set(pilon_test_runtime_dir "$ENV{HOME}/Pilon")
+        endif()
+        string(APPEND pilon_test_runtime_dir "/.runtime")
+    endif()
+    set_property(TEST documents files files_ui APPEND PROPERTY ENVIRONMENT
+        "PILON_RUNTIME_DIR=${pilon_test_runtime_dir}")
     add_test(NAME notes_ui COMMAND pilon_notes_ui_tests -platform offscreen -input ${PILON_TEST_SOURCE_DIR}/tests/notes_ui.qml)
     add_test(NAME notes_no_touch COMMAND pilon_notes_ui_tests -platform offscreen -input ${PILON_TEST_SOURCE_DIR}/tests/notes_no_touch.qml)
-    set_tests_properties(notes notes_ui notes_no_touch PROPERTIES ENVIRONMENT "QT_QUICK_BACKEND=software;PILON_NOTES_HANDWRITING=0;PILON_NOTES_OFFICE=${CMAKE_CURRENT_SOURCE_DIR}/../runtime/libreoffice/program/soffice")
+    set_tests_properties(notes notes_ui notes_no_touch PROPERTIES ENVIRONMENT "QT_QUICK_BACKEND=software;PILON_NOTES_HANDWRITING=0;PILON_NOTES_OFFICE=${pilon_test_runtime_dir}/libreoffice/program/soffice")
     set_property(TEST notes_no_touch APPEND PROPERTY ENVIRONMENT "PILON_TEST_NO_TOUCH=1")
     find_program(PILON_TEST_PYTHON NAMES python3 REQUIRED)
     add_test(NAME desktop_installer COMMAND ${PILON_TEST_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/tests/python/desktop_installer_tests.py)
     add_test(NAME android_packaging COMMAND ${PILON_TEST_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/tests/platform/android/android_packaging_tests.py)
     add_test(NAME release_packaging COMMAND ${PILON_TEST_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/tests/python/release_packaging_tests.py)
     add_test(NAME runtime_build COMMAND ${PILON_TEST_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/../addons/assistant/tests/python/runtime_build_tests.py)
+    add_test(NAME agent_workspace COMMAND ${PILON_TEST_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/../addons/assistant/tests/python/agent_workspace_tests.py)
     add_test(NAME speech_speed COMMAND ${PILON_TEST_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/../addons/assistant/tests/python/breeze_worker_tests.py)
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../runtime/litert/bin/python")
-        add_test(NAME litert_worker COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/../runtime/litert/bin/python" ${CMAKE_CURRENT_SOURCE_DIR}/../addons/assistant/tests/python/litert_worker_tests.py)
+    if(EXISTS "${pilon_test_runtime_dir}/litert/bin/python")
+        add_test(NAME litert_worker COMMAND "${pilon_test_runtime_dir}/litert/bin/python" ${CMAKE_CURRENT_SOURCE_DIR}/../addons/assistant/tests/python/litert_worker_tests.py)
     endif()
     add_test(NAME handwriting_worker COMMAND ${PILON_TEST_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/../addons/notes/tests/python/handwriting_worker_tests.py)
     add_test(NAME browser_worker COMMAND ${PILON_TEST_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/../addons/assistant/tests/python/browser_worker_tests.py)

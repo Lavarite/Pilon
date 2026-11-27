@@ -112,6 +112,16 @@ public final class PilonWidgetPreviewProbe extends Instrumentation {
         check(views != null);
         View result = views.apply(context, new FrameLayout(context)); actionless(result); return result;
     }
+    private void emptyAgenda(Context context, View empty) {
+        check(empty.findViewById(R.id.widget_time_grid) == null);
+        TextView title = empty.findViewById(R.id.widget_title);
+        check(title.getText().toString().equals("10/11/2026"));
+        check(title.getLineCount() == 1);
+        TextView status = empty.findViewById(R.id.widget_status);
+        check(status.getText().toString().equals(context.getString(R.string.pilon_widget_calendar_empty)));
+        for (TextView label : new TextView[]{title, status})
+            for (int line = 0; line < label.getLineCount(); ++line) check(label.getLayout().getEllipsisCount(line) == 0);
+    }
     private void runChecks() throws Exception {
         Context context = getTargetContext(); File root = PilonWidgets.directory(context);
         check(root.mkdir());
@@ -203,6 +213,8 @@ public final class PilonWidgetPreviewProbe extends Instrumentation {
             step = "rich-large-font-keeps-readable-rows";
             Configuration configuration = new Configuration(context.getResources().getConfiguration()); configuration.fontScale = 1.4f;
             Context largeContext = context.createConfigurationContext(configuration);
+            Configuration hugeConfiguration = new Configuration(context.getResources().getConfiguration()); hugeConfiguration.fontScale = 2;
+            Context hugeContext = context.createConfigurationContext(hugeConfiguration);
             View large = sized(largeContext, catalog, catalog.providers.get(0), 320, 720, true, "rich-widget-large-font");
             check(((ViewGroup)large.findViewById(R.id.widget_rows)).getChildCount() > 0);
             check(((ViewGroup)large.findViewById(R.id.widget_rows)).getChildCount() < fullRows.getChildCount());
@@ -217,13 +229,19 @@ public final class PilonWidgetPreviewProbe extends Instrumentation {
             step = "calendar-agenda-empty-at-minimum-with-large-font";
             gridFrame.put("rows", new JSONArray()); write(calendarFile, grid);
             for (boolean preview : new boolean[]{true, false}) {
-                View empty = sized(largeContext, catalog, catalog.providers.get(0), 160, 160, preview, "agenda-empty-" + preview);
-                check(empty.findViewById(R.id.widget_time_grid) == null);
-                check(((TextView)empty.findViewById(R.id.widget_title)).getText().toString().equals("10/11/2026"));
-                TextView status = empty.findViewById(R.id.widget_status);
-                check(status.getText().toString().equals("No events scheduled"));
-                for (int line = 0; line < status.getLineCount(); ++line) check(status.getLayout().getEllipsisCount(line) == 0);
+                emptyAgenda(largeContext, sized(largeContext, catalog, catalog.providers.get(0), 160, 160, preview, "agenda-empty-" + preview));
             }
+            step = "calendar-agenda-empty-at-largest-font-and-large-preview";
+            emptyAgenda(hugeContext, sized(hugeContext, catalog, catalog.providers.get(0), 160, 160, true, "agenda-empty-minimum-font2"));
+            emptyAgenda(hugeContext, sized(hugeContext, catalog, catalog.providers.get(0), 320, 720, true, "agenda-empty-large-font2"));
+            step = "calendar-agenda-empty-expires-to-refresh";
+            JSONObject expiredAgenda = new JSONObject(grid.toString());
+            expiredAgenda.put("validThrough", Instant.ofEpochMilli(System.currentTimeMillis() - 1000).toString());
+            expiredAgenda.put("updatedAt", expiredAgenda.getString("validFrom"));
+            write(calendarFile, expiredAgenda);
+            View expiredEmpty = preview(context, catalog, catalog.providers.get(0));
+            check(((TextView)expiredEmpty.findViewById(R.id.widget_status)).getText().toString()
+                .equals(context.getString(R.string.pilon_widget_refresh)));
             step = "calendar-agenda-all-day-is-populated";
             gridFrame.put("rows", new JSONArray().put(new JSONObject().put("id", "all_day").put("title", "All-day event").put("allDay", true)));
             write(calendarFile, grid);
@@ -293,8 +311,6 @@ public final class PilonWidgetPreviewProbe extends Instrumentation {
             View all = sized(context, catalog, catalog.providers.get(0), 288.4f, 429.6f, true, "time-grid-all-day");
             check(((ViewGroup)all.findViewById(R.id.widget_grid_all_day)).getChildCount() == 1);
             check(((TextView)all.findViewById(R.id.widget_status)).getText().toString().contains("7 more events in this day"));
-            Configuration hugeConfiguration = new Configuration(context.getResources().getConfiguration()); hugeConfiguration.fontScale = 2;
-            Context hugeContext = context.createConfigurationContext(hugeConfiguration);
             View tiny = sized(hugeContext, catalog, catalog.providers.get(0), 180, 160, true, "time-grid-tiny-font2");
             check(gridCards(tiny).size() > 0 && tiny.findViewById(R.id.widget_grid_card_title).getVisibility() == View.VISIBLE);
             check(namedCard(tiny, "First").findViewById(R.id.widget_grid_card_time).getVisibility() == View.GONE);

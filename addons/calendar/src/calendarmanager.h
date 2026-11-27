@@ -15,7 +15,6 @@ class CalendarManager : public QObject {
     Q_OBJECT
     QML_ELEMENT
     Q_PROPERTY(bool active READ active WRITE setActive NOTIFY activeChanged)
-    Q_PROPERTY(bool gitUpdating READ gitUpdating NOTIFY gitUpdatingChanged)
     Q_PROPERTY(QVariantList calendars READ calendars NOTIFY changed)
     Q_PROPERTY(QVariantList accounts READ accounts NOTIFY changed)
     Q_PROPERTY(QVariantList proposals READ proposals NOTIFY changed)
@@ -47,11 +46,6 @@ class CalendarManager : public QObject {
     QVariantList conflicts() const;
     bool active() const { return m_active; }
     void setActive(bool active);
-    bool gitUpdating() const { return m_gitUpdating; }
-    Q_INVOKABLE bool beginGitUpdate();
-    Q_INVOKABLE bool finishGitUpdate();
-    Q_INVOKABLE bool validateGitSnapshot(const QString &directory);
-    Q_INVOKABLE bool adoptGitDirectory(const QString &directory);
     Q_INVOKABLE QString disableBlockedReason() const;
     Q_INVOKABLE bool prepareDisable();
     Q_INVOKABLE bool resetPreferences(bool apply = true);
@@ -110,11 +104,10 @@ class CalendarManager : public QObject {
     Q_INVOKABLE QVariantMap propose(const QVariantList &changes, const QString &summary);
     Q_INVOKABLE bool updateProposal(const QString &id, int index, const QVariantMap &event);
     Q_INVOKABLE bool applyProposal(const QString &id);
-    Q_INVOKABLE void discardProposal(const QString &id);
+    Q_INVOKABLE bool discardProposal(const QString &id);
     QJsonObject assistantTool(const QString &name, const QJsonObject &args);
   signals:
     void activeChanged();
-    void gitUpdatingChanged();
     void changed();
     void proposalReady(const QString &id);
     void sharingChanged();
@@ -128,7 +121,9 @@ class CalendarManager : public QObject {
     std::function<void(const QString &, const QByteArray &, const QUrl &, const QByteArray &, const QVariantMap &,
                        Reply)>
         m_transport;
+    CalendarManager(const QString &directory, QObject *parent, bool background, bool startActive);
     QSqlDatabase m_db;
+    bool openStorage();
     Records m_events, m_calendars, m_accounts, m_links, m_proposals, m_conflicts, m_instances, m_shares;
     QVariantMap m_preferences;
     QNetworkAccessManager m_network;
@@ -150,17 +145,14 @@ class CalendarManager : public QObject {
     Records m_fileRecords;
     bool m_importingFiles = false;
     bool loadEventFiles();
-    bool readGitSnapshot(const QString &directory, Records &records, QString &error, bool requireKnownHistory = true) const;
     bool saveEventFiles();
     void watchEventFiles();
     QString m_error, m_loginProvider, m_verifier, m_state, m_redirect, m_reminderFailure;
     QStringList m_syncSources;
     int m_revision = 0;
     bool m_active = true, m_background = false, m_activityStarted = false;
-    bool m_gitUpdating = false, m_gitResumeActive = false;
-    int m_pendingRequests = 0;
     quint64 m_activationRevision = 0;
-    void startActivities(bool reloadFiles = true);
+    void startActivities();
     void stopActivities();
     bool m_syncing = false, m_batch = false, m_resync = false;
     bool m_interactionActive = false;
@@ -192,9 +184,9 @@ class CalendarManager : public QObject {
     std::function<void()> nativeAuthorization(const QString &provider, const QString &action, const QVariantMap &previous, AuthorizationReply done);
     void connectMobileAccount(const QString &provider);
     static QString mobileAuthorizationError(const QString &provider, const QVariantMap &tokens, const QVariantMap &previous = {});
-    void mobileIdentity(const QString &provider, QVariantMap tokens, AuthorizationReply done);
+    void verifyAccountIdentity(const QString &provider, QVariantMap tokens, AuthorizationReply done);
     void refreshMobileAccount(const QString &id, const QVariantMap &previous, AuthorizationReply done);
-    void acceptMobileAccount(const QString &provider, const QVariantMap &tokens);
+    void acceptVerifiedAccount(const QString &provider, const QVariantMap &tokens);
     void discover(const QString &account, std::function<void()> done);
     void removeCalendar(const QString &id);
     void syncNext();

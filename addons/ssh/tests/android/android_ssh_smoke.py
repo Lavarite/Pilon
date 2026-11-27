@@ -7,10 +7,15 @@ import pwd
 import shlex
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parents[4]
+sys.path.insert(0, str(ROOT / "src/scripts"))
+from environment import development_root
+
+DEV = development_root()
 ADB = str(Path.home() / "Android/Sdk/platform-tools/adb")
 
 
@@ -22,12 +27,12 @@ def run(*arguments):
 
 
 def main():
-    work = ROOT / "build/android/network-runtime"
+    work = DEV / "dev-deps/android/network-runtime"
     work.mkdir(exist_ok=True)
     directory = Path(tempfile.mkdtemp(prefix="ssh-proof-", dir=work))
     remote = "/data/local/tmp/pilon-ssh-proof-" + directory.name
-    runtime = ROOT / "builds/android/runtime/arm64-v8a"
-    openssl = Path(os.environ.get("PILON_ANDROID_BUILD_DIR", ROOT / "build/android/app")) / "_deps/pilon_openssl-build"
+    runtime = DEV / "builds/android/runtime/arm64-v8a"
+    openssl = Path(os.environ.get("PILON_ANDROID_BUILD_DIR", DEV / "builds/work/android/app")) / "_deps/pilon_openssl-build"
     server = None
     reverse = None
     try:

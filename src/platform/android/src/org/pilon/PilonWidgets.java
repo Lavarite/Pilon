@@ -24,9 +24,11 @@ import android.text.TextUtils;
 import android.view.View;
 import android.widget.RemoteViews;
 import java.io.File;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import org.json.JSONArray;
@@ -38,6 +40,7 @@ public final class PilonWidgets {
     static final String COLLECTION_CLICK = "org.pilon.WIDGET_COLLECTION_CLICK";
     static final String PINNED = "org.pilon.WIDGET_PINNED";
     private static final String PREFERENCES = "pilon_widgets";
+    private static final int ALL_WIDGETS = 0, ALARM_ONLY = -1;
     private PilonWidgets() {}
     static File directory(Context context) { return new File(context.getFilesDir(), "pilon-widgets"); }
     static ComponentName component(Context context) { return new ComponentName(context, PilonWidgetProvider.class); }
@@ -83,7 +86,8 @@ public final class PilonWidgets {
         } catch (Exception failure) { return false; }
     }
     static void deleted(Context context, int[] ids) {
-        SharedPreferences.Editor editor = preferences(context).edit(); for (int id : ids) editor.remove("widget." + id); editor.commit(); PilonWidgetClock.reconcile(context);
+        SharedPreferences.Editor editor = preferences(context).edit(); for (int id : ids) editor.remove("widget." + id); editor.commit();
+        update(context, ALARM_ONLY, PilonWidgetData.catalog(directory(context)));
     }
     static void restoreBindings(Context context, int[] oldIds, int[] newIds) {
         if (oldIds.length != newIds.length) return;
@@ -135,7 +139,9 @@ public final class PilonWidgets {
             if (!edit.putString(key, request.toString()).commit()) return false;
             Intent confirmation = new Intent(context, PilonWidgetProvider.class).setAction(PINNED)
                 .setData(Uri.parse("pilon-widget-pin://callback/" + token));
-            PendingIntent callback = PendingIntent.getBroadcast(context, 0, confirmation, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+            // The launcher supplies the widget ID as a fill-in extra to this explicit one-shot callback.
+            int flags = PendingIntent.FLAG_ONE_SHOT | (Build.VERSION.SDK_INT >= 31 ? PendingIntent.FLAG_MUTABLE : 0);
+            PendingIntent callback = PendingIntent.getBroadcast(context, 0, confirmation, flags);
             boolean initiated = manager.requestPinAppWidget(component(context), previewExtras(context, catalog, provider), callback);
             if (!initiated) prefs.edit().remove(key).commit();
             return initiated;
@@ -153,8 +159,8 @@ public final class PilonWidgets {
             int[] previous = new int[before.length()]; for (int index = 0; index < before.length(); ++index) previous[index] = before.getInt(index);
             int[] current = context.getSystemService(AppWidgetManager.class).getAppWidgetIds(component(context));
             int chosen = intent.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID);
-            // Some launchers omit callback extras; only a unique newly created ID is safe.
             chosen = PilonWidgetData.newlyPinnedId(chosen, previous, current);
+            if (chosen == 0) return;
             Binding binding = new Binding(request.optString("workspaceId"), request.optString("addonId"), request.optString("widgetId"));
             if (binding(context, chosen) == null && bind(context, chosen, binding)) update(context, chosen, PilonWidgetData.catalog(directory(context)));
         } catch (Exception failure) { /* A failed or obsolete pin stays unconfigured. */ }
@@ -172,26 +178,36 @@ public final class PilonWidgets {
         return result.toString();
     }
     public static void refresh(Context context) {
-        try {
-            if (!isAvailable(context)) return; PilonWidgetData.Catalog catalog = PilonWidgetData.catalog(directory(context));
-            for (int id : context.getSystemService(AppWidgetManager.class).getAppWidgetIds(component(context))) {
-                try { updateViews(context, id, catalog); } catch (RuntimeException invalid) { /* Continue updating the remaining installed widgets. */ }
-            }
-        } catch (RuntimeException failure) { /* Launcher removal must not fail a provider publication. */ }
-        PilonWidgetClock.reconcile(context);
+        if (isAvailable(context)) update(context, ALL_WIDGETS, PilonWidgetData.catalog(directory(context)));
     }
     static void update(Context context, int id, PilonWidgetData.Catalog catalog) {
-        try { updateViews(context, id, catalog); }
-        catch (RuntimeException removedOrInvalid) { /* A stale launcher ID/options must not crash Pilon. */ }
-        PilonWidgetClock.reconcile(context);
+        long now = System.currentTimeMillis(), next = Long.MAX_VALUE;
+        try {
+            AppWidgetManager manager = context.getSystemService(AppWidgetManager.class);
+            if (manager == null) return;
+            File root = directory(context);
+            Map<PilonWidgetData.Provider, PilonWidgetData.Snapshot> snapshots = new HashMap<>();
+            for (int widgetId : manager.getAppWidgetIds(component(context))) {
+                Binding binding = binding(context, widgetId);
+                PilonWidgetData.Provider provider = catalog != null && binding != null && catalog.workspaceId.equals(binding.workspaceId)
+                    ? catalog.find(binding.addonId, binding.widgetId) : null;
+                if (provider != null && !snapshots.containsKey(provider)) {
+                    PilonWidgetData.Snapshot snapshot = PilonWidgetData.snapshot(root, catalog, provider);
+                    snapshots.put(provider, snapshot);
+                    next = Math.min(next, PilonWidgetSchedule.nextUpdate(snapshot, now));
+                }
+                if (id == ALL_WIDGETS || id == widgetId) {
+                    try { updateViews(context, manager, widgetId, binding, provider, snapshots.get(provider)); }
+                    catch (RuntimeException removedOrInvalid) { /* Continue if the launcher removed a widget or supplied invalid options. */ }
+                }
+            }
+        } catch (RuntimeException failure) { /* Launcher removal must not fail a provider publication. */ }
+        PilonWidgetClock.reconcile(context, System.currentTimeMillis(), next);
     }
     @SuppressWarnings("deprecation")
-    private static void updateViews(Context context, int id, PilonWidgetData.Catalog catalog) {
-        if (!owns(context, id)) return;
-        Binding binding = binding(context, id); PilonWidgetData.Provider provider = catalog != null && binding != null && catalog.workspaceId.equals(binding.workspaceId)
-            ? catalog.find(binding.addonId, binding.widgetId) : null;
-        PilonWidgetData.Snapshot snapshot = provider == null ? null : PilonWidgetData.snapshot(directory(context), catalog, provider);
-        AppWidgetManager manager = context.getSystemService(AppWidgetManager.class); Bundle options;
+    private static void updateViews(Context context, AppWidgetManager manager, int id, Binding binding,
+                                    PilonWidgetData.Provider provider, PilonWidgetData.Snapshot snapshot) {
+        Bundle options;
         try { options = manager.getAppWidgetOptions(id); } catch (RuntimeException invalid) { options = new Bundle(); }
         RemoteViews views = null;
         if (Build.VERSION.SDK_INT >= 31) {
@@ -348,12 +364,21 @@ public final class PilonWidgets {
             && frame.optJSONArray("rows").length() == 0;
     }
     private static RemoteViews renderAt(Context context, int id, Binding binding, PilonWidgetData.Provider provider, PilonWidgetData.Snapshot snapshot, float width, float height, boolean preview, long now) {
+        JSONObject frame = snapshot == null ? null : snapshot.frame(now);
+        boolean agendaEmpty = frame != null && provider != null && emptyAgenda(binding, frame);
         RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.pilon_widget); int[] palette = colours(context, snapshot);
         views.setInt(R.id.widget_root, "setBackgroundColor", palette[0]); views.setTextColor(R.id.widget_title, palette[1]); views.setTextColor(R.id.widget_status, palette[1]); views.removeAllViews(R.id.widget_rows);
+        int horizontalPadding = Math.round(dp(context, 16));
+        if (agendaEmpty && textPaint(context, 14, true).measureText(frame.optString("title"))
+            > dp(context, width) - 2 * horizontalPadding)
+            horizontalPadding = Math.round(dp(context, 8));
+        int verticalPadding = Math.round(dp(context, agendaEmpty ? 12 : 16));
+        views.setViewPadding(R.id.widget_root, horizontalPadding, verticalPadding, horizontalPadding, verticalPadding);
+        views.setInt(R.id.widget_title, "setMaxLines", agendaEmpty ? 2 : 1);
+        views.setInt(R.id.widget_status, "setMaxLines", agendaEmpty ? 3 : 2);
         views.setViewVisibility(R.id.widget_status, View.VISIBLE);
         views.setViewVisibility(R.id.widget_title, View.VISIBLE);
         views.setViewVisibility(R.id.widget_heading, View.GONE); views.setViewVisibility(R.id.widget_heading_compact, View.GONE);
-        JSONObject frame = snapshot == null ? null : snapshot.frame(now);
         views.setTextViewText(R.id.widget_title, provider == null ? context.getString(R.string.pilon_widget_name) : provider.name);
         if (binding == null || provider == null) {
             Intent configure = new Intent(context, PilonWidgetConfigurationActivity.class).putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)
@@ -364,10 +389,9 @@ public final class PilonWidgets {
         }
         if (!preview) views.setOnClickPendingIntent(R.id.widget_root, launch(context, id, frame == null ? null : binding, frame == null ? null : snapshot, frame == null ? "open" : frame.optString("actionId", "open")));
         if (frame == null) { views.setTextViewText(R.id.widget_status, context.getString(R.string.pilon_widget_refresh)); return views; }
-        if (emptyAgenda(binding, frame)) {
+        if (agendaEmpty) {
             views.setTextViewText(R.id.widget_title, frame.optString("title"));
             views.setTextViewText(R.id.widget_status, context.getString(R.string.pilon_widget_calendar_empty));
-            views.setInt(R.id.widget_status, "setMaxLines", 3);
             return views;
         }
         if (frame.has("timeGrid")) return !preview && owns(context, id)

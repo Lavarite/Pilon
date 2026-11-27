@@ -1020,6 +1020,8 @@ TestCase {
         compare(page.browseFolder, lastFolder)
         const location = child("notesFolderPath")
         compare(location.text, notes.storageDirectory + "/Z folder"); verify(location.readOnly)
+        verify(location.showingSummary)
+        compare(findChild(location, "elidedFieldText").elide, Text.ElideMiddle)
         verify(page.navigateLibraryPath("/Z folder/Nested")); wait(40)
         compare(page.browseFolder, nested); compare(location.text, notes.storageDirectory + "/Z folder/Nested")
         verify(notes.renameFolder(lastFolder, "Renamed folder"))
@@ -1032,8 +1034,9 @@ TestCase {
         mouseClick(grid, grid.width - 20, grid.height - 20, Qt.RightButton); wait(40)
         verify(child("noteLibraryContext").opened)
         mouseClick(child("createFolderHere")); compare(child("noteFolderDialog").parentId, lastFolder)
+        verify(waitForRendering(child("noteFolderDialog").contentItem))
         child("noteFolderName").text = "New nested folder"; mouseClick(child("saveNoteFolder"))
-        verify(notes.folders.some(folder => folder.title === "Renamed folder/New nested folder"))
+        tryVerify(() => notes.folders.some(folder => folder.title === "Renamed folder/New nested folder"))
     }
     function test_library_touch_selects_then_double_tap_opens() {
         const folder = notes.createFolder("Touch folder"), nested = notes.createNote(folder)

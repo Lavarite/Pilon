@@ -6,6 +6,7 @@
 #include <QTemporaryDir>
 #include <QClipboard>
 #include <QGuiApplication>
+#include <QFile>
 
 class DocumentPreviewTests : public QObject {
     Q_OBJECT
@@ -58,7 +59,9 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(rendered.size() >= 3, 10000);
         QCOMPARE(rendered.at(0).at(0).toInt(), 0);
         QCOMPARE(rendered.at(1).at(0).toInt(), 24);
-        QCOMPARE(rendered.at(2).at(0).toInt(), 1);
+        QCOMPARE(rendered.at(2).at(0).toInt(), 23);
+        QTRY_VERIFY(!document.data(document.index(25), DocumentPreview::Image).toUrl().isEmpty());
+        QVERIFY(document.data(document.index(12), DocumentPreview::Image).toUrl().isEmpty());
         QCOMPARE(document.pageAt(top + 20, 1), 24);
         QCOMPARE(document.pageAt(document.pageY(24, 2) + 20, 2), 24);
         QVERIFY(!document.data(document.index(24), DocumentPreview::Image).toUrl().isEmpty());
@@ -91,6 +94,56 @@ private slots:
         document.find("selectable", 0); QTRY_COMPARE(found.size(), 2);
         boxes = document.data(document.index(0), DocumentPreview::Highlights).toList();
         QVERIFY(boxes.first().toRectF().top() > first.top());
+    }
+    void failedZoomKeepsThePreviousPageImage() {
+        const auto path = makePdf("zoom.pdf", 1);
+        DocumentPreview document;
+        QSignalSpy rendered(&document, &DocumentPreview::pageRendered);
+        document.setSource(QUrl::fromLocalFile(path));
+        QTRY_COMPARE(rendered.size(), 1);
+        const auto page = document.index(0);
+        const auto earlier = document.data(page, DocumentPreview::Image).toUrl();
+        QVERIFY(QFile::exists(earlier.toLocalFile()));
+        QVERIFY(QFile::remove(path));
+        document.prioritize(0, 100, 3);
+        QTRY_COMPARE(rendered.size(), 2);
+        QCOMPARE(document.data(page, DocumentPreview::Image).toUrl(), earlier);
+        QVERIFY(QFile::exists(earlier.toLocalFile()));
+    }
+    void searchDistinguishesDecoderFailureFromNoMatch() {
+        const auto path = makePdf("unreadable-search.pdf", 1);
+        DocumentPreview document;
+        QSignalSpy found(&document, &DocumentPreview::found);
+        document.setSource(QUrl::fromLocalFile(path));
+        QTRY_COMPARE(document.rowCount(), 1);
+        document.find("absent term", 0);
+        QTRY_COMPARE(found.size(), 1);
+        QCOMPARE(found.first().first().toInt(), -1);
+        QVERIFY(document.property("searchError").toString().isEmpty());
+        QVERIFY(QFile::remove(path));
+        document.find("selectable", 0);
+        QTRY_VERIFY(!document.searching());
+        QCOMPARE(found.size(), 1);
+        QVERIFY(!document.property("searchError").toString().isEmpty());
+    }
+    void selectionKeepsSupplementaryCharactersIntact() {
+        const auto face = QString::fromUcs4(U"😀");
+        DocumentPreview document;
+        document.setSource(QUrl::fromLocalFile(QFINDTESTDATA("../fixtures/supplementary-character.pdf")));
+        QTRY_COMPARE(document.rowCount(), 1);
+        QSignalSpy found(&document, &DocumentPreview::found);
+        document.find(face, 0);
+        QTRY_COMPARE(found.size(), 1);
+        QCOMPARE(document.selectedText(), face);
+        const auto boxes = document.data(document.index(0), DocumentPreview::Highlights).toList();
+        QVERIFY(!boxes.isEmpty());
+        const auto box = boxes.first().toRectF();
+        for (const bool backwards : {false, true}) {
+            const qreal left = box.left() + box.width() / 4, right = box.right() - box.width() / 4;
+            document.select(backwards ? right : left, box.center().y(), document.pageWidth(), 1, true);
+            document.select(backwards ? left : right, box.center().y(), document.pageWidth(), 1, false);
+            QCOMPARE(document.selectedText(), face);
+        }
     }
     void switchingDocumentsDiscardsStaleWork() {
         DocumentPreview document;

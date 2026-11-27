@@ -40,6 +40,10 @@ FilePickerWindow {
     function changeEnabled(id, enabled) {
         return changeAddonEnabled ? changeAddonEnabled(id, enabled) : addonRegistry.setEnabled(id, enabled)
     }
+    function importPackages(files) {
+        const failure = addonSettings.importPackages(files, false)
+        if (failure) message = failure
+    }
     function resetAddonDraft() {
         const choices = {}
         if (addonRegistry) for (const addon of addonRegistry.addons)
@@ -303,6 +307,7 @@ FilePickerWindow {
                     }
                 }
                 AddonsSettings {
+                    id: addonSettings
                     objectName: "setupAddons"
                     visible: !setup.welcoming && setup.step === 1
                     Layout.fillWidth: true
@@ -325,10 +330,15 @@ FilePickerWindow {
                         Layout.fillWidth: true
                         label: qsTr("Folder")
                         PilonTextField {
+                            id: storagePath
                             objectName: "setupStoragePath"
                             Layout.fillWidth: true; Layout.minimumWidth: 0
                             text: setup.draftWorkspace
                             Accessible.name: qsTr("Pilon folder")
+                            elideWhenUnfocused: true
+                            summaryElideMode: Text.ElideMiddle
+                            ToolTip.visible: hovered && showingSummary && text.length > 0
+                            ToolTip.text: storagePath.text
                             selectByMouse: true
                             onTextEdited: setup.draftWorkspace = text
                         }

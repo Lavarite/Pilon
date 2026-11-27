@@ -2,7 +2,6 @@
 #include "assistantmodels.h"
 #include "notedocument.h"
 #include "../../../src/core/workspace/pilonworkspace.h"
-#include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
@@ -103,7 +102,11 @@ QVariantList NoteHandwriting::prepareLines(const QVariantList &strokes, const QS
 }
 
 NoteHandwriting::NoteHandwriting(QObject *parent) : QObject(parent) {
-    m_root = qEnvironmentVariable("PILON_NOTES_OCR_ROOT", QDir(QCoreApplication::applicationDirPath()).absoluteFilePath(".."));
+#ifndef Q_OS_ANDROID
+    const auto legacyRoot = qEnvironmentVariable("PILON_NOTES_OCR_ROOT");
+    const QDir runtime(legacyRoot.isEmpty() ? PilonWorkspace::runtimeDirectory() : QDir(legacyRoot).filePath("runtime"));
+    m_workerProgram = runtime.filePath("handwriting/bin/python");
+#endif
     m_delay.setSingleShot(true); m_delay.setInterval(600);
     m_timeout.setSingleShot(true); m_timeout.setInterval(120000);
     connect(&m_delay, &QTimer::timeout, this, &NoteHandwriting::next);
@@ -122,7 +125,7 @@ NoteHandwriting::NoteHandwriting(QObject *parent) : QObject(parent) {
             m_process.setProgram(PilonWorkspace::packagedExecutable("ocr"));
             m_process.setArguments({models});
 #else
-            m_process.setProgram(m_root + "/runtime/handwriting/bin/python");
+            m_process.setProgram(m_workerProgram);
             m_process.setArguments({"-u", m_directory.filePath("handwriting_worker.py"), models});
 #endif
             auto env = QProcessEnvironment::systemEnvironment(); env.insert("HF_HUB_OFFLINE", "1"); env.insert("TOKENIZERS_PARALLELISM", "false");
@@ -192,8 +195,8 @@ void NoteHandwriting::next() {
         m_pending.clear(); emit failed(tr("Handwriting recognition is missing from this installation.")); return;
     }
 #else
-    if (!QFile::exists(m_root + "/runtime/handwriting/bin/python")) {
-        m_pending.clear(); emit failed(tr("Handwriting recognition is missing from this installation. Run ./src/scripts/build.sh to install its runtime.")); return;
+    if (!QFileInfo(m_workerProgram).isExecutable()) {
+        m_pending.clear(); emit failed(tr("Handwriting recognition is missing from this installation.")); return;
     }
 #endif
     if (!QFile::exists(models + "en_PP-OCRv5_rec_mobile.onnx") || !QFile::exists(models + "ch_PP-OCRv5_det_server.onnx")) {

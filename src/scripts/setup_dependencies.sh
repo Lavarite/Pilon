@@ -10,7 +10,7 @@ if ! command -v pacman >/dev/null 2>&1; then
     exit 1
 fi
 packages=(gcc make cmake pkgconf qt6-base qt6-declarative qt6-multimedia qt6-svg
-    libical libsecret libssh2 curl ffmpeg poppler vulkan-headers vulkan-icd-loader shaderc uv python tar binutils libarchive git github-cli)
+    libical libsecret libssh2 curl ffmpeg poppler vulkan-headers vulkan-icd-loader shaderc uv python tar binutils libarchive git)
 # Intel GPU/NPU inference needs userspace compute drivers in addition to the
 # kernel display driver. Install them only on devices that expose this hardware.
 for vendor in /sys/class/drm/card*/device/vendor; do

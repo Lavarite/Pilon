@@ -6,14 +6,19 @@ from pathlib import Path
 import selectors
 import shlex
 import subprocess
+import sys
 import time
 import uuid
 import wave
 
 ROOT = Path(__file__).resolve().parents[4]
+sys.path.insert(0, str(ROOT / "src/scripts"))
+from environment import development_root
+
+DEV = development_root()
 ADB = Path.home() / "Android/Sdk/platform-tools/adb"
-PROOF = ROOT / "build/android/breeze/device-proof"
-MODEL = ROOT / "build/android/breeze/models/breeze-tts-2-q8_0.gguf"
+PROOF = DEV / "dev-deps/android/breeze/device-proof"
+MODEL = DEV / "dev-deps/android/breeze/models/breeze-tts-2-q8_0.gguf"
 EXPECTED = "b17b89b1c21107c44e8d556ab0a856d7acd06bdd0c914e68e0e57f6e33f555a3"
 
 
@@ -79,8 +84,8 @@ def main():
 
     try:
         adb("shell", "mkdir", "-p", remote)
-        runtime = ROOT / "builds/android/runtime/arm64-v8a"
-        libraries = [runtime / name for name in ("libpilon_breeze.so", "libaudiocpp.so", "libpilon_ffmpeg.so")]
+        runtime = DEV / "builds/android/runtime/arm64-v8a"
+        libraries = [runtime / name for name in ("libpilon_speech.so", "libaudiocpp.so", "libpilon_ffmpeg.so")]
         libraries += [Path.home() / "Qt/6.12.0/android_arm64_v8a/lib/libQt6Core_arm64-v8a.so",
             Path.home() / "Android/Sdk/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so"]
         for file in libraries:
@@ -91,8 +96,8 @@ def main():
         adb("push", MODEL, remote + "/model.gguf")
         assert sha(remote + "/model.gguf") == EXPECTED
         facts["modelPushAndVerifySeconds"] = time.monotonic() - started
-        adb("shell", "chmod", "700", remote + "/libpilon_breeze.so", remote + "/libpilon_ffmpeg.so")
-        prefix = f"env LD_LIBRARY_PATH={shlex.quote(remote)} {shlex.quote(remote + '/libpilon_breeze.so')}"
+        adb("shell", "chmod", "700", remote + "/libpilon_speech.so", remote + "/libpilon_ffmpeg.so")
+        prefix = f"env LD_LIBRARY_PATH={shlex.quote(remote)} {shlex.quote(remote + '/libpilon_speech.so')}"
         checked = adb("shell", prefix + " --self-test " + shlex.quote(remote + "/libpilon_ffmpeg.so") + " " + shlex.quote(remote), text=True)
         facts["selfTest"] = json.loads(checked.stdout)
         command = "echo $$ > " + shlex.quote(remote + "/worker.pid") + "; exec " + prefix + " " + shlex.quote(remote + "/model.gguf") + " " + shlex.quote(remote + "/libpilon_ffmpeg.so") + " 4"

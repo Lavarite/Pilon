@@ -130,7 +130,8 @@ void AssistantManager::openArtifact(const QString &id)
     for (const auto &value : messages()) {
         const auto message = value.toMap();
         if (message.value("role") != "artifact" || message.value("id").toString() != id) continue;
-        const QString path = message.value("artifact").toMap().value("path").toString();
+        const auto path = PilonWorkspace::currentPublicPath(PilonWorkspace::configuredRoot(),
+            message.value("artifact").toMap().value("path").toString());
         if (!validPath(path) || !QFileInfo(path).isFile()) {
             m_error = tr("The artifact has moved or is no longer available: %1").arg(path);
             emit stateChanged();
@@ -147,7 +148,8 @@ void AssistantManager::startArtifactDrag(const QString &id)
     for (const auto &value : messages()) {
         const auto message = value.toMap();
         if (message.value("role") != "artifact" || message.value("id").toString() != id) continue;
-        const QString path = message.value("artifact").toMap().value("path").toString();
+        const auto path = PilonWorkspace::currentPublicPath(PilonWorkspace::configuredRoot(),
+            message.value("artifact").toMap().value("path").toString());
         const QFileInfo file(path);
         if (!validPath(path) || !file.isFile() || !file.isReadable()) {
             m_error = tr("The artifact has moved or is no longer available: %1").arg(path);
@@ -299,6 +301,7 @@ bool AssistantManager::runFileTool(const QString &name, const QJsonObject &args)
     }
     QString path;
     QString id;
+    QString createdDirectory;
     if (name == "create_artifact") {
         const QString filename = args.value("filename").toString();
         if (filename.isEmpty() || filename == "." || filename == ".."
@@ -308,7 +311,7 @@ bool AssistantManager::runFileTool(const QString &name, const QJsonObject &args)
             return true;
         }
         const QString chatDirectory = artifactRoot() + '/' + m_chatId;
-        if (!QDir().mkpath(chatDirectory) || QFileInfo(artifactRoot()).isSymLink() || QFileInfo(chatDirectory).isSymLink()) {
+        if (QFileInfo(artifactRoot()).isSymLink() || QFileInfo(chatDirectory).isSymLink() || !QDir().mkpath(chatDirectory)) {
             finishTool({{"error", "Unable to create the artifact directory."}});
             return true;
         }
@@ -318,6 +321,7 @@ bool AssistantManager::runFileTool(const QString &name, const QJsonObject &args)
             finishTool({{"error", "Unable to create a unique artifact directory."}});
             return true;
         }
+        createdDirectory = directory;
         QFile::setPermissions(chatDirectory, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
         QFile::setPermissions(directory, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
         path = directory + '/' + filename;
@@ -328,6 +332,7 @@ bool AssistantManager::runFileTool(const QString &name, const QJsonObject &args)
             if (message.value("role") == "artifact" && message.value("id").toString() == id)
                 path = message.value("artifact").toMap().value("path").toString();
         }
+        path = PilonWorkspace::currentPublicPath(PilonWorkspace::configuredRoot(), path);
         const auto info = QFileInfo(path);
         if (path.isEmpty() || !validPath(path) || !info.isFile()) {
             finishTool({{"error", "The artifact file is no longer available."}});
@@ -335,6 +340,11 @@ bool AssistantManager::runFileTool(const QString &name, const QJsonObject &args)
         }
     }
     const QString error = writeArtifact(path, content);
+    if (!error.isEmpty() && !createdDirectory.isEmpty()) {
+        QDir().rmdir(createdDirectory);
+        QDir().rmdir(QFileInfo(createdDirectory).absolutePath());
+        QDir().rmdir(artifactRoot());
+    }
     finishTool(error.isEmpty() ? recordArtifact(path, true, id) : QJsonObject{{"error", error}});
     return true;
 }

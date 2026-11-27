@@ -1,11 +1,13 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <g fill="currentColor">
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 64 64">
+  <defs>
+    <path id="mark" d="M21 19H43 M22 29L25 33H39L42 29 M23 42V56 M29 42V56 M35 42V56 M41 42V56 M23 21C19 16 9 17 8 25C7 33 17 36 22 30C26 25 22 20 17 21C12 21 11 28 16 29C19 30 21 26 18 25 M41 21C45 16 55 17 56 25C57 33 47 36 42 30C38 25 42 20 47 21C52 21 53 28 48 29C45 30 43 26 46 25"/>
+  </defs>
+  <g fill="currentColor" stroke="#000" stroke-width="1.5">
     <rect x="7" y="8" width="50" height="5" rx="1"/>
     <rect x="21" y="36" width="22" height="4" rx="1"/>
   </g>
-  <g fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M21 19H43 M22 29L25 33H39L42 29 M23 42V56 M29 42V56 M35 42V56 M41 42V56"/>
-    <path d="M23 21C19 16 9 17 8 25C7 33 17 36 22 30C26 25 22 20 17 21C12 21 11 28 16 29C19 30 21 26 18 25"/>
-    <path d="M41 21C45 16 55 17 56 25C57 33 47 36 42 30C38 25 42 20 47 21C52 21 53 28 48 29C45 30 43 26 46 25"/>
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <use xlink:href="#mark" stroke="#000" stroke-width="5.5"/>
+    <use xlink:href="#mark" stroke="currentColor" stroke-width="3.5"/>
   </g>
 </svg>

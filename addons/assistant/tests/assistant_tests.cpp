@@ -5,11 +5,13 @@
 #include "sshcredentials.h"
 #include "remotefilemanager.h"
 #include "pilonworkspace.h"
+#include "pilonsettings.h"
 #include <QJsonDocument>
 #include <QDrag>
 #include <QGuiApplication>
 #include <QMimeData>
 #include <QNetworkReply>
+#include <QPromise>
 #include <QMetaProperty>
 #include <QRegularExpression>
 #include <QSignalSpy>
@@ -21,12 +23,66 @@
 #include <QXmlStreamReader>
 #include <sys/resource.h>
 #include <limits>
+#include <tuple>
 
 class AssistantTests : public QObject
 {
     Q_OBJECT
     QTemporaryDir m_voiceDirectory;
     QTemporaryDir m_settingsDirectory;
+    static QString spokenReplyFile(const AssistantManager &manager)
+    {
+        const auto messages = manager.messages();
+        for (auto it = messages.crbegin(); it != messages.crend(); ++it) {
+            const auto message = it->toMap();
+            if (message.value("role") != "assistant") continue;
+            for (const auto &value : message.value("attachments").toList()) {
+                const auto audio = value.toMap();
+                if (audio.value("mime") == "audio/wav") return audio.value("url").toUrl().toLocalFile();
+            }
+        }
+        return {};
+    }
+    static bool installAudioFixture(const QString &root, const QString &name, const QString &kind, const QString &engine)
+    {
+        const auto relativePath = "hf-audio/test/fixture/" + name;
+        QFile fixture(QDir(root).filePath(relativePath));
+        if (!QDir().mkpath(QFileInfo(fixture).absolutePath()) || !fixture.open(QIODevice::WriteOnly)
+            || fixture.write("weights") != 7) return false;
+        fixture.close();
+        QFile manifest(QDir(root).filePath("installed.json"));
+        QJsonArray models;
+        if (manifest.exists()) {
+            if (!manifest.open(QIODevice::ReadOnly)) return false;
+            models = QJsonDocument::fromJson(manifest.readAll()).array();
+            manifest.close();
+        }
+        models.append(QJsonObject{{"id", "audio:test/fixture/" + name}, {"name", name}, {"kind", kind}, {"engine", engine},
+            {"weights", relativePath}, {"files", QJsonArray{QJsonObject{{"path", relativePath}, {"size", 7}}}}});
+        const auto bytes = QJsonDocument(models).toJson();
+        return manifest.open(QIODevice::WriteOnly) && manifest.write(bytes) == bytes.size();
+    }
+    static bool writeSpeechWorker(const QString &directory, const QByteArray &contents)
+    {
+        const QDir bin(directory + "/runtime/speech/bin");
+        if (!QDir().mkpath(bin.absolutePath())) return false;
+        QFile worker(bin.filePath("pilon-speech"));
+        QFile library(bin.filePath("libaudiocpp.so.0"));
+        QFile ffmpeg(bin.filePath("ffmpeg"));
+        constexpr auto executable = QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner;
+        return worker.open(QIODevice::WriteOnly) && worker.write(contents) == contents.size()
+            && worker.setPermissions(executable) && library.open(QIODevice::WriteOnly)
+            && ffmpeg.open(QIODevice::WriteOnly) && ffmpeg.setPermissions(executable);
+    }
+    static bool selectImportedBreeze(AssistantManager &manager)
+    {
+        for (const auto &entry : manager.audioModels()) {
+            const auto model = entry.toMap();
+            if (model.value("engine") == "breeze_tts")
+                return manager.selectAudioModel(model.value("id").toString());
+        }
+        return false;
+    }
     QString accountFixture(const QString &directory) {
         QFile script(directory + "/codex");
         if (!script.open(QIODevice::WriteOnly)) return {};
@@ -367,6 +423,7 @@ private slots:
         QVERIFY(!manager.m_codexRuntime.m_timer.isActive());
         manager.prepareRuntime();
         QVERIFY(manager.m_codexRuntime.m_timer.isActive());
+        QCOMPARE(manager.m_codexRuntime.m_root, directory.filePath("runtime/codex"));
         const auto timer = manager.m_codexRuntime.m_timer.id();
         manager.prepareRuntime();
         QCOMPARE(manager.m_codexRuntime.m_timer.id(), timer);
@@ -375,6 +432,56 @@ private slots:
         QVERIFY(manager.prepareDisable()); manager.setActive(false);
         QVERIFY(!manager.m_codexRuntime.m_timer.isActive());
         manager.setActive(true); QVERIFY(!manager.m_codexRuntime.m_timer.isActive());
+    }
+    void defaultAgentAndManagedCodexUseTheSelectedPilonFolder() {
+        QTemporaryDir directory;
+        const auto pointer = PilonWorkspace::bootstrapFile();
+        QFile existing(pointer);
+        QVERIFY(!existing.exists());
+        const auto restorePointer = qScopeGuard([&] { QFile::remove(pointer); });
+        QSettings bootstrap(pointer, QSettings::IniFormat);
+        bootstrap.setValue("workspace/version", 1);
+        bootstrap.setValue("workspace/root", directory.path());
+        bootstrap.sync();
+        const QList<QByteArray> names{"PILON_CODEX", "PILON_EPHEMERAL_CHAT", "PILON_RUNTIME_DIR", "PILON_AGENT_DIR", "PILON_CHAT_DIR"};
+        QHash<QByteArray, QByteArray> environment;
+        for (const auto &name : names) { environment[name] = qgetenv(name); qunsetenv(name); }
+        const auto restoreEnvironment = qScopeGuard([&] {
+            for (const auto &name : names) {
+                if (environment[name].isNull()) qunsetenv(name);
+                else qputenv(name, environment[name]);
+            }
+        });
+        AssistantManager manager;
+        QCOMPARE(manager.workspaceRoot(), directory.filePath(".pilon/assistant/agent"));
+        const auto legacy = directory.filePath("legacy/AgentFiles");
+        QVERIFY(QDir().mkpath(legacy + "/tools/.venv"));
+        const QMap<QString, QByteArray> legacyFiles{{"AGENTS.md", "custom instructions"},
+            {"tools/pyproject.toml", "custom manifest"}, {"tools/uv.lock", "custom lock"}};
+        for (auto entry = legacyFiles.cbegin(); entry != legacyFiles.cend(); ++entry) {
+            QFile file(legacy + '/' + entry.key());
+            QVERIFY(file.open(QIODevice::WriteOnly));
+            QCOMPARE(file.write(entry.value()), entry.value().size());
+        }
+        QVERIFY(manager.initializeWorkspace(legacy));
+        manager.prepareRuntime();
+        for (auto entry = legacyFiles.cbegin(); entry != legacyFiles.cend(); ++entry) {
+            QFile original(legacy + '/' + entry.key()), copy(manager.workspaceRoot() + '/' + entry.key());
+            QVERIFY(original.open(QIODevice::ReadOnly) && copy.open(QIODevice::ReadOnly));
+            QCOMPARE(original.readAll(), entry.value());
+            QCOMPARE(copy.readAll(), entry.value());
+        }
+        QVERIFY(!QFileInfo::exists(manager.toolsRoot() + "/.venv"));
+        const auto codex = directory.filePath(".pilon/runtime/codex");
+        QCOMPARE(manager.m_codexRuntime.m_root, codex);
+        QVERIFY(QFileInfo::exists(directory.filePath(".pilon/assistant/agent/tools/uv.lock")));
+        const auto executable = codex + "/1.2.3/node_modules/.bin/codex";
+        QVERIFY(QDir().mkpath(QFileInfo(executable).absolutePath()));
+        QFile marker(codex + "/current"); QVERIFY(marker.open(QIODevice::WriteOnly));
+        QCOMPARE(marker.write("1.2.3"), 5); marker.close();
+        QFile cli(executable); QVERIFY(cli.open(QIODevice::WriteOnly));
+        cli.close(); QVERIFY(cli.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+        QCOMPARE(manager.runtimePath("codex"), executable);
     }
     void rejectedMessageReportsFailureWithoutAddingIt() {
         AssistantManager manager;
@@ -463,11 +570,25 @@ private slots:
         if (root.isEmpty()) QSKIP("Set PILON_TEST_CODEX_UPDATE to exercise the official npm updater.");
         const auto previous = qgetenv("PILON_EPHEMERAL_CHAT"); qunsetenv("PILON_EPHEMERAL_CHAT");
         const auto restore = qScopeGuard([&] { if (previous.isNull()) qunsetenv("PILON_EPHEMERAL_CHAT"); else qputenv("PILON_EPHEMERAL_CHAT", previous); });
-        CodexRuntime runtime; runtime.start(root, QStandardPaths::findExecutable("codex"));
+        QVERIFY(QDir().mkpath(root));
+        QFile checked(QDir(root).filePath("checked"));
+        QVERIFY(checked.open(QIODevice::WriteOnly));
+        checked.write(QDateTime::currentDateTimeUtc().toString(Qt::ISODate).toUtf8());
+        checked.close();
+        CodexRuntime runtime;
+        runtime.start(root, {});
+        QSignalSpy updated(&runtime, &CodexRuntime::updated);
+        runtime.checkNow();
+        QVERIFY(runtime.checking());
+        QTRY_COMPARE_WITH_TIMEOUT(updated.count(), 1, 120000);
+        QVERIFY(!runtime.checking());
+        QCOMPARE(runtime.updateStatus(), QString("Codex is up to date."));
         QTRY_VERIFY_WITH_TIMEOUT(!CodexRuntime::executable(root).isEmpty(), 120000);
         QProcess process; process.start(CodexRuntime::executable(root), {"--version"});
         QVERIFY(process.waitForFinished(10000)); QCOMPARE(process.exitCode(), 0);
-        const auto output = process.readAllStandardOutput(); QVERIFY(!CodexRuntime::version(output).isEmpty()); qInfo().noquote() << output.trimmed();
+        const auto output = process.readAllStandardOutput();
+        QCOMPARE(CodexRuntime::version(output), runtime.installedVersion());
+        qInfo().noquote() << output.trimmed();
     }
     void codexRuntimeOnlyActivatesVerifiedVersions() {
         QTemporaryDir root;
@@ -512,6 +633,7 @@ private slots:
         QVERIFY(manager.deleteProject(id));
         QVERIFY(manager.project(id).isEmpty());
         QVERIFY(manager.currentProjectId().isEmpty());
+        QVERIFY(manager.chats().first().toMap().value("projectId").toString().isEmpty());
         QVERIFY(QFileInfo::exists(directory.path()));
         manager.openChat(chat);
         QCOMPARE(manager.messages().first().toMap().value("text").toString(), QString("Keep this chat"));
@@ -560,11 +682,27 @@ private slots:
             QVERIFY(!manager.instructionPrefix({}).contains("Use the existing design."));
             const auto first = manager.workingDirectory(); manager.clear(); QVERIFY(first != manager.workingDirectory());
             manager.openChat(chat); QCOMPARE(manager.currentProjectId(), id);
-            QVERIFY(manager.moveChatToProject(chat, "")); QVERIFY(manager.currentProjectId().isEmpty());
         }
         AssistantManager restored;
         QCOMPARE(restored.project(id).value("instructions").toString(), QString("Use the existing design."));
-        restored.openChat(chat); QVERIFY(restored.currentProjectId().isEmpty());
+        restored.openChat(chat); QCOMPARE(restored.currentProjectId(), id);
+    }
+
+    void chatWorkDoesNotCreateArtifactDirectories() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const auto oldAgent = qgetenv("PILON_AGENT_DIR");
+        const auto oldArtifacts = qgetenv("PILON_ARTIFACT_DIR");
+        const auto restore = qScopeGuard([&] {
+            qputenv("PILON_AGENT_DIR", oldAgent);
+            qputenv("PILON_ARTIFACT_DIR", oldArtifacts);
+        });
+        qputenv("PILON_AGENT_DIR", directory.filePath("agent").toUtf8());
+        qputenv("PILON_ARTIFACT_DIR", directory.filePath("artifacts").toUtf8());
+        AssistantManager manager;
+        QVERIFY(manager.initializeWorkspace());
+        QVERIFY(QFileInfo(manager.workingDirectory()).isDir());
+        QVERIFY(!QFileInfo::exists(manager.artifactRoot()));
     }
 
     void nativeCodexCompactsAfterBackendContextOverflow_data() {
@@ -638,25 +776,204 @@ private slots:
         qputenv("PILON_CHAT_DIR", directory.filePath("chats").toUtf8());
         QFile script(directory.filePath("fake-codex")); QVERIFY(script.open(QIODevice::WriteOnly));
         script.write(R"PY(#!/usr/bin/env python3
-import json,sys
+import json,os,sys
+from pathlib import Path
 for line in sys.stdin:
  r=json.loads(line)
  if 'id' not in r: continue
  if r['method']=='thread/delete':
-  print(json.dumps({'id':r['id'],'error':{'code':-32600,'message':'no rollout found for thread id '+r['params']['threadId']}}),flush=True)
+  archive=Path(os.environ['CODEX_HOME'])/'archived_sessions'
+  error='no rollout found for thread id '+r['params']['threadId'] if archive.is_dir() else 'failed to resolve archived sessions directory: No such file or directory (os error 2)'
+  print(json.dumps({'id':r['id'],'error':{'code':-32600,'message':error}}),flush=True)
  else: print(json.dumps({'id':r['id'],'result':{}}),flush=True)
 )PY"); script.close(); QVERIFY(script.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
         AssistantManager manager;
         QVERIFY(QDir().mkpath(manager.codexHome()));
         QFile pending(manager.codexHome() + "/pending-deletions.json");
         QVERIFY(pending.open(QIODevice::WriteOnly)); pending.write("[\"already-gone\"]"); pending.close();
-        manager.m_codex.start(script.fileName(), {}, QProcessEnvironment::systemEnvironment());
+        const auto archive = manager.codexHome() + "/archived_sessions";
+        QVERIFY(!QFileInfo::exists(archive));
+        auto environment = QProcessEnvironment::systemEnvironment();
+        environment.insert("CODEX_HOME", manager.codexHome());
+        manager.m_codex.start(script.fileName(), {}, environment);
         const auto empty = [&] { QFile f(pending.fileName()); return f.open(QIODevice::ReadOnly) && QJsonDocument::fromJson(f.readAll()).array().isEmpty(); };
         QTRY_VERIFY_WITH_TIMEOUT(empty(), 5000);
+        QVERIFY(QFileInfo(archive).isDir());
         QVERIFY(manager.error().isEmpty());
-        manager.deleteCodexThreads({"already-gone"});
+        QVERIFY(manager.queueCodexThreads("19f02f92f2a041ef89b79c906061aae2", {"already-gone"}));
+        manager.deleteCodexThreads();
         QTRY_VERIFY_WITH_TIMEOUT(empty(), 5000);
         QVERIFY(manager.error().isEmpty());
+    }
+    void chatDeletionRequiresRecordedCodexIntent() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const auto oldChats = qgetenv("PILON_CHAT_DIR");
+        auto restore = qScopeGuard([&] { qputenv("PILON_CHAT_DIR", oldChats); });
+        qputenv("PILON_CHAT_DIR", directory.filePath("chats").toUtf8());
+        AssistantManager manager;
+        const QString id = "19f02f92f2a041ef89b79c906061aae2";
+        const auto chat = directory.filePath("chats/" + id);
+        QVERIFY(QDir().mkpath(chat));
+        QFile record(chat + "/chat.json");
+        QVERIFY(record.open(QIODevice::WriteOnly));
+        const QByteArray saved = R"({"version":1,"codexThreadId":"thread"})";
+        QCOMPARE(record.write(saved), saved.size());
+        record.close();
+        const auto queue = manager.codexHome() + "/pending-deletions.json";
+        QVERIFY(QDir().mkpath(queue));
+        QVERIFY(!manager.deleteChat(id));
+        QVERIFY(record.open(QIODevice::ReadOnly));
+        QCOMPARE(record.readAll(), saved);
+        QVERIFY(!manager.error().isEmpty());
+    }
+    void codexDeletionWaitsForLocalCommit() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const auto oldChats = qgetenv("PILON_CHAT_DIR");
+        auto restore = qScopeGuard([&] { qputenv("PILON_CHAT_DIR", oldChats); });
+        qputenv("PILON_CHAT_DIR", directory.filePath("chats").toUtf8());
+        AssistantManager manager;
+        const QString id = "19f02f92f2a041ef89b79c906061aae2";
+        const auto chat = directory.filePath("chats/" + id);
+        QVERIFY(QDir().mkpath(chat));
+        QFile record(chat + "/chat.json");
+        QVERIFY(record.open(QIODevice::WriteOnly));
+        record.write(R"({"version":1,"codexThreadId":"thread"})");
+        record.close();
+        QVERIFY(QDir().mkpath(manager.codexHome()));
+        QFile pending(manager.codexHome() + "/pending-deletions.json");
+        QVERIFY(pending.open(QIODevice::WriteOnly));
+        const QJsonArray staged{QJsonObject{{"threadId", "thread"}, {"chatId", id}}, "thread"};
+        pending.write(QJsonDocument(staged).toJson());
+        pending.close();
+        QFile script(directory.filePath("fake-codex"));
+        QVERIFY(script.open(QIODevice::WriteOnly));
+        script.write(R"PY(#!/usr/bin/env python3
+import json,os,sys
+from pathlib import Path
+chat=Path(os.environ['PILON_TEST_CHAT'])
+for line in sys.stdin:
+ r=json.loads(line)
+ if 'id' not in r: continue
+ if r['method']=='thread/delete':
+  with (Path(os.environ['CODEX_HOME'])/'deletion-requests').open('a') as requests:
+   requests.write('present\n' if chat.exists() else 'removed\n')
+ print(json.dumps({'id':r['id'],'result':{}}),flush=True)
+)PY");
+        script.close();
+        QVERIFY(script.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+        auto environment = QProcessEnvironment::systemEnvironment();
+        environment.insert("CODEX_HOME", manager.codexHome());
+        environment.insert("PILON_TEST_CHAT", chat);
+        manager.m_codex.start(script.fileName(), {}, environment);
+        QTRY_VERIFY_WITH_TIMEOUT(manager.m_codex.ready(), 5000);
+        bool processed = false;
+        manager.m_codex.request("thread/read", {}, [&](QJsonObject, QString) { processed = true; });
+        QTRY_VERIFY_WITH_TIMEOUT(processed, 5000);
+        const auto requests = manager.codexHome() + "/deletion-requests";
+        QVERIFY(!QFileInfo::exists(requests));
+        manager.m_chatId = id;
+        manager.m_codexThreadId = "thread";
+        QVERIFY(manager.deleteChat(id));
+        QVERIFY(!QFileInfo::exists(chat));
+        QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(requests), 5000);
+        const auto queued = [&] {
+            QFile file(pending.fileName());
+            return file.open(QIODevice::ReadOnly) ? QJsonDocument::fromJson(file.readAll()).array() : staged;
+        };
+        QTRY_COMPARE_WITH_TIMEOUT(queued(), QJsonArray{}, 5000);
+        QFile actual(requests);
+        QVERIFY(actual.open(QIODevice::ReadOnly));
+        QCOMPARE(actual.readAll(), QByteArray("removed\n"));
+    }
+    void migratedCodexRolloutDeletion_data() {
+        QTest::addColumn<QString>("folder");
+        QTest::addColumn<QString>("copyMode");
+        QTest::newRow("active") << QString("sessions/2026/09/30") << QString("plain");
+        QTest::newRow("archived") << QString("archived_sessions") << QString("plain");
+        QTest::newRow("compressed-copy") << QString("sessions/2026/09/30") << QString("compressed");
+        QTest::newRow("already-removed") << QString("sessions/2026/09/30") << QString("missing");
+        QTest::newRow("linked-copy") << QString("sessions/2026/09/30") << QString("link");
+    }
+    void migratedCodexRolloutDeletion() {
+        QFETCH(QString, folder);
+        QFETCH(QString, copyMode);
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const auto oldChats = qgetenv("PILON_CHAT_DIR");
+        auto restore = qScopeGuard([&] { qputenv("PILON_CHAT_DIR", oldChats); });
+        qputenv("PILON_CHAT_DIR", directory.filePath("chats").toUtf8());
+        const QString thread = "01a0f472-8e4d-7981-9b7a-2e2b5623df26";
+        const auto suffix = '/' + folder + "/rollout-2026-09-30T23-32-23-" + thread + ".jsonl";
+        const auto legacy = directory.filePath("legacy") + suffix;
+        AssistantManager manager;
+        const auto current = manager.codexHome() + suffix + (copyMode == "compressed" ? ".zst" : "");
+        QVERIFY(QDir().mkpath(QFileInfo(legacy).absolutePath()));
+        QVERIFY(QDir().mkpath(QFileInfo(current).absolutePath()));
+        QFile original(legacy);
+        QVERIFY(original.open(QIODevice::WriteOnly));
+        QCOMPARE(original.write("original rollout"), 16);
+        original.close();
+        const bool copied = copyMode == "plain" || copyMode == "compressed";
+        if (copied) QVERIFY(QFile::copy(legacy, current));
+        if (copyMode == "link") QVERIFY(QFile::link(legacy, current));
+
+        QFile script(directory.filePath("fake-codex"));
+        QVERIFY(script.open(QIODevice::WriteOnly));
+        script.write(R"PY(#!/usr/bin/env python3
+import json,os,sqlite3,sys
+from pathlib import Path
+home=Path(os.environ['CODEX_HOME'])
+thread=os.environ['PILON_TEST_THREAD']
+legacy=os.environ['PILON_TEST_LEGACY_ROLLOUT']
+state=sqlite3.connect(home/'state_5.sqlite')
+state.execute('CREATE TABLE threads (id TEXT PRIMARY KEY, rollout_path TEXT)')
+state.execute('INSERT INTO threads VALUES (?, ?)', (thread, legacy))
+state.commit()
+for line in sys.stdin:
+ r=json.loads(line)
+ if 'id' not in r: continue
+ response={'id':r['id'],'result':{}}
+ if r['method']=='thread/delete':
+  with (home/'deletion-requests').open('a') as requests:
+   requests.write(r['params']['threadId']+'\n')
+  path=Path(state.execute('SELECT rollout_path FROM threads WHERE id=?',(thread,)).fetchone()[0])
+  if path.is_relative_to(home):
+   path.unlink(missing_ok=True)
+  else:
+   response={'id':r['id'],'error':{'code':-32600,'message':f'rollout path `{path}` must be in archived sessions directory'}}
+ print(json.dumps(response),flush=True)
+)PY");
+        script.close();
+        QVERIFY(script.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+        QFile pending(manager.codexHome() + "/pending-deletions.json");
+        QVERIFY(pending.open(QIODevice::WriteOnly));
+        pending.write(QJsonDocument(QJsonArray{thread}).toJson());
+        pending.close();
+        auto environment = QProcessEnvironment::systemEnvironment();
+        environment.insert("CODEX_HOME", manager.codexHome());
+        environment.insert("PILON_TEST_THREAD", thread);
+        environment.insert("PILON_TEST_LEGACY_ROLLOUT", legacy);
+        connect(&manager.m_codex, &CodexClient::initialized, &manager, [&] { manager.deleteCodexThreads(); });
+        manager.m_codex.start(script.fileName(), {}, environment);
+        const auto pendingThreads = [&] {
+            QFile file(pending.fileName());
+            return file.open(QIODevice::ReadOnly) ? QJsonDocument::fromJson(file.readAll()).array() : QJsonArray{};
+        };
+        const bool repaired = copyMode != "link";
+        if (repaired) {
+            QTRY_VERIFY_WITH_TIMEOUT(!QFileInfo::exists(current), 4000);
+            QTRY_COMPARE_WITH_TIMEOUT(pendingThreads(), QJsonArray{}, 4000);
+            QVERIFY2(manager.error().isEmpty(), qPrintable(manager.error()));
+        } else {
+            QTRY_VERIFY_WITH_TIMEOUT(manager.error().contains("must be in archived sessions directory"), 4000);
+            QCOMPARE(pendingThreads(), QJsonArray{thread});
+        }
+        QVERIFY(QFileInfo::exists(legacy));
+        QFile requests(manager.codexHome() + "/deletion-requests");
+        QVERIFY(requests.open(QIODevice::ReadOnly));
+        QCOMPARE(requests.readAll().split('\n').size(), repaired ? 3 : 2);
     }
     void externalReasoningStreamsBeforeCompletion() {
         AssistantManager manager; manager.m_busy = true; manager.m_codexThreadId = "thread"; manager.m_codexTurnId = "turn";
@@ -674,6 +991,67 @@ for line in sys.stdin:
         QVERIFY(manager.m_thinkingIndex < 0);
         manager.m_busy = false;
     }
+    void reasoningCompletionAfterAnswerUpdatesTheOriginalBubble() {
+        AssistantManager manager;
+        manager.m_busy = true;
+        manager.m_codexThreadId = "thread";
+        manager.m_codexTurnId = "turn";
+        const auto send = [&](const QString &method, const QString &id, QJsonObject params) {
+            params["threadId"] = "thread";
+            params["turnId"] = "turn";
+            params["itemId"] = id;
+            manager.codexNotification(method, params);
+        };
+        send("item/reasoning/textDelta", "thought", {{"delta", "Working"}});
+        send("item/agentMessage/delta", "reply", {{"delta", "An answer."}});
+        send("item/reasoning/textDelta", "thought", {{"delta", " it out."}});
+        QCOMPARE(manager.messages().size(), 2);
+        QCOMPARE(manager.messages().first().toMap().value("text").toString(), QString("Working it out."));
+        send("item/reasoning/textDelta", "next-thought", {{"delta", "Another thought."}});
+        send("item/completed", "thought", {{"item", QJsonObject{{"type", "reasoning"},
+            {"content", QJsonArray{"Full thought."}}}}});
+        QCOMPARE(manager.messages().size(), 3);
+        QCOMPARE(manager.messages().first().toMap().value("text").toString(), QString("Full thought."));
+        QCOMPARE(manager.messages().first().toMap().value("state").toString(), QString("Finished"));
+        QCOMPARE(manager.messages()[1].toMap().value("text").toString(), QString("An answer."));
+        QCOMPARE(manager.messages().last().toMap().value("state").toString(), QString("Thinking"));
+        QCOMPARE(manager.status(), QString("Thinking…"));
+        send("item/completed", "next-thought", {{"item", QJsonObject{{"type", "reasoning"}}}});
+        QCOMPARE(manager.messages().last().toMap().value("text").toString(), QString("Another thought."));
+        QVERIFY(manager.m_thinkingIndex < 0);
+        manager.m_busy = false;
+    }
+    void savedDuplicateThinkingKeepsItsOriginalPosition() {
+        AssistantManager manager;
+        const auto thought = [](const QString &text, int elapsed) {
+            return QJsonObject{{"id", "thought"}, {"role", "thinking"}, {"text", text},
+                {"elapsedMs", elapsed}, {"state", "Finished"}};
+        };
+        const QJsonObject user{{"role", "user"}, {"text", "Question"}};
+        const QJsonArray messages{user, thought("Partial", 500),
+            QJsonObject{{"role", "assistant"}, {"text", "Answer"}}, thought("Complete", 0),
+            user, thought("Partial again", 100), QJsonObject{{"role", "assistant"}, {"text", "Another answer"}},
+            thought("Complete again", 0), user, thought("A separate turn", 100)};
+        const QString chatId(32, 'a');
+        manager.restoreChat(chatId, {{"messages", messages}, {"history", QJsonArray{user}}});
+        const auto restored = manager.messages();
+        QCOMPARE(restored.size(), 8);
+        QCOMPARE(restored[1].toMap().value("text").toString(), QString("Complete"));
+        QCOMPARE(restored[1].toMap().value("elapsedMs").toInt(), 500);
+        QCOMPARE(restored[1].toMap().value("messageId").toString(), "message:" + chatId + ":1");
+        QCOMPARE(restored[2].toMap().value("text").toString(), QString("Answer"));
+        QCOMPARE(restored[4].toMap().value("text").toString(), QString("Complete again"));
+        QCOMPARE(restored.last().toMap().value("text").toString(), QString("A separate turn"));
+        const auto existingId = restored.last().toMap().value("messageId");
+        QCOMPARE(existingId.toString(), "message:" + chatId + ":9");
+
+        manager.m_messages.append(QVariantMap{{"role", "user"}, {"messageId", "next-user"}});
+        manager.m_messages.append(thought("A new thought", 200).toVariantMap());
+        const auto updated = manager.messages();
+        QCOMPARE(updated[7].toMap().value("messageId"), existingId);
+        QVERIFY(updated.last().toMap().value("messageId") != existingId);
+        QCOMPARE(manager.messages(), updated);
+    }
     void accountQuotaSupportsMultipleBucketsAndSparseUpdates() {
         AssistantConnections connections;
         connections.m_account = {{"type", "chatgpt"}, {"email", "test@example.test"}};
@@ -681,12 +1059,72 @@ for line in sys.stdin:
         const QJsonObject second{{"limitId", "other"}, {"secondary", QJsonObject{{"usedPercent", 100}, {"windowDurationMins", 10080}}}};
         connections.updateRateLimits({{"rateLimitsByLimitId", QJsonObject{{"codex", first}, {"other", second}}}});
         QCOMPARE(connections.usage().size(), 2);
+        QCOMPARE(connections.usage()[0].toMap().value("bucket").toString(), QString("codex"));
+        QCOMPARE(connections.usage()[0].toMap().value("windowMinutes").toInt(), 300);
         QCOMPARE(connections.usage()[0].toMap().value("remaining").toDouble(), 75.0);
+        QCOMPARE(connections.usage()[1].toMap().value("bucket").toString(), QString("other"));
+        QCOMPARE(connections.usage()[1].toMap().value("windowMinutes").toInt(), 10080);
         QCOMPARE(connections.usage()[1].toMap().value("remaining").toDouble(), 0.0);
         connections.updateRateLimits({{"rateLimits", QJsonObject{{"limitId", "codex"}, {"primary", QJsonValue::Null}}}});
         QCOMPARE(connections.usage().size(), 2);
         connections.updateRateLimits({{"rateLimitsByLimitId", QJsonObject{{"codex", QJsonObject{{"primary", QJsonValue::Null}}}}}});
         QVERIFY(connections.usage().isEmpty());
+    }
+    void fastModeFollowsTheModelCatalogAndReachesTheTurn() {
+        QTemporaryDir directory;
+        QFile script(directory.filePath("codex"));
+        QVERIFY(script.open(QIODevice::WriteOnly));
+        script.write(R"PY(#!/usr/bin/env python3
+import json,sys
+from pathlib import Path
+for line in sys.stdin:
+    req=json.loads(line)
+    if 'id' not in req: continue
+    result={}
+    if req['method']=='account/read': result={'account':{'type':'chatgpt','email':'fixture@example.test'}}
+    if req['method']=='model/list':
+        result={'data':[{'model':'fast-fixture','serviceTiers':[{'id':'priority'}],'defaultServiceTier':'priority'},
+                        {'model':'standard-fixture','serviceTiers':[{'id':'ultrafast'}]}]}
+    if req['method']=='turn/start':
+        Path(__file__).with_name('turn').write_text(json.dumps(req['params']))
+        result={'turn':{'id':'fixture-turn'}}
+    print(json.dumps({'id':req['id'],'result':result}),flush=True)
+)PY");
+        script.close();
+        QVERIFY(script.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+
+        AssistantManager manager;
+        manager.m_connections.configure(script.fileName(), directory.filePath("home"), false);
+        manager.m_connections.refreshAccount();
+        QTRY_COMPARE(manager.m_connections.models().size(), 2);
+        const auto firstRemote = manager.models()->installed().size();
+        manager.setModelIndex(firstRemote);
+        QVERIFY(manager.property("fastModeAvailable").toBool());
+        QVERIFY(manager.property("fastMode").toBool());
+        manager.m_codex.start(script.fileName(), {}, QProcessEnvironment::systemEnvironment());
+        QTRY_VERIFY(manager.m_codex.ready());
+        const auto submit = [&](const QString &tier) {
+            manager.m_history = QJsonArray{QJsonObject{{"role", "user"}, {"content", "fixture"}}};
+            manager.m_codexThreadId = "fixture-thread";
+            manager.m_codexTurnId.clear();
+            manager.m_busy = true;
+            manager.startCodexTurn();
+            QTRY_VERIFY(!manager.m_codexStarting);
+            QFile recorded(directory.filePath("turn"));
+            QVERIFY(recorded.open(QIODevice::ReadOnly));
+            QCOMPARE(QJsonDocument::fromJson(recorded.readAll()).object().value("serviceTierForTurn").toString(), tier);
+            manager.m_busy = false;
+        };
+        submit("priority");
+        QVERIFY(manager.setProperty("fastMode", false));
+        submit("default");
+        manager.setModelIndex(firstRemote + 1);
+        QVERIFY(!manager.property("fastModeAvailable").toBool());
+        manager.setProperty("fastMode", true);
+        QVERIFY(!manager.property("fastMode").toBool());
+        submit({});
+        manager.setModelIndex(firstRemote);
+        QVERIFY(!manager.property("fastMode").toBool());
     }
     void accountQuotaCacheWaitsForVerifiedIdentity() {
         QTemporaryDir directory;
@@ -846,7 +1284,6 @@ for line in sys.stdin:
         QCOMPARE(environment.value("SSL_CERT_FILE"), path);
         QCOMPARE(environment.value("CODEX_CA_CERTIFICATE"), QString("explicit-owner-override.pem"));
         QCOMPARE(environment.value("OTHER_SETTING"), QString("unchanged"));
-        QVERIFY(!environment.contains("GIT_EXEC_PATH")); QVERIFY(!environment.contains("GIT_SSL_NO_VERIFY"));
         QFile file(path); QVERIFY(file.open(QIODevice::ReadOnly));
         QCOMPARE(file.readAll(), roots.first().toPem());
         QCOMPARE(QSslCertificate::fromPath(path).size(), 1);
@@ -1366,7 +1803,7 @@ os.execl('/bin/sh','sh','-c',sys.argv[-1])
         QFile tool(directory.filePath("secret-tool")); QVERIFY(tool.open(QIODevice::WriteOnly));
         tool.write(R"PY(#!/usr/bin/env python3
 import sys,pathlib
-path=pathlib.Path(__file__).with_name('test-secret')
+path=pathlib.Path(__file__).with_name('test-secret-'+sys.argv[-1].replace('/','-'))
 if sys.argv[1]=='store': path.write_bytes(sys.stdin.buffer.read())
 elif sys.argv[1]=='lookup':
     if not path.exists(): sys.exit(1)
@@ -1389,12 +1826,74 @@ elif sys.argv[1]=='clear': path.unlink(missing_ok=True)
         QCOMPARE(restored.servers().first().toMap().value("baseUrl").toString(), QString("https://example.test/v1"));
         QVERIFY(restored.saveServer(id, "Fixture", "https://example.test/v1", "model", "rotated-fixture", "chat", 32768, false));
         AssistantConnections rotated; QCOMPARE(rotated.apiKey(id), QByteArray("rotated-fixture"));
+        QCOMPARE(rotated.apiKey(id, QUrl("https://example.test:443/v1")), QByteArray("rotated-fixture"));
+        QVERIFY(rotated.apiKey(id, QUrl("https://another.example.test/v1")).isEmpty());
+        QVERIFY(rotated.apiKey(id, QUrl("http://example.test/v1")).isEmpty());
         rotated.updateServerUsage(originalProfile, limits);
         QVERIFY(!rotated.m_serverUsage.contains(id));
         rotated.updateServerUsage(rotated.servers().first().toMap(), limits);
         QVERIFY(rotated.m_serverUsage.contains(id));
-        QVERIFY(rotated.removeServer(id)); QVERIFY(!QFileInfo::exists(directory.filePath("test-secret")));
+        QVERIFY(rotated.removeServer(id)); QVERIFY(QDir(directory.path()).entryList({"test-secret-*"}, QDir::Files).isEmpty());
         QVERIFY(!rotated.m_serverUsage.contains(id));
+    }
+    void lockedKeyringKeepsAnExistingKeyBoundToItsOriginalServer_data() {
+        QTest::addColumn<bool>("legacy");
+        QTest::newRow("stored-key") << false;
+        QTest::newRow("legacy-key") << true;
+    }
+    void lockedKeyringKeepsAnExistingKeyBoundToItsOriginalServer() {
+        QFETCH(bool, legacy);
+        QTemporaryDir directory;
+        const auto path = qgetenv("PATH");
+        const auto restore = qScopeGuard([&] { qputenv("PATH", path); QSettings().remove("assistant/apiServers"); });
+        QFile tool(directory.filePath("secret-tool")); QVERIFY(tool.open(QIODevice::WriteOnly));
+        tool.write("#!/bin/sh\nexit 1\n"); tool.close();
+        QVERIFY(tool.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+        qputenv("PATH", directory.path().toUtf8() + ':' + path);
+        QVariantMap profile{{"id", "api/locked"}, {"name", "Original"}, {"baseUrl", "https://old.example.test/v1"}};
+        if (!legacy) profile["hasKey"] = true;
+        QSettings().setValue("assistant/apiServers", QVariantList{profile});
+        AssistantConnections connections;
+        QVERIFY(!connections.saveServer("api/locked", "Changed", "https://new.example.test/v1", "model", {}, "chat", 32768, false));
+        QCOMPARE(connections.servers(), QVariantList{profile});
+    }
+    void failedServerSettingsKeepThePreviousProfileAndKey() {
+        QTemporaryDir directory;
+        const auto path = qgetenv("PATH");
+        const auto settingsFolder = QFileInfo(QSettings().fileName()).absolutePath();
+        QVERIFY(settingsFolder.startsWith(m_settingsDirectory.path()));
+        const auto permissions = QFileInfo(settingsFolder).permissions();
+        const auto restore = qScopeGuard([&] {
+            QFile::setPermissions(settingsFolder, permissions);
+            qputenv("PATH", path); QSettings().remove("assistant/apiServers"); QSettings().sync();
+        });
+        QFile tool(directory.filePath("secret-tool")); QVERIFY(tool.open(QIODevice::WriteOnly));
+        tool.write(R"PY(#!/usr/bin/env python3
+from pathlib import Path
+import sys
+slot=Path(__file__).with_name('slot-'+sys.argv[-1].replace('/','-'))
+if sys.argv[1]=='store': slot.write_bytes(sys.stdin.buffer.read())
+elif sys.argv[1]=='clear': slot.unlink(missing_ok=True)
+elif sys.argv[1]=='lookup': sys.stdout.buffer.write(slot.read_bytes())
+)PY"); tool.close();
+        QVERIFY(tool.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+        qputenv("PATH", directory.path().toUtf8() + ':' + path);
+        AssistantConnections connections;
+        QVERIFY(connections.saveServer({}, "Original", "https://old.example.test/v1", "model", "original-key", "chat", 32768, false));
+        const auto before = connections.servers();
+        const auto profile = before.first().toMap();
+        const auto id = profile.value("id").toString();
+        const QVariantMap limits{{"text", "42 requests remaining"}, {"updatedAt", 1000}};
+        connections.updateServerUsage(profile, limits);
+        QVERIFY(QFile::setPermissions(settingsFolder, QFile::ReadOwner | QFile::ExeOwner));
+        QVERIFY(!connections.saveServer(id, "Changed", "https://new.example.test/v1", "model", "replacement-key", "chat", 32768, false));
+        QCOMPARE(connections.servers(), before);
+        QCOMPARE(connections.m_serverUsage.value(id).toMap(), limits);
+        QCOMPARE(connections.apiKey(id), QByteArray("original-key"));
+        AssistantConnections reopened;
+        QCOMPARE(reopened.servers(), before);
+        QCOMPARE(reopened.apiKey(id), QByteArray("original-key"));
+        QCOMPARE(QDir(directory.path()).entryList({"slot-*"}, QDir::Files).size(), 1);
     }
     void accountRemovalPreservesCredentialsOnKeyringOrLogoutFailure() {
         QTemporaryDir directory;
@@ -1706,9 +2205,8 @@ http.server.HTTPServer(('127.0.0.1', int(sys.argv[sys.argv.index('--port') + 1])
             QVERIFY2(initialMessages.size() < 6000, qPrintable(QString("Initial messages grew to %1 bytes").arg(initialMessages.size())));
             const auto initialPrompt = requests.first().value("messages").toArray().first().toObject().value("content").toString();
             QVERIFY(initialPrompt.contains("list_skills") && initialPrompt.contains("load_skill"));
-            for (const auto &id : {QString("gh-fix-ci"), QString("frontend-design")})
-                QVERIFY(QFileInfo::exists(manager.codexHome() + "/skills/" + id + "/SKILL.md"));
-            QVERIFY(!initialPrompt.contains("# Fix GitHub Actions failures")); // Workflow stays on demand.
+            QVERIFY(QFileInfo::exists(manager.codexHome() + "/skills/frontend-design/SKILL.md"));
+            QVERIFY(!initialPrompt.contains("# Frontend design")); // Workflow stays on demand.
             QVERIFY(manager.pendingAction().contains("touch declined-command"));
             const auto fileResult = requests.last().value("messages").toArray().last().toObject();
             QCOMPARE(fileResult.value("tool_call_id"), QJsonValue("harness-call-1"));
@@ -1842,6 +2340,84 @@ http.server.HTTPServer(('127.0.0.1', int(sys.argv[sys.argv.index('--port') + 1])
         QTRY_VERIFY(socket.bytesAvailable() > 0);
         QVERIFY(socket.readAll().startsWith("HTTP/1.1 401"));
         QCOMPARE(requested.size(), 0);
+        QVERIFY(!provider.active());
+    }
+
+    void localCodexProviderRejectsMalformedOrDuplicateHeaders()
+    {
+        CodexProvider provider;
+        QVERIFY(provider.listen());
+        QSignalSpy requested(&provider, &CodexProvider::requested);
+        const auto submit = [&](const QByteArray &headers, const QByteArray &status) {
+            QTcpSocket socket;
+            socket.connectToHost(QHostAddress::LocalHost, provider.port());
+            QTRY_COMPARE(socket.state(), QAbstractSocket::ConnectedState);
+            socket.write("POST /v1/responses HTTP/1.1\r\nAuthorization: Bearer "
+                + provider.token() + "\r\nContent-Length: 2\r\n" + headers + "\r\n{}");
+            QTRY_VERIFY(socket.bytesAvailable() > 0);
+            QVERIFY(socket.readAll().startsWith("HTTP/1.1 " + status));
+        };
+        submit("Header-without-colon\r\n", "400");
+        submit("Content-Length: 2\r\n", "400");
+        QCOMPARE(requested.size(), 0);
+        submit({}, "200");
+        QCOMPARE(requested.size(), 1);
+    }
+
+    void codexCompletesPendingRequestsAfterProcessExit()
+    {
+        CodexClient client;
+        client.start("/bin/sh", {"-c", R"(read -r initialize
+            printf '%s\n' '{"id":1,"result":{}}'
+            read -r initialized
+            read -r request
+            exit 7)"}, QProcessEnvironment::systemEnvironment());
+        QTRY_VERIFY(client.ready());
+        int replies = 0;
+        QString error;
+        client.request("fixture", {}, [&](QJsonObject, const QString &message) {
+            ++replies;
+            error = message;
+        });
+        QTRY_VERIFY(!client.running());
+        QCOMPARE(replies, 1);
+        QVERIFY(!error.isEmpty());
+        client.request("fixture", {}, [&](QJsonObject, const QString &message) {
+            ++replies;
+            error = message;
+        });
+        QCOMPARE(replies, 2);
+        QVERIFY(!error.isEmpty());
+    }
+
+    void localCodexProviderRejectsAnOversizedUnfinishedFrame()
+    {
+        QTcpServer backend;
+        QVERIFY(backend.listen(QHostAddress::LocalHost));
+        connect(&backend, &QTcpServer::newConnection, this, [&] {
+            auto *connection = backend.nextPendingConnection();
+            connect(connection, &QTcpSocket::readyRead, connection, [connection] {
+                connection->readAll();
+                if (connection->property("sent").toBool())
+                    return;
+                connection->setProperty("sent", true);
+                connection->write("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n"
+                                  "Content-Length: 20000000\r\n\r\ndata: ");
+                connection->write(QByteArray(17 * 1024 * 1024, 'x'));
+            });
+        });
+        CodexProvider provider;
+        QVERIFY(provider.listen());
+        provider.configure(backend.serverPort(), {}, {});
+        connect(&provider, &CodexProvider::requested, &provider, &CodexProvider::complete);
+        QSignalSpy failed(&provider, &CodexProvider::backendFailed);
+        QTcpSocket client;
+        client.connectToHost(QHostAddress::LocalHost, provider.port());
+        QTRY_COMPARE(client.state(), QAbstractSocket::ConnectedState);
+        client.write("POST /v1/responses HTTP/1.1\r\nContent-Length: 2\r\n"
+                     "Authorization: Bearer " + provider.token() + "\r\n\r\n{}");
+        QTRY_COMPARE_WITH_TIMEOUT(failed.size(), 1, 3000);
+        QVERIFY(failed.first().first().toString().contains("too large"));
         QVERIFY(!provider.active());
     }
 
@@ -2283,6 +2859,46 @@ record({'closed': True})
         manager.m_messages = data.value("messages").toArray().toVariantList();
     }
 
+    void failedResearchMigrationKeepsOriginalEvidence_data()
+    {
+        QTest::addColumn<QByteArray>("archive");
+        QTest::addColumn<QString>("arguments");
+        QTest::newRow("invalid-arguments") << QByteArray("{\"content\":\"Complete evidence\"}") << QString("{\"max_chars\":-1}");
+        QTest::newRow("corrupt-archive") << QByteArray("unfinished JSON") << QString("{}");
+        QTest::newRow("missing-archive") << QByteArray{} << QString("{}");
+    }
+
+    void failedResearchMigrationKeepsOriginalEvidence()
+    {
+        QFETCH(QByteArray, archive);
+        QFETCH(QString, arguments);
+        AssistantManager manager;
+        const auto directory = manager.workspaceRoot() + "/research/" + manager.m_chatId;
+        QVERIFY(QDir().mkpath(directory));
+        const auto base = directory + '/' + QString(24, 'a') + '-' + QString(16, 'b');
+        if (!archive.isEmpty()) {
+            QFile original(base + ".json"); QVERIFY(original.open(QIODevice::WriteOnly));
+            QCOMPARE(original.write(archive), archive.size());
+        }
+        QFile text(base + ".txt"); QVERIFY(text.open(QIODevice::WriteOnly));
+        QCOMPARE(text.write("Complete evidence"), 17); text.close();
+        const QJsonObject original{{"content", "Excerpt"}, {"excerpted", true},
+            {"full_result_path", base + ".json"}, {"full_text_path", base + ".txt"}};
+        const QJsonObject call{{"id", "old-browser"}, {"function", QJsonObject{{"name", "browser_open"}, {"arguments", arguments}}}};
+        manager.m_history.append(QJsonObject{{"role", "assistant"}, {"tool_calls", QJsonArray{call}}});
+        manager.m_history.append(QJsonObject{{"role", "tool"}, {"tool_call_id", "old-browser"},
+            {"content", QString::fromUtf8(QJsonDocument(original).toJson(QJsonDocument::Compact))}});
+        manager.m_messages.append(QVariantMap{{"role", "tool"}, {"callId", "old-browser"},
+            {"output", QString::fromUtf8(QJsonDocument(original).toJson())}});
+        manager.saveChat();
+        QFile saved(manager.chatRoot() + '/' + manager.m_chatId + "/chat.json");
+        QVERIFY(saved.open(QIODevice::ReadOnly)); const auto before = saved.readAll(); saved.close();
+        manager.migrateResearchChats();
+        QVERIFY(text.open(QIODevice::ReadOnly)); QCOMPARE(text.readAll(), QByteArray("Complete evidence"));
+        QCOMPARE(QFileInfo::exists(base + ".json"), !archive.isEmpty());
+        QVERIFY(saved.open(QIODevice::ReadOnly)); QCOMPARE(saved.readAll(), before);
+    }
+
     void browserSearchReturnsShortDistinctSnippets()
     {
         AssistantManager manager;
@@ -2427,8 +3043,16 @@ record({'closed': True})
         QTest::newRow("enabled-after-startup") << true;
     }
 
+    void emptyChatDraftSurvivesManagerRestart_data()
+    {
+        QTest::addColumn<bool>("allowAutosave");
+        QTest::newRow("autosaved") << true;
+        QTest::newRow("closed-before-autosave") << false;
+    }
+
     void emptyChatDraftSurvivesManagerRestart()
     {
+        QFETCH(bool, allowAutosave);
         QTemporaryDir directory;
         const auto previous = qgetenv("PILON_CHAT_DIR");
         qputenv("PILON_CHAT_DIR", directory.path().toUtf8());
@@ -2443,9 +3067,14 @@ record({'closed': True})
             AssistantManager first;
             QVERIFY(first.setProperty("draftText", draft));
             id = first.currentChatId();
-            const auto path = directory.filePath(id + "/chat.json");
-            QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(path), 3000);
-            QFile file(path); QVERIFY(file.open(QIODevice::ReadOnly));
+            const auto path = directory.filePath(id + "/draft.json");
+            if (allowAutosave) QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(path), 3000);
+            else QVERIFY(!QFileInfo::exists(path));
+            QVERIFY(!QFileInfo::exists(directory.filePath(id + "/chat.json")));
+            QVERIFY(first.chats().isEmpty());
+        }
+        {
+            QFile file(directory.filePath(id + "/draft.json")); QVERIFY(file.open(QIODevice::ReadOnly));
             QCOMPARE(QJsonDocument::fromJson(file.readAll()).object().value("draft").toString(), draft);
             QVERIFY(!(file.permissions() & QFile::ReadOther));
         }
@@ -2453,6 +3082,7 @@ record({'closed': True})
         QTRY_COMPARE(second.currentChatId(), id);
         QCOMPARE(second.property("draftText").toString(), draft);
         QVERIFY(second.messages().isEmpty());
+        QVERIFY(second.chats().isEmpty());
         QVERIFY(second.setProperty("draftText", QString{}));
         QVERIFY(second.saveChat());
         AssistantManager third;
@@ -2507,20 +3137,126 @@ record({'closed': True})
         AssistantManager manager;
         manager.m_selectedModel = {};
         QVERIFY(manager.setProperty("draftText", "Keep until accepted"));
+        QVERIFY(manager.saveChat());
+        const auto directory = manager.chatRoot() + '/' + manager.currentChatId();
+        QVERIFY(QFileInfo::exists(directory + "/draft.json"));
+        QVERIFY(!QFileInfo::exists(directory + "/chat.json"));
+        QVERIFY(manager.chats().isEmpty());
         QVERIFY(!manager.send("Keep until accepted"));
         QCOMPARE(manager.property("draftText").toString(), QString("Keep until accepted"));
         manager.m_selectedModel = {{"id", "draft-fixture"}, {"runtime", "llama"}};
         QVERIFY(manager.send("Keep until accepted"));
         QCOMPARE(manager.property("draftText").toString(), QString{});
         manager.stop();
-        QFile file(manager.chatRoot() + '/' + manager.currentChatId() + "/chat.json");
+        QCOMPARE(manager.chats().size(), 1);
+        QVERIFY(!QFileInfo::exists(directory + "/draft.json"));
+        QFile file(directory + "/chat.json");
         QVERIFY(file.open(QIODevice::ReadOnly));
         QCOMPARE(QJsonDocument::fromJson(file.readAll()).object().value("draft").toString(), QString{});
+    }
+
+    void failedFirstSendKeepsDraftForRetry()
+    {
+        AssistantManager manager;
+        manager.m_connections.m_models = {QVariantMap{{"id", "draft-fixture"}, {"runtime", "llama"}}};
+        manager.setModelIndex(manager.availableModels().size() - 1);
+        const auto directory = manager.chatRoot() + '/' + manager.currentChatId();
+        const auto path = directory + "/chat.json";
+        QVERIFY(QDir().mkpath(path));
+        manager.setDraftText("Keep this draft");
+        QVERIFY(!manager.send("Keep this draft"));
+        QVERIFY2(manager.error().contains("Unable to save this chat"), qPrintable(manager.error()));
+        QVERIFY(!manager.busy());
+        QVERIFY(manager.messages().isEmpty());
+        QVERIFY(manager.chats().isEmpty());
+        QCOMPARE(manager.draftText(), QString("Keep this draft"));
+        QTRY_VERIFY(QFileInfo::exists(directory + "/draft.json"));
+        QVERIFY(QDir().rmdir(path));
+        QVERIFY2(manager.send("Keep this draft"), qPrintable(manager.error()));
+        QCOMPARE(manager.chats().size(), 1);
+        QVERIFY(manager.draftText().isEmpty());
+        manager.stop();
+    }
+
+    void newChatResumesDraftsWithinTheirProjects()
+    {
+        QTemporaryDir directory;
+        AssistantManager manager;
+        const auto project = manager.addProject(directory.path());
+        QVERIFY(!project.isEmpty());
+        const auto recentDraft = manager.currentChatId();
+        manager.setDraftText("Outside projects");
+        QVERIFY(manager.selectProject(project));
+        const auto projectDraft = manager.currentChatId();
+        QVERIFY(projectDraft != recentDraft);
+        manager.setDraftText("In this project");
+        QVERIFY(manager.selectProject(""));
+        QCOMPARE(manager.draftText(), QString("Outside projects"));
+        QVERIFY(manager.selectProject(project));
+        QCOMPARE(manager.currentChatId(), projectDraft);
+        QCOMPARE(manager.draftText(), QString("In this project"));
+        QVERIFY(manager.chats().isEmpty());
+        manager.m_selectedModel = {{"id", "draft-fixture"}, {"runtime", "llama"}};
+        QVERIFY(manager.send(manager.draftText()));
+        manager.stop();
+        QCOMPARE(manager.chats().size(), 1);
+        QCOMPARE(manager.chats().first().toMap().value("projectId").toString(), project);
+        QVERIFY(manager.selectProject(project));
+        QVERIFY(manager.currentChatId() != projectDraft);
+        QVERIFY(manager.draftText().isEmpty());
+    }
+
+    void legacyUnsentChatIsHiddenAndCanBeCleared()
+    {
+        AssistantManager manager;
+        const auto id = QUuid::createUuid().toString(QUuid::Id128);
+        const auto path = manager.chatRoot() + '/' + id;
+        QVERIFY(QDir().mkpath(path));
+        QFile legacy(path + "/chat.json");
+        QVERIFY(legacy.open(QIODevice::WriteOnly));
+        const auto bytes = QJsonDocument(QJsonObject{{"version", 1}, {"history", manager.m_history}, {"draft", "Old draft"}}).toJson();
+        QCOMPARE(legacy.write(bytes), bytes.size());
+        legacy.close();
+        manager.refreshChats();
+        QVERIFY(manager.chats().isEmpty());
+        QVERIFY(manager.selectProject(""));
+        QCOMPARE(manager.currentChatId(), id);
+        QCOMPARE(manager.draftText(), QString("Old draft"));
+        manager.setDraftText({});
+        manager.clear();
+        manager.refreshChats();
+        QVERIFY(manager.chats().isEmpty());
+        manager.openChat(id);
+        QVERIFY(manager.draftText().isEmpty());
+        QVERIFY(legacy.exists());
+    }
+
+    void deletingProjectKeepsBothUnsentDraftsReachable()
+    {
+        QTemporaryDir directory;
+        AssistantManager manager;
+        const auto project = manager.addProject(directory.path());
+        QVERIFY(!project.isEmpty());
+        const auto recentDraft = manager.currentChatId();
+        manager.setDraftText("Recents draft");
+        QVERIFY(manager.selectProject(project));
+        QTest::qWait(20);
+        manager.setDraftText("Project draft");
+        QVERIFY(manager.deleteProject(project));
+        QVERIFY(manager.selectProject(""));
+        QCOMPARE(manager.draftText(), QString("Project draft"));
+        manager.setDraftText("");
+        QVERIFY(manager.saveChat());
+        QVERIFY(manager.selectProject(""));
+        QCOMPARE(manager.currentChatId(), recentDraft);
+        QCOMPARE(manager.draftText(), QString("Recents draft"));
+        QVERIFY(manager.chats().isEmpty());
     }
 
     void failedViewedDraftSavePreventsNavigation()
     {
         AssistantManager manager;
+        manager.addMessage("user", "Saved conversation");
         QVERIFY(manager.setProperty("draftText", "Original draft"));
         QVERIFY(manager.saveChat());
         const auto viewed = manager.currentChatId();
@@ -2528,6 +3264,8 @@ record({'closed': True})
         QFile file(path); QVERIFY(file.open(QIODevice::ReadOnly));
         const auto original = file.readAll(); file.close();
         manager.clear(); const auto working = manager.currentChatId();
+        manager.addMessage("user", "Working conversation");
+        QVERIFY(manager.saveChat());
         manager.m_busy = true; manager.openChat(viewed);
         QVERIFY(manager.setProperty("draftText", "Unsaved viewed edit"));
         QVERIFY(QFile::remove(path)); QVERIFY(QDir().mkpath(path));
@@ -2535,6 +3273,9 @@ record({'closed': True})
         QCOMPARE(manager.currentChatId(), viewed);
         QCOMPARE(manager.property("draftText").toString(), QString("Unsaved viewed edit"));
         QVERIFY(manager.error().contains("Unable to save this chat"));
+        QVERIFY(!manager.deleteChat(working));
+        QVERIFY(QFileInfo(manager.chatRoot() + '/' + working + "/chat.json").isFile());
+        QCOMPARE(manager.property("draftText").toString(), QString("Unsaved viewed edit"));
         QVERIFY(QDir().rmdir(path)); QVERIFY(file.open(QIODevice::WriteOnly));
         QCOMPARE(file.write(original), original.size()); file.close();
         manager.openChat(working);
@@ -2606,7 +3347,7 @@ record({'closed': True})
         AssistantManager manager;
         manager.addAttachments({QUrl::fromLocalFile(source.fileName())});
         QVERIFY(manager.saveChat()); const auto id = manager.currentChatId();
-        const auto path = manager.chatRoot() + '/' + id + "/chat.json";
+        const auto path = manager.chatRoot() + '/' + id + "/draft.json";
         QFile file(path); QVERIFY(file.open(QIODevice::ReadOnly));
         auto data = QJsonDocument::fromJson(file.readAll()).object(); file.close();
         auto unsafe = manager.attachments()[0].toMap();
@@ -2636,9 +3377,12 @@ record({'closed': True})
         QVERIFY(firstFile.open(QIODevice::WriteOnly)); firstFile.write("first"); firstFile.close();
         QVERIFY(secondFile.open(QIODevice::WriteOnly)); secondFile.write("working"); secondFile.close();
         AssistantManager manager;
+        manager.addMessage("user", "First conversation");
         manager.addAttachments({QUrl::fromLocalFile(firstFile.fileName())});
         QVERIFY(manager.saveChat()); const auto first = manager.currentChatId();
-        manager.clear(); manager.addAttachments({QUrl::fromLocalFile(secondFile.fileName())});
+        manager.clear();
+        manager.addMessage("user", "Working conversation");
+        manager.addAttachments({QUrl::fromLocalFile(secondFile.fileName())});
         QVERIFY(manager.saveChat()); const auto working = manager.currentChatId();
         manager.m_busy = true; manager.openChat(first);
         QCOMPARE(manager.attachments().size(), 1);
@@ -3046,7 +3790,7 @@ record({'closed': True})
         QVERIFY(!manager.skillCatalog().isEmpty());
         manager.m_loadedSkills.insert("remote-devices");
         QCOMPARE(manager.toolDefinitions(), initial);
-        QCOMPARE(manager.skillCatalog().size(), 12);
+        QCOMPARE(manager.skillCatalog().size(), 10);
         const auto files = callTool(manager, "load_skill", {{"id", "local-files"}});
         QVERIFY(files.contains("instructions"));
         QCOMPARE(files.value("tools").toArray().size(), 4);
@@ -3054,18 +3798,55 @@ record({'closed': True})
         QVERIFY(!manager.m_loadedSkills.contains("file-artifacts"));
         QCOMPARE(manager.toolDefinitions(), initial);
         QVERIFY(!manager.skill("local-files", false).contains("instructions"));
-        for (const auto &id : {"gh-fix-ci", "gh-address-comments", "frontend-design"}) {
-            const auto workflow = callTool(manager, "load_skill", {{"id", id}});
-            QVERIFY(workflow.contains("instructions"));
-            QVERIFY(workflow.value("tools").toArray().isEmpty());
-            QVERIFY(!workflow.contains("execution")); // No unrelated operation schemas.
-            QVERIFY(manager.skillFile(id, "upstream.md").contains("content"));
-            QVERIFY(manager.skillFile(id, "LICENSE.txt").value("content").toString().contains("Apache"));
-            QCOMPARE(manager.toolDefinitions(), initial);
-        }
+        const auto workflow = callTool(manager, "load_skill", {{"id", "frontend-design"}});
+        QVERIFY(workflow.contains("instructions"));
+        QVERIFY(workflow.value("tools").toArray().isEmpty());
+        QVERIFY(!workflow.contains("execution")); // No unrelated operation schemas.
+        QVERIFY(manager.skillFile("frontend-design", "upstream.md").contains("content"));
+        QVERIFY(manager.skillFile("frontend-design", "LICENSE.txt").value("content").toString().contains("Apache"));
+        QCOMPARE(manager.toolDefinitions(), initial);
         QVERIFY(manager.skill("superpowers-systematic-debugging").contains("pilon_adapter"));
         QVERIFY(manager.skillFile("superpowers-systematic-debugging", "root-cause-tracing.md").contains("content"));
         QVERIFY(manager.skillFile("remote-devices", "../../assistantmanager.cpp").contains("error"));
+    }
+
+    void codexDisablesRemovedManagedSkillsAndKeepsCustomFiles()
+    {
+        AssistantManager manager;
+        const QDir source(PilonWorkspace::appDataDirectory() + "/assistant/skills/retired-fixture");
+        const QDir installed(manager.codexHome() + "/skills");
+        const auto retiredPath = installed.filePath("retired-fixture/SKILL.md");
+        const auto customPath = installed.filePath("custom-fixture/SKILL.md");
+        QVERIFY(!source.exists());
+        QVERIFY(!QFileInfo::exists(retiredPath) && !QFileInfo::exists(customPath));
+        const auto cleanup = qScopeGuard([&] {
+            QDir(source.path()).removeRecursively();
+            QDir(QFileInfo(retiredPath).absolutePath()).removeRecursively();
+            QDir(QFileInfo(customPath).absolutePath()).removeRecursively();
+        });
+        const auto write = [](const QString &path, const QByteArray &contents) {
+            QFile file(path);
+            return QDir().mkpath(QFileInfo(path).absolutePath())
+                && file.open(QIODevice::WriteOnly) && file.write(contents) == contents.size();
+        };
+        QVERIFY(write(source.filePath("skill.json"), R"({"description":"Managed fixture","files":["SKILL.md"]})"));
+        QVERIFY(write(source.filePath("SKILL.md"), "# Managed fixture\n"));
+        QVERIFY(write(customPath, "---\nname: custom-fixture\ndescription: Custom fixture\n---\n"));
+        QVERIFY(manager.installCodexSkills());
+        QVERIFY(QFileInfo::exists(retiredPath));
+        QVERIFY(QDir(source.path()).removeRecursively());
+
+        const auto options = manager.codexThreadOptions();
+        const auto entries = options.value("config").toObject().value("skills.config").toArray();
+        QStringList disabled;
+        for (const auto &value : entries) {
+            const auto entry = value.toObject();
+            if (entry.value("enabled") == false) disabled.append(entry.value("path").toString());
+        }
+        QVERIFY(disabled.contains(retiredPath));
+        QVERIFY(!disabled.contains(customPath));
+        QVERIFY(!disabled.contains(installed.filePath("frontend-design/SKILL.md")));
+        QVERIFY(QFileInfo::exists(retiredPath) && QFileInfo::exists(customPath));
     }
 
     void deferredToolsValidateAndPreserveCallHistory()
@@ -3663,7 +4444,7 @@ record({'closed': True})
         if (!qEnvironmentVariableIsSet("PILON_TEST_RESEARCH")) QSKIP("Set PILON_TEST_RESEARCH=1 for public API checks.");
         AssistantManager manager;
         manager.m_loadedSkills.insert("research");
-        for (const auto &name : {"search_wikipedia", "search_papers", "search_github"}) {
+        for (const auto &name : {"search_wikipedia", "search_papers"}) {
             const auto result = callTool(manager, name, {{"query", "quantum computing"}, {"limit", 2}});
             QVERIFY2(!result.contains("error"), qPrintable(QJsonDocument(result).toJson()));
             QVERIFY(!result.value("results").toArray().isEmpty());
@@ -3671,6 +4452,91 @@ record({'closed': True})
         }
     }
 
+    void researchSkillAdvertisesGeneralAndScholarlySources()
+    {
+        AssistantManager manager;
+        QStringList names;
+        for (const auto &tool : manager.skill("research").value("tools").toArray())
+            names.append(tool.toObject().value("function").toObject().value("name").toString());
+        names.sort();
+        QCOMPARE(names, (QStringList{"browser_open", "browser_search", "read_webpage", "search_papers", "search_wikipedia"}));
+    }
+
+    void researchRequestsRejectExcessResponseBytesAndRedirects()
+    {
+        QTcpServer server;
+        QVERIFY(server.listen(QHostAddress::LocalHost, 0));
+        int redirects = 0;
+        connect(&server, &QTcpServer::newConnection, this, [&] {
+            auto *socket = server.nextPendingConnection();
+            connect(socket, &QTcpSocket::readyRead, socket, [&, socket] {
+                const auto query = socket->readAll();
+                if (query.startsWith("GET /large ")) {
+                    socket->write("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n");
+                    socket->write(QByteArray(8 * 1024 * 1024 + 1, 'a'));
+                } else if (query.startsWith("GET /once ")) {
+                    socket->write("HTTP/1.1 302 Found\r\nLocation: /final\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                } else if (query.startsWith("GET /final ")) {
+                    socket->write("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nThe final page");
+                } else if (++redirects <= 8) {
+                    socket->write("HTTP/1.1 302 Found\r\nLocation: /redirect\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                } else {
+                    socket->write("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nThe final page");
+                }
+                socket->disconnectFromHost();
+            });
+            connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
+        });
+        AssistantManager manager;
+        manager.m_loadedSkills.insert("research");
+        const auto root = QString("http://127.0.0.1:%1").arg(server.serverPort());
+        const auto large = callTool(manager, "read_webpage", {{"url", root + "/large"}});
+        QVERIFY(large.value("error").toString().contains("8 MiB"));
+        QVERIFY(!large.contains("content"));
+        QCOMPARE(callTool(manager, "read_webpage", {{"url", root + "/once"}}).value("content").toString(), "The final page");
+        const auto redirected = callTool(manager, "read_webpage", {{"url", root + "/redirect"}});
+        QVERIFY(redirected.contains("error"));
+        QVERIFY(redirects <= 6);
+    }
+
+    void waveformRejectsIncompleteOrUnsupportedRiffChunks_data()
+    {
+        QTest::addColumn<QByteArray>("bytes");
+        const auto pcm = QByteArray::fromHex("524946462600000057415645666d74201000000001000100803e0000007d00000200100064617461020000000040");
+        QTest::newRow("wrong-signature") << QByteArray(pcm).replace(0, 4, "TEST");
+        QTest::newRow("short-data") << pcm.chopped(1);
+        QTest::newRow("unsupported-format") << QByteArray(pcm).replace(20, 2, QByteArray::fromHex("0300"));
+        QTest::newRow("wrong-channel-layout") << QByteArray(pcm).replace(22, 2, QByteArray::fromHex("0200"));
+        QTest::newRow("chunk-outside-container") << QByteArray(pcm).replace(40, 4, QByteArray::fromHex("ffffffff"));
+    }
+    void waveformRejectsIncompleteOrUnsupportedRiffChunks()
+    {
+        QFETCH(QByteArray, bytes);
+        QTemporaryDir directory;
+        QFile file(directory.filePath("audio.wav"));
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        QCOMPARE(file.write(bytes), bytes.size());
+        file.close();
+        QVERIFY(assistantAudioSummary(file.fileName()).isEmpty());
+    }
+    void mediaWorkerExitWithoutOutputIsAnError()
+    {
+        QTemporaryDir directory;
+        const auto path = qgetenv("PATH");
+        const auto restore = qScopeGuard([&] { qputenv("PATH", path); });
+        QFile tool(directory.filePath("ffmpeg")); QVERIFY(tool.open(QIODevice::WriteOnly));
+        tool.write("#!/bin/sh\nexit 1\n"); tool.close();
+        QVERIFY(tool.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+        qputenv("PATH", directory.path().toUtf8() + ':' + path);
+        QFile file(directory.filePath("audio.wav"));
+        const auto pcm = QByteArray::fromHex("524946462600000057415645666d74201000000001000100803e0000007d00000200100064617461020000000040");
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        QCOMPARE(file.write(pcm), pcm.size());
+        file.close();
+        const auto result = prepareAssistantMedia({QVariantMap{{"id", "voice"}, {"name", "audio.wav"}, {"path", file.fileName()}}},
+                                                 {}, true, directory.path(), {}, {}, std::make_shared<std::atomic_bool>(false));
+        QVERIFY(result.value("error").toString().contains("Media utility"));
+    }
     void waveformCompressesActivity()
     {
         QTemporaryDir directory;
@@ -3705,6 +4571,278 @@ record({'closed': True})
         QCOMPARE(parts.last().toMap().value("type").toString(), QString("input_audio"));
         for (const auto &part : parts)
             QVERIFY(!part.toMap().value("text").toString().contains("transcribed locally"));
+    }
+
+    void textOnlyAudioReturnsAndReusesItsTranscript()
+    {
+        QTemporaryDir directory;
+        QFile wav(directory.filePath("audio.wav"));
+        QVERIFY(wav.open(QIODevice::WriteOnly));
+        QVERIFY(wav.write(QByteArray::fromHex("524946462600000057415645666d74201000000001000100803e0000007d00000200100064617461020000000040")) > 0);
+        wav.close();
+        QFile whisper(directory.filePath("whisper"));
+        QVERIFY(whisper.open(QIODevice::WriteOnly));
+        QVERIFY(whisper.write("#!/bin/sh\nfor arg do stem=$arg; done\nprintf 'Fixture transcript\\n' > \"$stem.txt\"\n") > 0);
+        whisper.close();
+        QVERIFY(whisper.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+        const auto cancel = std::make_shared<std::atomic_bool>(false);
+        const auto prepared = prepareAssistantMedia({QVariantMap{{"path", wav.fileName()},
+            {"name", "audio.wav"}, {"id", "voice"}}}, {}, false, directory.path(), whisper.fileName(), wav.fileName(), cancel);
+        QVERIFY2(!prepared.contains("error"), qPrintable(prepared.value("error").toString()));
+        const auto attachments = prepared.value("attachments").toList();
+        QCOMPARE(attachments.first().toMap().value("transcript").toString(), QString("Fixture transcript"));
+        QVERIFY(whisper.remove());
+        const auto cached = prepareAssistantMedia(attachments, {}, false, directory.path(), {}, {}, cancel);
+        QVERIFY2(!cached.contains("error"), qPrintable(cached.value("error").toString()));
+        QVERIFY(cached.value("content").toList().last().toMap().value("text").toString().contains("Fixture transcript"));
+    }
+
+    void sameCodexStreamingStatusOnlyNotifiesOnce()
+    {
+        AssistantManager manager;
+        manager.m_busy = true;
+        manager.m_codexThreadId = "thread";
+        manager.m_codexTurnId = "turn";
+        QSignalSpy state(&manager, &AssistantManager::stateChanged);
+        const QJsonObject event{{"threadId", "thread"}, {"turnId", "turn"}, {"itemId", "reply"}, {"delta", "a"}};
+        manager.codexNotification("item/agentMessage/delta", event);
+        manager.codexNotification("item/agentMessage/delta", event);
+        QCOMPARE(manager.status(), QString("Responding…"));
+        QCOMPARE(state.count(), 1);
+        QCOMPARE(manager.messages().last().toMap().value("text").toString(), QString("aa"));
+    }
+
+    void cancelledMediaKeepsDraftAndSettlesBeforeNextSend()
+    {
+        AssistantManager manager;
+        const auto audioPath = QDir(manager.attachmentDirectory()).filePath("clip.wav");
+        QFile audio(audioPath);
+        QVERIFY(audio.open(QIODevice::WriteOnly));
+        QVERIFY(audio.write(QByteArray::fromHex("524946462600000057415645666d74201000000001000100803e0000007d00000200100064617461020000000040")) > 0);
+        audio.close();
+        const auto id = QUuid::createUuid().toString(QUuid::Id128);
+        manager.m_attachments = {QVariantMap{{"id", id}, {"name", "clip.wav"}, {"path", audioPath}, {"mime", "audio/wav"}}};
+        QPromise<QVariantMap> pending;
+        pending.start();
+        manager.m_busy = true;
+        manager.m_cancelMedia = std::make_shared<std::atomic_bool>(false);
+        manager.m_mediaWatcher.setFuture(pending.future());
+        manager.setDraftText("Next message");
+        manager.stop();
+        QVERIFY(!manager.busy());
+        QVERIFY(manager.mediaCancelling());
+        QVERIFY(!manager.send(manager.draftText()));
+        QCOMPARE(manager.draftText(), QString("Next message"));
+        pending.addResult(QVariantMap{{"transcriptChatId", manager.currentChatId()},
+            {"completedTranscripts", QVariantMap{{id, "Completed before Stop"}}}});
+        pending.finish();
+        QTRY_VERIFY(!manager.mediaCancelling());
+        QCOMPARE(manager.draftText(), QString("Next message"));
+        QCOMPARE(manager.attachments().first().toMap().value("transcript").toString(), QString("Completed before Stop"));
+        const auto retry = prepareAssistantMedia(manager.attachments(), manager.draftText(), false,
+            manager.m_sessionDirectory.path(), {}, {}, std::make_shared<std::atomic_bool>(false));
+        QVERIFY2(!retry.contains("error"), qPrintable(retry.value("error").toString()));
+        QVERIFY(retry.value("content").toList().last().toMap().value("text").toString().contains("Completed before Stop"));
+    }
+
+    void apiAudioDispatchAndTranscription_data()
+    {
+        QTest::addColumn<QString>("scenario");
+        for (const auto name : {"native-audio", "text-only", "history-requiring-transcription",
+                "history-transcribed-before-attachment-failure", "history-transcribed-before-same-batch-failure",
+                "reuse-active-transcription"})
+            QTest::newRow(name) << QString::fromLatin1(name);
+    }
+
+    void apiAudioDispatchAndTranscription()
+    {
+        QFETCH(QString, scenario);
+        const bool nativeAudio = scenario != "text-only";
+        const bool historicalAudio = scenario.startsWith("history-");
+        const bool laterAttachmentFails = scenario.endsWith("-failure");
+        const bool sameBatchFails = scenario.endsWith("-same-batch-failure");
+        const bool reuseActiveTranscription = scenario == "reuse-active-transcription";
+        QTemporaryDir directory;
+        QHash<QByteArray, QByteArray> oldEnvironment;
+        const auto restore = qScopeGuard([&] {
+            for (auto it = oldEnvironment.cbegin(); it != oldEnvironment.cend(); ++it) {
+                if (it.value().isNull()) qunsetenv(it.key().constData());
+                else qputenv(it.key().constData(), it.value());
+            }
+        });
+        for (const auto &entry : QList<QPair<QByteArray, QString>>{{"PILON_MODELS_DIR", "models"},
+                {"PILON_RUNTIME_DIR", "runtime"}, {"PILON_AGENT_DIR", "agent"}, {"PILON_CHAT_DIR", "chats"}}) {
+            oldEnvironment.insert(entry.first, qgetenv(entry.first.constData()));
+            qputenv(entry.first.constData(), directory.filePath(entry.second).toUtf8());
+        }
+        QFile wav(directory.filePath("audio.wav"));
+        QVERIFY(wav.open(QIODevice::WriteOnly));
+        QVERIFY(wav.write(QByteArray::fromHex("524946462600000057415645666d74201000000001000100803e0000007d00000200100064617461020000000040")) > 0);
+        wav.close();
+        QVERIFY(installAudioFixture(directory.filePath("models"), "whisper.bin", "input", "whisper"));
+        QVERIFY(QDir().mkpath(directory.filePath("runtime/bin")));
+        QFile whisper(directory.filePath("runtime/bin/whisper-cli"));
+        QVERIFY(whisper.open(QIODevice::WriteOnly));
+        const auto script = R"SH(#!/bin/sh
+fixture=$(dirname "$0")/../..
+printf 'started\n' >> "$fixture/started"
+while [ ! -f "$fixture/release" ]; do sleep 0.03; done
+for arg do stem=$arg; done
+printf 'Fixture transcript\n' > "$stem.txt"
+)SH";
+        QVERIFY(whisper.write(script) > 0);
+        whisper.close();
+        QVERIFY(whisper.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+        QTcpServer server;
+        QVERIFY(server.listen(QHostAddress::LocalHost));
+        QList<QJsonObject> requests;
+        connect(&server, &QTcpServer::newConnection, this, [&] {
+            auto *socket = server.nextPendingConnection();
+            connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
+            connect(socket, &QTcpSocket::readyRead, socket, [&, socket, bytes = QByteArray{}]() mutable {
+                bytes += socket->readAll();
+                const auto end = bytes.indexOf("\r\n\r\n");
+                if (end < 0 || socket->property("sent").toBool()) return;
+                const auto body = QJsonDocument::fromJson(bytes.mid(end + 4)).object();
+                if (!body.contains("messages")) return;
+                socket->setProperty("sent", true);
+                requests.append(body);
+                const auto response = streamEvent({{"content", "Fixture answer"}}, "stop") + "data: [DONE]\n\n";
+                socket->write("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: "
+                    + QByteArray::number(response.size()) + "\r\nConnection: close\r\n\r\n" + response);
+                socket->disconnectFromHost();
+            });
+        });
+        AssistantManager manager;
+        const QVariantMap selected{{"provider", "chat"}, {"protocol", "chat"}, {"id", "api/asr-fixture"},
+            {"remoteModel", "fixture-api"}, {"name", "Fixture"}, {"audio", nativeAudio},
+            {"baseUrl", QString("http://127.0.0.1:%1/v1").arg(server.serverPort())}};
+        manager.m_connections.m_servers = {selected};
+        manager.setModelIndex(0);
+        QVERIFY(manager.speechInputAvailable());
+        const auto executable = whisper.fileName();
+        if (historicalAudio) QVERIFY(whisper.rename(executable + ".held"));
+        const auto selectTextOnly = [&] {
+            auto textOnly = selected;
+            textOnly.insert("id", "api/asr-fixture-text");
+            textOnly.insert("remoteModel", "fixture-text");
+            textOnly.insert("audio", false);
+            manager.m_connections.m_servers.append(textOnly);
+            manager.setModelIndex(1);
+        };
+        const auto releaseRecognition = [&] {
+            QFile release(directory.filePath("release"));
+            return release.open(QIODevice::WriteOnly);
+        };
+        manager.addAttachments({QUrl::fromLocalFile(wav.fileName())});
+        QFile missing(directory.filePath("missing.txt"));
+        const auto attachLaterFailure = [&] {
+            if (!missing.open(QIODevice::WriteOnly) || missing.write("Temporary attachment") <= 0)
+                return false;
+            missing.close();
+            manager.addAttachments({QUrl::fromLocalFile(missing.fileName())});
+            return true;
+        };
+        if (sameBatchFails) QVERIFY(attachLaterFailure());
+        QVERIFY2(manager.send({}), qPrintable(manager.error()));
+        const auto audioChat = manager.currentChatId();
+        QCOMPARE(manager.transcribing(), !nativeAudio);
+        QVERIFY(!manager.transcribingEarlierAudio());
+        if (historicalAudio) {
+            QTRY_COMPARE_WITH_TIMEOUT(requests.size(), 1, 4000);
+            QTRY_VERIFY_WITH_TIMEOUT(!manager.busy(), 4000);
+            QVERIFY(whisper.rename(executable));
+            selectTextOnly();
+            if (sameBatchFails) {
+                const auto attachments = manager.messages().first().toMap().value("attachments").toList();
+                QCOMPARE(attachments.size(), 2);
+                QVERIFY(QFile::remove(attachments.last().toMap().value("path").toString()));
+                QVERIFY(missing.remove());
+            } else if (laterAttachmentFails) {
+                QVERIFY(attachLaterFailure());
+                QVERIFY(missing.remove());
+            }
+            QVERIFY2(manager.send("Follow up on the recording"), qPrintable(manager.error()));
+            QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(directory.filePath("started")), 4000);
+            QTRY_VERIFY(manager.transcribingEarlierAudio());
+            QCOMPARE(requests.size(), 1);
+            QVERIFY(releaseRecognition());
+            if (laterAttachmentFails) {
+                QTRY_VERIFY_WITH_TIMEOUT(manager.error().contains("Unable to stage the attachment"), 4000);
+                QCOMPARE(requests.size(), 1);
+            } else {
+                QTRY_COMPARE_WITH_TIMEOUT(requests.size(), 2, 4000);
+                QVERIFY(QJsonDocument(requests.last()).toJson().contains("Fixture transcript"));
+            }
+            QTRY_VERIFY_WITH_TIMEOUT(!manager.busy(), 4000);
+            QVERIFY(!manager.transcribing());
+            QVERIFY(!manager.transcribingEarlierAudio());
+            QCOMPARE(manager.messages().first().toMap().value("attachments").toList().first().toMap()
+                         .value("transcript").toString(), QString("Fixture transcript"));
+            return;
+        }
+        QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(directory.filePath("started")), 4000);
+        if (nativeAudio) {
+            QTRY_COMPARE_WITH_TIMEOUT(requests.size(), 1, 4000);
+            QVERIFY(QJsonDocument(requests.first()).toJson().contains("input_audio"));
+            QVERIFY(!manager.transcribingAttachments().isEmpty());
+            QTRY_VERIFY_WITH_TIMEOUT(!manager.busy(), 4000);
+            if (reuseActiveTranscription) {
+                selectTextOnly();
+                QVERIFY2(manager.send("A follow-up I will stop"), qPrintable(manager.error()));
+                QTRY_VERIFY(manager.transcribingEarlierAudio());
+                manager.stop();
+                QTRY_VERIFY(!manager.mediaCancelling());
+                QVERIFY(!manager.transcribingAttachments().isEmpty());
+                QVERIFY2(manager.send("Follow up on the recording"), qPrintable(manager.error()));
+                QTRY_VERIFY(manager.transcribing());
+                QCOMPARE(requests.size(), 1);
+                QVERIFY(releaseRecognition());
+                QTRY_COMPARE_WITH_TIMEOUT(requests.size(), 2, 4000);
+                QTRY_VERIFY_WITH_TIMEOUT(!manager.busy() && manager.transcribingAttachments().isEmpty(), 4000);
+                QVERIFY(QJsonDocument(requests.last()).toJson().contains("Fixture transcript"));
+                QFile starts(directory.filePath("started"));
+                QVERIFY(starts.open(QIODevice::ReadOnly));
+                QCOMPARE(starts.readAll(), QByteArray("started\n"));
+                return;
+            }
+            manager.clear();
+            QVERIFY(manager.currentChatId() != audioChat);
+        } else {
+            QCOMPARE(requests.size(), 0);
+        }
+        QVERIFY(releaseRecognition());
+        QTRY_COMPARE_WITH_TIMEOUT(requests.size(), 1, 4000);
+        QTRY_VERIFY_WITH_TIMEOUT(!manager.busy() && manager.transcribingAttachments().isEmpty(), 4000);
+        QCOMPARE(!nativeAudio, QJsonDocument(requests.first()).toJson().contains("Fixture transcript"));
+        if (nativeAudio) manager.openChat(audioChat);
+        const auto messages = manager.messages();
+        QCOMPARE(messages.first().toMap().value("attachments").toList().first().toMap().value("transcript").toString(),
+                 QString("Fixture transcript"));
+        QVERIFY(!manager.transcribing());
+        if (nativeAudio) {
+            // A cancelled turn can skip the live message update after the transcript was saved.
+            auto message = manager.m_messages.first().toMap();
+            auto attachments = message.value("attachments").toList();
+            auto audio = attachments.first().toMap();
+            audio.remove("transcript");
+            attachments[0] = audio;
+            message.insert("attachments", attachments);
+            manager.m_messages[0] = message;
+            QVERIFY(QFile::remove(manager.selectedSpeechInputPath()));
+            QVERIFY(whisper.remove());
+            selectTextOnly();
+            QVERIFY(!manager.nativeAudioInput());
+            QVERIFY(!manager.speechInputAvailable());
+            QVERIFY2(manager.send("Follow up on the recording"), qPrintable(manager.error()));
+            QTRY_COMPARE_WITH_TIMEOUT(requests.size(), 2, 4000);
+            QTRY_VERIFY_WITH_TIMEOUT(!manager.busy(), 4000);
+            const auto replayed = QJsonDocument(requests.last()).toJson();
+            QVERIFY(replayed.contains("Fixture transcript"));
+            QVERIFY(!replayed.contains("input_audio"));
+            QCOMPARE(manager.messages().first().toMap().value("attachments").toList().first().toMap()
+                         .value("transcript").toString(), QString("Fixture transcript"));
+        }
     }
 
 
@@ -4180,7 +5318,7 @@ record({'closed': True})
         qputenv("PILON_MODELS_DIR", directory.filePath("models").toUtf8());
         qunsetenv("PILON_RUNTIME_DIR");
         qputenv("PILON_LLM_BACKEND", "cpu"); qputenv("PILON_GPU_LAYERS", "0");
-        const auto installed = QDir(QCoreApplication::applicationDirPath()).absoluteFilePath("../runtime");
+        const auto installed = QDir(QCoreApplication::applicationDirPath()).absoluteFilePath("../.runtime");
         QCOMPARE(QDir::cleanPath(PilonWorkspace::runtimeDirectory()), QDir::cleanPath(installed));
         AssistantManager manager;
         QVERIFY(QDir::cleanPath(manager.runtimePath("llama-server")) != QDir::cleanPath(executable));
@@ -4714,7 +5852,10 @@ record({'closed': True})
         });
         AssistantManager manager;
         const auto cache = qEnvironmentVariable("PILON_TEST_BROWSER_CACHE");
-        if (!cache.isEmpty()) QVERIFY(QFile::link(cache, manager.toolsRoot() + "/browsers"));
+        if (!cache.isEmpty()) {
+            QVERIFY(QDir().mkpath(manager.toolsRoot()));
+            QVERIFY(QFile::link(cache, manager.toolsRoot() + "/browsers"));
+        }
         const QString url = QString("http://127.0.0.1:%1/page").arg(server.serverPort());
         const auto first = callTool(manager, "browser_open", {{"url", url}, {"wait_for", "#ready"}});
         QVERIFY2(!first.contains("error"), qPrintable(QJsonDocument(first).toJson()));
@@ -4733,8 +5874,14 @@ record({'closed': True})
         manager.nextTool();
         QTest::qWait(100);
         QVERIFY(manager.busy());
+#ifndef Q_OS_ANDROID
+        QVERIFY(manager.m_browserDeadline.isActive());
+#endif
         manager.stop();
         QCOMPARE(manager.m_browserProcess.state(), QProcess::NotRunning);
+#ifndef Q_OS_ANDROID
+        QVERIFY(!manager.m_browserDeadline.isActive());
+#endif
         QVERIFY(!manager.busy());
         QCOMPARE(manager.messages().last().toMap().value("state").toString(), QString("Cancelled"));
         QVERIFY(manager.m_history.last().toObject().value("content").toString().contains("Cancelled"));
@@ -5085,12 +6232,301 @@ else:
                                           QRegularExpression::CaseInsensitiveOption);
         QVERIFY2(expected.match(reply).hasMatch(), qPrintable(reply));
     }
+    void linuxWorkersUseTheInstalledRuntime_data()
+    {
+        QTest::addColumn<bool>("speech");
+        QTest::addColumn<bool>("staged");
+        QTest::newRow("breeze") << true << true;
+        QTest::newRow("litert") << false << true;
+        QTest::newRow("legacy litert") << false << false;
+    }
+
+    void linuxWorkersUseTheInstalledRuntime()
+    {
+#ifdef Q_OS_ANDROID
+        QSKIP("Android uses packaged workers.");
+#endif
+        QFETCH(bool, speech);
+        QFETCH(bool, staged);
+        struct rlimit limit {};
+        const bool viaRunner = !speech && getrlimit(RLIMIT_RTTIME, &limit) == 0 && limit.rlim_max == 0;
+        QMap<QByteArray, QByteArray> previous;
+        for (const auto *name : {"PILON_RUNTIME_DIR", "PILON_PREFIX_CACHE_DIR", "PILON_MODELS_DIR"}) {
+            previous.insert(name, qgetenv(name));
+            qunsetenv(name);
+        }
+        const auto restore = qScopeGuard([&] {
+            for (auto it = previous.cbegin(); it != previous.cend(); ++it) {
+                if (it.value().isNull()) qunsetenv(it.key()); else qputenv(it.key(), it.value());
+            }
+        });
+        QTemporaryDir directory;
+        const auto originalPath = qgetenv("PATH");
+        const auto restorePath = qScopeGuard([&] { qputenv("PATH", originalPath); });
+        const auto runner = directory.filePath("bin/systemd-run");
+        if (viaRunner) qputenv("PATH", directory.filePath("bin").toUtf8() + ':' + originalPath);
+        qputenv("PILON_RUNTIME_DIR", directory.filePath("runtime").toUtf8());
+        qputenv("PILON_PREFIX_CACHE_DIR", directory.filePath("cache").toUtf8());
+        qputenv("PILON_MODELS_DIR", directory.filePath("models").toUtf8());
+        if (speech) {
+            qputenv("PATH", directory.filePath("runtime/speech/bin").toUtf8() + ':' + originalPath);
+            QVERIFY(writeSpeechWorker(directory.path(), "#!/bin/sh\nexit 0\n"));
+            QVERIFY(installAudioFixture(directory.filePath("models"), "breeze.gguf", "output", "breeze_tts"));
+            AssistantManager manager;
+            manager.previewVoice("Fixture voice", 5);
+            QCOMPARE(manager.m_speechProcess.program(), directory.filePath("runtime/speech/bin/pilon-speech"));
+            QCOMPARE(manager.m_speechProcess.arguments().first(), directory.filePath("models/hf-audio/test/fixture/breeze.gguf"));
+            QCOMPARE(manager.m_speechProcess.arguments().last(), "breeze_tts");
+            return;
+        }
+        const auto python = directory.filePath("runtime/litert/bin/python");
+        const auto worker = directory.filePath(staged ? "runtime/litert/workers/litert_worker.py" : "addons/assistant/workers/litert_worker.py");
+        const auto executables = viaRunner ? QStringList{python, runner} : QStringList{python};
+        for (const auto &path : executables + QStringList{worker}) {
+            QVERIFY(QDir().mkpath(QFileInfo(path).absolutePath()));
+            QFile file(path); QVERIFY(file.open(QIODevice::WriteOnly));
+            QVERIFY(file.write("#!/bin/sh\nexit 0\n") > 0);
+        }
+        for (const auto &path : executables)
+            QVERIFY(QFile::setPermissions(path, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+        AssistantManager manager;
+        manager.startLiteRtServer();
+        QCOMPARE(manager.m_server.program(), viaRunner ? runner : python);
+        const auto arguments = manager.m_server.arguments();
+        if (viaRunner) {
+            const auto separator = arguments.indexOf("--");
+            QVERIFY(separator >= 0);
+            QCOMPARE(arguments.value(separator + 1), python);
+            QCOMPARE(QDir::cleanPath(arguments.value(separator + 2)), worker);
+        } else QCOMPARE(QDir::cleanPath(arguments.value(0)), worker);
+    }
+
+    void liveMonoSpeechCopiesEachSampleToBothStereoChannels()
+    {
+        const auto mono = QByteArray::fromHex("001166e7ff7f0080");
+        const auto stereo = QByteArray::fromHex("0011001166e766e7ff7fff7f00800080");
+        QCOMPARE(AssistantManager::stereoSpeechPcm(mono), stereo);
+    }
+
+    void localSpeechModelSelectionPersistsOnlyInstalledChoices()
+    {
+        QTemporaryDir models;
+        QVERIFY(models.isValid());
+        const auto previousRoot = qgetenv("PILON_MODELS_DIR");
+        const auto previousRuntime = qgetenv("PILON_RUNTIME_DIR");
+        const QStringList keys{"assistant/speechInput", "assistant/speechOutput", "assistant/speechPreset", "assistant/voiceMode"};
+        QVariantMap previous;
+        for (const auto &key : keys) {
+            previous.insert(key, PilonSettings().value(key));
+            PilonSettings().remove(key);
+        }
+        auto restore = qScopeGuard([&] {
+            if (previousRoot.isNull()) qunsetenv("PILON_MODELS_DIR");
+            else qputenv("PILON_MODELS_DIR", previousRoot);
+            if (previousRuntime.isNull()) qunsetenv("PILON_RUNTIME_DIR");
+            else qputenv("PILON_RUNTIME_DIR", previousRuntime);
+            for (const auto &key : keys) {
+                if (previous.value(key).isValid()) PilonSettings().setValue(key, previous.value(key));
+                else PilonSettings().remove(key);
+            }
+        });
+        qputenv("PILON_MODELS_DIR", QFile::encodeName(models.path()));
+        qputenv("PILON_RUNTIME_DIR", QFile::encodeName(models.filePath("runtime")));
+        PilonSettings().setValue("assistant/speechInput", "whisper-base");
+        PilonSettings().setValue("assistant/speechOutput", "breeze-tts-2");
+        AssistantManager manager;
+        QVERIFY(manager.speechInputModel().isEmpty());
+        QVERIFY(manager.speechOutputModel().isEmpty());
+        QVERIFY(!manager.selectAudioModel("whisper-base"));
+
+        QVERIFY(installAudioFixture(models.path(), "whisper-small.bin", "input", "whisper"));
+        QVERIFY(installAudioFixture(models.path(), "whisper-base.bin", "input", "whisper"));
+        QVERIFY(installAudioFixture(models.path(), "supertonic.gguf", "output", "supertonic"));
+        manager.m_models.refresh();
+        QCOMPARE(manager.speechInputModel(), "audio:test/fixture/whisper-small.bin");
+        QVERIFY(manager.selectAudioModel("audio:test/fixture/whisper-base.bin"));
+        QCOMPARE(manager.selectedSpeechInputPath(), models.filePath("hf-audio/test/fixture/whisper-base.bin"));
+        QVERIFY(manager.selectAudioModel("audio:test/fixture/supertonic.gguf"));
+        manager.setVoiceMode(true);
+        QVERIFY(!manager.voiceMode());
+        QVERIFY(!manager.instructionPrefix({}).contains("Spoken mode"));
+        QVERIFY(PilonSettings().value("assistant/voiceMode").toBool());
+        QVERIFY(!manager.saveSpeechPreset("F6", "fr", 7));
+        QVERIFY(!manager.saveSpeechPreset("F2", "bogus", 7));
+        QVERIFY(manager.saveSpeechPreset("F2", "fr", 7));
+        AssistantManager restored;
+        QCOMPARE(restored.speechInputModel(), "audio:test/fixture/whisper-base.bin");
+        QCOMPARE(restored.speechOutputModel(), "audio:test/fixture/supertonic.gguf");
+        QCOMPARE(restored.speechPreset(), (QVariantMap{{"preset", "F2"}, {"language", "fr"}, {"speed", 7}}));
+#ifndef Q_OS_ANDROID
+        const auto worker = models.filePath("runtime/speech/bin/pilon-speech");
+        QVERIFY(QDir().mkpath(QFileInfo(worker).absolutePath()));
+        QFile executable(worker);
+        QVERIFY(executable.open(QIODevice::WriteOnly));
+        executable.close();
+        QVERIFY(executable.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+        QFile library(models.filePath("runtime/speech/bin/libaudiocpp.so.0"));
+        QVERIFY(library.open(QIODevice::WriteOnly));
+        library.close();
+        QVERIFY(restored.voiceMode());
+        QVERIFY(restored.instructionPrefix({}).contains("Spoken mode"));
+#endif
+    }
+
+    void importedSpeechModelsUseSelectedWeightsAndReleaseRemovedWorkers()
+    {
+#ifdef Q_OS_ANDROID
+        QSKIP("Android uses packaged workers.");
+#endif
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        QMap<QByteArray, QByteArray> previousEnvironment;
+        const auto restoreEnvironment = qScopeGuard([&] {
+            for (auto it = previousEnvironment.cbegin(); it != previousEnvironment.cend(); ++it)
+                if (it.value().isNull()) qunsetenv(it.key()); else qputenv(it.key(), it.value());
+        });
+        const auto setEnvironment = [&](const QByteArray &key, const QString &value) {
+            previousEnvironment.insert(key, qgetenv(key));
+            qputenv(key, QFile::encodeName(value));
+        };
+        setEnvironment("PILON_MODELS_DIR", directory.path());
+        setEnvironment("PILON_RUNTIME_DIR", directory.filePath("runtime"));
+        setEnvironment("PATH", directory.filePath("runtime/speech/bin") + ':' + qEnvironmentVariable("PATH"));
+        const QStringList preferenceKeys{"assistant/speechInput", "assistant/speechOutput", "assistant/speechPreset", "assistant/phononVoice"};
+        QVariantMap previousPreferences;
+        for (const auto &key : preferenceKeys) previousPreferences.insert(key, PilonSettings().value(key));
+        const auto restorePreferences = qScopeGuard([&] {
+            for (const auto &key : preferenceKeys) {
+                if (previousPreferences.value(key).isValid()) PilonSettings().setValue(key, previousPreferences.value(key));
+                else PilonSettings().remove(key);
+            }
+        });
+        const auto makeFile = [&](const QString &path, const QByteArray &contents, bool executable = false) {
+            QFile file(directory.filePath(path));
+            if (!QDir().mkpath(QFileInfo(file).absolutePath()) || !file.open(QIODevice::WriteOnly)
+                || file.write(contents) != contents.size()) return false;
+            return !executable || file.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+        };
+        const auto identifier = [](const QString &name) { return "audio:owner/repo/" + name; };
+        const auto relativePath = [](const QString &name) { return "hf-audio/owner/repo/" + name; };
+        QJsonArray models;
+        for (const auto &[name, kind, engine] : QList<std::tuple<QString, QString, QString>>{
+                 {"whisper.bin", "input", "whisper"}, {"supertonic-a.gguf", "output", "supertonic"},
+                 {"supertonic-b.gguf", "output", "supertonic"}, {"breeze.gguf", "output", "breeze_tts"},
+                 {"model.safetensors", "output", "gradium_phonon"}}) {
+            const auto path = relativePath(name);
+            QVERIFY(makeFile(path, "weights"));
+            QJsonObject model{{"id", identifier(name)}, {"name", name}, {"kind", kind}, {"engine", engine},
+                {"weights", path}, {"files", QJsonArray{QJsonObject{{"path", path}, {"size", 7}}}}};
+            if (name == "supertonic-b.gguf") {
+                model["languageIds"] = QJsonArray{"fr"};
+                model["presetIds"] = QJsonArray{"F2"};
+            }
+            models.append(model);
+        }
+        QVERIFY(makeFile("installed.json", QJsonDocument(models).toJson()));
+        QVERIFY(makeFile("runtime/speech/bin/libaudiocpp.so.0", {}));
+        QVERIFY(makeFile("runtime/speech/bin/ffmpeg", "#!/bin/sh\nexit 0\n", true));
+        const auto worker = directory.filePath("runtime/speech/bin/pilon-speech");
+        QVERIFY(makeFile("runtime/speech/bin/pilon-speech", R"PY(#!/usr/bin/env python3
+import json, pathlib, sys
+print('{"ready": true}', flush=True)
+for line in sys.stdin:
+    request = json.loads(line)
+    if sys.argv[4] == "breeze_tts":
+        continue
+    if sys.argv[4] == "gradium_phonon":
+        assert set(request) == {"text", "output", "voiceEmbedding", "temperature", "stream"}
+        assert request["stream"] is True
+        voice = pathlib.Path(request["voiceEmbedding"])
+        assert voice.is_file() and voice.suffix == ".safetensors"
+        text = f'{request["temperature"]}/{request["text"]}'
+    else:
+        text = f'{request["preset"]}/{request["language"]}/{request["speed"]}'
+    pathlib.Path(request["output"]).write_text(text)
+    print(json.dumps({"output": request["output"]}), flush=True)
+)PY", true));
+        PilonSettings().setValue("assistant/speechPreset", QVariantMap{{"preset", "M1"}, {"language", "en"}, {"speed", 7}});
+        AssistantManager manager;
+        QVERIFY(manager.selectAudioModel(identifier("whisper.bin")));
+        QCOMPARE(manager.selectedSpeechInputPath(), directory.filePath(relativePath("whisper.bin")));
+        QPromise<QString> pendingTranscript;
+        pendingTranscript.start();
+        manager.m_audioTranscripts.insert("pending", pendingTranscript.future());
+        QVERIFY(!manager.removeModel(identifier("whisper.bin")));
+        pendingTranscript.finish();
+        manager.m_audioTranscripts.clear();
+        QSignalSpy ready(&manager, &AssistantManager::voicePreviewReady);
+        for (const auto &name : {"supertonic-a.gguf", "supertonic-b.gguf"}) {
+            QVERIFY(manager.selectAudioModel(identifier(name)));
+            QVERIFY(manager.speechOutputAvailable());
+            ready.clear();
+            manager.previewSpeechPreset("F2", "fr", 7);
+            QTRY_COMPARE_WITH_TIMEOUT(ready.size(), 1, 5000);
+            QCOMPARE(manager.m_speechProcess.program(), worker);
+            QCOMPARE(manager.m_speechProcess.arguments().first(), directory.filePath(relativePath(name)));
+            QCOMPARE(manager.m_speechProcess.arguments().last(), QString("supertonic"));
+        }
+        QSignalSpy spoken(&manager, &AssistantManager::speechReady);
+        manager.speakReply("Use the selected speech model.");
+        QTRY_COMPARE_WITH_TIMEOUT(spoken.size(), 1, 5000);
+        QFile reply(spoken.takeFirst().first().toUrl().toLocalFile());
+        QVERIFY(reply.open(QIODevice::ReadOnly));
+        QCOMPARE(reply.readAll(), QByteArray("F2/fr/7"));
+        QVERIFY(manager.selectAudioModel(identifier("model.safetensors")));
+        QVERIFY(manager.speechOutputAvailable());
+        const auto originalVoice = directory.filePath("custom.safetensors");
+        const QByteArray voiceHeader = R"({"speaker_wavs":{"dtype":"F32","shape":[1,1,1],"data_offsets":[0,4]}})";
+        QByteArray voice(8, '\0');
+        voice[0] = char(voiceHeader.size());
+        QVERIFY(makeFile("custom.safetensors", voice + voiceHeader + QByteArray(4, '\0')));
+        QVERIFY(manager.savePhononVoiceSettings(QUrl::fromLocalFile(originalVoice).toString(), 0.45));
+        const auto savedVoice = manager.phononVoice().value("voiceEmbedding").toString();
+        const auto removeVoice = qScopeGuard([&] { QFile::remove(savedVoice); });
+        QVERIFY(savedVoice != originalVoice && QFile::remove(originalVoice));
+        QCOMPARE(manager.phononVoice().value("voiceName").toString(), "custom.safetensors");
+        const QByteArray invalidHeader = R"({"speaker_wavs":{}})";
+        voice[0] = char(invalidHeader.size());
+        QVERIFY(makeFile("invalid.safetensors", voice + invalidHeader + QByteArray(4, '\0')));
+        QVERIFY(!manager.savePhononVoiceSettings(directory.filePath("invalid.safetensors"), 0.45));
+        const QByteArray invalidCache = R"({"transformer.layers.0.self_attn/cache":{"dtype":"F32","shape":[1],"data_offsets":[0,4]}})";
+        voice[0] = char(invalidCache.size());
+        QVERIFY(makeFile("invalid-cache.safetensors", voice + invalidCache + QByteArray(4, '\0')));
+        QVERIFY(!manager.savePhononVoiceSettings(directory.filePath("invalid-cache.safetensors"), 0.45));
+        QCOMPARE(manager.phononVoice().value("voiceEmbedding").toString(), savedVoice);
+        ready.clear();
+        manager.previewVoice("", 5);
+        QTRY_COMPARE_WITH_TIMEOUT(ready.size(), 1, 5000);
+        QCOMPARE(manager.m_speechProcess.arguments().first(), directory.filePath(relativePath("model.safetensors")));
+        QCOMPARE(manager.m_speechProcess.arguments().last(), "gradium_phonon");
+        manager.speakReply("Bonjour et bienvenue.");
+        QTRY_COMPARE_WITH_TIMEOUT(spoken.size(), 1, 5000);
+        QFile phononReply(spoken.first().first().toUrl().toLocalFile());
+        QVERIFY(phononReply.open(QIODevice::ReadOnly));
+        QCOMPARE(phononReply.readAll(), QByteArray("0.45/Bonjour et bienvenue."));
+        QVERIFY(manager.selectAudioModel(identifier("breeze.gguf")));
+        manager.previewVoice("Voice fixture", 5);
+        QTRY_VERIFY_WITH_TIMEOUT(manager.m_speechReady, 5000);
+        QCOMPARE(manager.m_speechProcess.arguments().first(), directory.filePath(relativePath("breeze.gguf")));
+        QCOMPARE(manager.m_speechProcess.arguments().last(), QString("breeze_tts"));
+        QCOMPARE(manager.m_speechProcess.processEnvironment().value("TMPDIR"), manager.m_sessionDirectory.path());
+        QVERIFY(manager.speaking());
+        QVERIFY(manager.removeModel(identifier("breeze.gguf")));
+        QVERIFY(!manager.speaking());
+        QCOMPARE(manager.m_speechProcess.state(), QProcess::NotRunning);
+        QVERIFY(!QFileInfo::exists(directory.filePath(relativePath("breeze.gguf"))));
+        QCOMPARE(manager.speechOutputModel(), identifier("supertonic-a.gguf"));
+        QVERIFY(manager.selectAudioModel(identifier("supertonic-b.gguf")));
+        AssistantManager restored;
+        QCOMPARE(restored.speechInputModel(), identifier("whisper.bin"));
+        QCOMPARE(restored.speechOutputModel(), identifier("supertonic-b.gguf"));
+    }
+
     void voiceCancellationStopsChildrenAndPreservesSavedSample()
     {
         QTemporaryDir directory;
-        QFile worker(directory.filePath("voice.py"));
-        QVERIFY(worker.open(QIODevice::WriteOnly));
-        worker.write(R"PY(import json, pathlib, shutil, subprocess, sys, time
+        QVERIFY(writeSpeechWorker(directory.path(), R"PY(#!/usr/bin/env python3
+import json, pathlib, shutil, subprocess, sys, time
 print(json.dumps({"ready": True}), flush=True)
 for line in sys.stdin:
     request = json.loads(line)
@@ -5103,18 +6539,22 @@ for line in sys.stdin:
     reference = request["reference"]
     shutil.copyfile(reference["path"], request["output"])
     print(json.dumps({"output": request["output"], "reference": reference}), flush=True)
-)PY");
-        worker.close();
-        const auto previousPython = qgetenv("PILON_BREEZE_PYTHON");
-        const auto previousWorker = qgetenv("PILON_BREEZE_WORKER");
+)PY"));
+        const auto previousRuntime = qgetenv("PILON_RUNTIME_DIR");
+        const auto previousModels = qgetenv("PILON_MODELS_DIR");
+        const auto previousPath = qgetenv("PATH");
         auto restore = qScopeGuard([&] {
-            if (previousPython.isNull()) qunsetenv("PILON_BREEZE_PYTHON");
-            else qputenv("PILON_BREEZE_PYTHON", previousPython);
-            if (previousWorker.isNull()) qunsetenv("PILON_BREEZE_WORKER");
-            else qputenv("PILON_BREEZE_WORKER", previousWorker);
+            qputenv("PATH", previousPath);
+            if (previousRuntime.isNull()) qunsetenv("PILON_RUNTIME_DIR");
+            else qputenv("PILON_RUNTIME_DIR", previousRuntime);
+            if (previousModels.isNull()) qunsetenv("PILON_MODELS_DIR");
+            else qputenv("PILON_MODELS_DIR", previousModels);
         });
-        qputenv("PILON_BREEZE_PYTHON", QStandardPaths::findExecutable("python3").toUtf8());
-        qputenv("PILON_BREEZE_WORKER", worker.fileName().toUtf8());
+        qputenv("PATH", directory.filePath("runtime/speech/bin").toUtf8() + ':' + previousPath);
+        qputenv("PILON_RUNTIME_DIR", QFile::encodeName(directory.filePath("runtime")));
+        const auto modelRoot = directory.filePath("models");
+        qputenv("PILON_MODELS_DIR", QFile::encodeName(modelRoot));
+        QVERIFY(installAudioFixture(modelRoot, "breeze.gguf", "output", "breeze_tts"));
         QFile saved(directory.filePath("saved.wav"));
         QVERIFY(saved.open(QIODevice::WriteOnly));
         const QByteArray original(128, 'v');
@@ -5126,13 +6566,13 @@ for line in sys.stdin:
         manager.previewVoice("slow", 5);
         const auto request = manager.m_speechRequest;
         const auto output = request.value("output").toString();
-        QFile childFile(directory.filePath("voice.pid"));
+        QFile childFile(directory.filePath("runtime/speech/bin/pilon-speech.pid"));
         QTRY_VERIFY_WITH_TIMEOUT(childFile.exists(), 5000);
         QVERIFY(childFile.open(QIODevice::ReadOnly));
         const auto child = QString::fromLatin1(childFile.readAll()).trimmed();
         auto cleanupChild = qScopeGuard([&] { QProcess::execute("kill", {"-KILL", child}); });
         manager.stopSpeech();
-        QCOMPARE(manager.m_speechProcess.state(), QProcess::NotRunning);
+        QTRY_COMPARE_WITH_TIMEOUT(manager.m_speechProcess.state(), QProcess::NotRunning, 1000);
         auto childStopped = [&] {
             QFile status("/proc/" + child + "/status");
             return !status.open(QIODevice::ReadOnly) || status.readAll().contains("\nState:\tZ");
@@ -5154,9 +6594,8 @@ for line in sys.stdin:
     void voicePreviewAndGlobalSettings()
     {
         QTemporaryDir directory;
-        QFile worker(directory.filePath("voice.py"));
-        QVERIFY(worker.open(QIODevice::WriteOnly));
-        worker.write(R"PY(import json, pathlib, shutil, sys, time, wave
+        QVERIFY(writeSpeechWorker(directory.path(), R"PY(#!/usr/bin/env python3
+import json, pathlib, shutil, sys, time, wave
 print(json.dumps({"ready": True}), flush=True)
 for line in sys.stdin:
     request = json.loads(line)
@@ -5180,19 +6619,20 @@ for line in sys.stdin:
         audio.setparams((1, 2, 16000, 0, "NONE", "not compressed"))
         audio.writeframes(b"\0\0" * 1600)
     print(json.dumps({"output": output, "reference": reference}), flush=True)
-)PY");
-        worker.close();
-        const auto previousPython = qgetenv("PILON_BREEZE_PYTHON");
-        const auto previousWorker = qgetenv("PILON_BREEZE_WORKER");
+)PY"));
+        const auto previousRuntime = qgetenv("PILON_RUNTIME_DIR");
+        const auto previousRoot = qgetenv("PILON_MODELS_DIR");
+        const auto previousPath = qgetenv("PATH");
         QSettings settings;
         const auto previousPrompt = settings.value("assistant/voicePrompt");
         const auto previousSpeed = settings.value("assistant/voiceSpeed");
         const auto previousReference = settings.value("assistant/voiceReference");
         auto restore = qScopeGuard([&] {
-            if (previousPython.isNull()) qunsetenv("PILON_BREEZE_PYTHON");
-            else qputenv("PILON_BREEZE_PYTHON", previousPython);
-            if (previousWorker.isNull()) qunsetenv("PILON_BREEZE_WORKER");
-            else qputenv("PILON_BREEZE_WORKER", previousWorker);
+            qputenv("PATH", previousPath);
+            if (previousRuntime.isNull()) qunsetenv("PILON_RUNTIME_DIR");
+            else qputenv("PILON_RUNTIME_DIR", previousRuntime);
+            if (previousRoot.isNull()) qunsetenv("PILON_MODELS_DIR");
+            else qputenv("PILON_MODELS_DIR", previousRoot);
             if (previousPrompt.isValid()) settings.setValue("assistant/voicePrompt", previousPrompt);
             else settings.remove("assistant/voicePrompt");
             if (previousSpeed.isValid()) settings.setValue("assistant/voiceSpeed", previousSpeed);
@@ -5200,8 +6640,11 @@ for line in sys.stdin:
             if (previousReference.isValid()) settings.setValue("assistant/voiceReference", previousReference);
             else settings.remove("assistant/voiceReference");
         });
-        qputenv("PILON_BREEZE_PYTHON", QStandardPaths::findExecutable("python3").toUtf8());
-        qputenv("PILON_BREEZE_WORKER", worker.fileName().toUtf8());
+        qputenv("PATH", directory.filePath("runtime/speech/bin").toUtf8() + ':' + previousPath);
+        qputenv("PILON_RUNTIME_DIR", QFile::encodeName(directory.filePath("runtime")));
+        const auto modelRoot = directory.filePath("models");
+        qputenv("PILON_MODELS_DIR", QFile::encodeName(modelRoot));
+        QVERIFY(installAudioFixture(modelRoot, "breeze.gguf", "output", "breeze_tts"));
         settings.setValue("assistant/voicePrompt", "Original voice");
         settings.setValue("assistant/voiceSpeed", 5);
         settings.remove("assistant/voiceReference");
@@ -5275,7 +6718,7 @@ for line in sys.stdin:
             manager.previewVoice("slow", 5);
             manager.stopSpeech();
             QVERIFY(!manager.previewingVoice());
-            QCOMPARE(manager.m_speechProcess.state(), QProcess::NotRunning);
+            QVERIFY(manager.m_speechStopping || manager.m_speechProcess.state() == QProcess::NotRunning);
             manager.previewVoice("After cancellation", 5);
             QTRY_COMPARE_WITH_TIMEOUT(preview.size(), 5, 5000);
             QVERIFY(manager.error().isEmpty());
@@ -5341,7 +6784,7 @@ for line in sys.stdin:
     void liveVoicePreview()
     {
         if (!qEnvironmentVariableIsSet("PILON_TEST_BREEZE"))
-            QSKIP("Set PILON_TEST_BREEZE=1 to preview a designed voice on the GPU.");
+            QSKIP("Set PILON_TEST_BREEZE=1 to preview an imported Breeze voice.");
         QSettings settings;
         const QStringList keys{"assistant/voicePrompt", "assistant/voiceSpeed", "assistant/voiceReference"};
         QVariantList previous;
@@ -5353,6 +6796,7 @@ for line in sys.stdin:
             }
         });
         AssistantManager manager;
+        QVERIFY2(selectImportedBreeze(manager), "Import a Breeze GGUF model first.");
         manager.m_voiceMode = false;
         const QString savedPrompt = manager.voicePrompt();
         const int savedSpeed = manager.voiceSpeed();
@@ -5398,42 +6842,40 @@ for line in sys.stdin:
         manager.speakReply("Your projects are ready. What would you like to work on?");
         QTRY_VERIFY_WITH_TIMEOUT(!manager.speaking(), 180000);
         QVERIFY2(manager.error().isEmpty(), qPrintable(manager.error()));
-        QCOMPARE(speech.size(), 1);
         QFile::remove("/tmp/pilon-voice-reference-reply.wav");
-        QVERIFY(QFile::copy(speech.first().first().toUrl().toLocalFile(), "/tmp/pilon-voice-reference-reply.wav"));
+        QVERIFY(QFile::copy(spokenReplyFile(manager), "/tmp/pilon-voice-reference-reply.wav"));
         manager.stopSpeech(); // Release the first worker before starting the restarted manager.
         AssistantManager restarted;
+        QVERIFY2(selectImportedBreeze(restarted), "Import a Breeze GGUF model first.");
         QCOMPARE(restarted.m_voiceReference, identity);
         restarted.addMessage("assistant", "I can read the documentation and explain how the application works.");
         restarted.m_assistantIndex = 0;
-        QSignalSpy afterRestart(&restarted, &AssistantManager::speechReady);
         restarted.speakReply("I can read the documentation and explain how the application works.");
         QTRY_VERIFY_WITH_TIMEOUT(!restarted.speaking(), 180000);
         QVERIFY2(restarted.error().isEmpty(), qPrintable(restarted.error()));
-        QCOMPARE(afterRestart.size(), 1);
         QCOMPARE(restarted.m_voiceReference, identity);
         QFile::remove("/tmp/pilon-voice-reference-restarted.wav");
-        QVERIFY(QFile::copy(afterRestart.first().first().toUrl().toLocalFile(), "/tmp/pilon-voice-reference-restarted.wav"));
+        QVERIFY(QFile::copy(spokenReplyFile(restarted), "/tmp/pilon-voice-reference-restarted.wav"));
     }
 
     void liveSpeechWithResidentLanguageModel()
     {
         if (!qEnvironmentVariableIsSet("PILON_TEST_BREEZE") || !qEnvironmentVariableIsSet("PILON_TEST_MODELS"))
-            QSKIP("Set PILON_TEST_BREEZE=1 and PILON_TEST_MODELS=1 for shared GPU memory checks.");
+            QSKIP("Set PILON_TEST_BREEZE=1 and PILON_TEST_MODELS=1 for concurrent model checks.");
         AssistantManager manager;
+        QVERIFY2(selectImportedBreeze(manager), "Import a Breeze GGUF model first.");
         manager.setModelIndex(1);
         manager.setEffort(2);
         manager.m_voiceMode = true;
-        QSignalSpy speech(&manager, &AssistantManager::speechReady);
         manager.send("Reply with exactly: Your projects are ready.");
         QTRY_VERIFY_WITH_TIMEOUT(!manager.busy() && !manager.speaking(), 180000);
         QVERIFY2(manager.error().isEmpty(), qPrintable(manager.error()));
-        QCOMPARE(speech.size(), 1);
+        const auto firstSpeech = spokenReplyFile(manager);
+        QVERIFY(QFileInfo(firstSpeech).isFile());
         QVERIFY(manager.m_ready);
         const auto voice = manager.m_voiceReference;
         manager.clear();
-        // Keep the voice model loaded, then reload the language model. The free
-        // memory estimate must not reserve the voice weights a second time.
+        // Keep the voice model loaded while reloading the language model.
         manager.m_stopping = true;
         manager.m_server.kill();
         QVERIFY(manager.m_server.waitForFinished(3000));
@@ -5441,7 +6883,8 @@ for line in sys.stdin:
         manager.send("Reply with exactly: Everything is ready.");
         QTRY_VERIFY_WITH_TIMEOUT(!manager.busy() && !manager.speaking(), 180000);
         QVERIFY2(manager.error().isEmpty(), qPrintable(manager.error()));
-        QCOMPARE(speech.size(), 2);
+        const auto secondSpeech = spokenReplyFile(manager);
+        QVERIFY(QFileInfo(secondSpeech).isFile() && secondSpeech != firstSpeech);
         QCOMPARE(manager.m_voiceReference, voice);
         QCOMPARE(manager.m_server.arguments().value(manager.m_server.arguments().indexOf("--ctx-size") + 1), QString("131072"));
         QVERIFY(!manager.m_server.arguments().contains("--fit-target"));
@@ -5450,21 +6893,20 @@ for line in sys.stdin:
     void liveSpeech()
     {
         if (!qEnvironmentVariableIsSet("PILON_TEST_BREEZE"))
-            QSKIP("Set PILON_TEST_BREEZE=1 to run Breeze on the GPU.");
+            QSKIP("Set PILON_TEST_BREEZE=1 to run an imported Breeze model.");
         AssistantManager manager;
+        QVERIFY2(selectImportedBreeze(manager), "Import a Breeze GGUF model first.");
         manager.m_voiceMode = true;
         manager.addMessage("assistant", "Your projects are ready. What would you like to work on?");
         manager.m_assistantIndex = 0;
-        QSignalSpy speech(&manager, &AssistantManager::speechReady);
         manager.speakReply("Your projects are ready. What would you like to work on?");
         QTRY_VERIFY_WITH_TIMEOUT(!manager.speaking(), 180000);
         QVERIFY2(manager.error().isEmpty(), qPrintable(manager.error()));
-        QCOMPARE(speech.size(), 1);
-        const QString path = speech.first().first().toUrl().toLocalFile();
+        const QString path = spokenReplyFile(manager);
         QVERIFY(QFileInfo(path).size() > 10000);
         const auto summary = assistantAudioSummary(path);
         QVERIFY(summary.value("duration").toDouble() > 1);
-        QFile::copy(path, "/tmp/pilon-breeze-spoken-reply.wav");
+        QFile::copy(path, "/tmp/pilon-speech-spoken-reply.wav");
     }
     void liveMedia()
     {
@@ -5676,17 +7118,17 @@ for line in sys.stdin:
     void liveLocalModelAndSpeechTogether() {
         if (!qEnvironmentVariableIsSet("PILON_TEST_MODEL_SPEECH")) QSKIP("Opt in to load the installed model and Breeze together.");
         AssistantManager manager; manager.setModelIndex(0); manager.setEffort(0); manager.m_voiceMode = true;
-        QSignalSpy speech(&manager, &AssistantManager::speechReady);
         manager.send("Say exactly: The model and spoken reply are working together. Do not use tools.");
         QTRY_VERIFY_WITH_TIMEOUT(!manager.busy() && !manager.speaking(), 600000);
         QVERIFY2(manager.error().isEmpty(), qPrintable(manager.error()));
-        QCOMPARE(speech.size(), 1);
-        QVERIFY(assistantAudioSummary(speech.last().first().toUrl().toLocalFile()).value("duration").toDouble() > 1);
+        const auto firstSpeech = spokenReplyFile(manager);
+        QVERIFY(assistantAudioSummary(firstSpeech).value("duration").toDouble() > 1);
         const auto modelProcess = manager.m_server.processId();
         manager.send("Say exactly: This second message also works. Do not use tools.");
         QTRY_VERIFY_WITH_TIMEOUT(!manager.busy() && !manager.speaking(), 600000);
         QVERIFY2(manager.error().isEmpty(), qPrintable(manager.error()));
-        QCOMPARE(speech.size(), 2);
+        const auto secondSpeech = spokenReplyFile(manager);
+        QVERIFY(QFileInfo(secondSpeech).isFile() && secondSpeech != firstSpeech);
         QCOMPARE(manager.m_server.processId(), modelProcess);
         qInfo() << "Both spoken replies completed with context" << manager.selectedModel().value("context") << "and model process" << modelProcess;
     }

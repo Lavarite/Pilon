@@ -22,7 +22,6 @@ TestCase {
             QtObject {
                 id: manager
                 property bool active: true
-                property bool gitUpdating: false
                 property var shares: []
                 property string error: ""
                 property string today: "2026-11-10"
@@ -71,11 +70,8 @@ TestCase {
                 property color selectedMainColour: "#241e1a"
                 property color selectedTextColour: "#d3c4b5"
                 property color selectedAccentColour: "#ffb86c"
-                property int owners: 0
                 property var selections: []
                 property bool selectionAllowed: true
-                function registerWorkspaceOwner(owner) { owners++ }
-                function unregisterWorkspaceOwner(owner) { owners-- }
                 function selectPage(id) { selections = selections.concat([id]); return selectionAllowed }
                 function pageInstance(id) { return page }
             }
@@ -86,7 +82,6 @@ TestCase {
     function test_publicationUsesScopedGenerationPaletteAndCoalesces() {
         const item = createTemporaryObject(fixture, test)
         tryCompare(item.service, "committed", 4)
-        compare(item.context.owners, 1)
         compare(item.service.publications.length, 1)
         compare(item.service.publications[0].id, "agenda")
         compare(item.service.publications[0].snapshot.palette.background, "#241e1a")
@@ -108,13 +103,11 @@ TestCase {
             item.destroy()
         }
     }
-    function test_inactiveAndGitUpdatingWaitForResume() {
+    function test_inactiveWaitsForResume() {
         const item = createTemporaryObject(fixture, test, {paused:true})
         item.manager.active = false; item.paused = false; settled()
         compare(item.service.publications.length, 0)
-        item.manager.gitUpdating = true; item.manager.active = true; settled()
-        compare(item.service.publications.length, 0)
-        item.manager.gitUpdating = false
+        item.manager.active = true
         tryCompare(item.service, "committed", 4)
     }
     function test_headerUsesPublishedPeriodAndDoesNotCreate() {

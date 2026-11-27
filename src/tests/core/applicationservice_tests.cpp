@@ -12,6 +12,8 @@
 #include <QJsonObject>
 #include <QJsonDocument>
 #include <QLocalSocket>
+#include <QProcess>
+#include <QProcessEnvironment>
 #include <QUrl>
 #include <QSettings>
 #include <QFileOpenEvent>
@@ -39,6 +41,8 @@ private slots:
         QFile script(commands.filePath("systemctl")); QVERIFY(script.open(QIODevice::WriteOnly));
         script.write("#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$PILON_SERVICE_TEST_LOG\"\n"
                      "[ -z \"$PILON_SERVICE_TEST_MARKER\" ] || [ -f \"$PILON_SERVICE_TEST_MARKER\" ] || exit 1\n"
+                     "if [ \"$2\" = daemon-reload ] && [ -n \"$PILON_SERVICE_TEST_RELOAD_UNIT\" ]; then\n"
+                     "    [ -f \"$PILON_SERVICE_TEST_RELOAD_UNIT\" ] || exit 1\nfi\n"
                      "[ \"$PILON_SERVICE_TEST_FAIL\" != 1 ]\n"); script.close();
         QVERIFY(script.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
         qputenv("PATH", commands.path().toUtf8() + ':' + originalPath);
@@ -58,6 +62,9 @@ private slots:
         for (const auto &bad : {"https://widget/org.example.fixture/list", "pilon://user@widget/org.example.fixture/list",
                  "pilon://widget/org.example.fixture/../list", "pilon://widget/org.example.fixture/list?command=bad"})
             QVERIFY(!service.receiveWidgetUrl(QUrl(bad)));
+        for (const auto &bad : {"&action=open%0A&generation=1", "&action=open&generation=1%0A",
+                               "&action=open&action=other&generation=1", "&action=open&generation=9007199254740992"})
+            QVERIFY(!service.receiveWidgetUrl(QUrl(base + bad)));
         QWindow window; service.setWindow(&window);
         QCOMPARE(requested.size(), 1); QCOMPARE(requested.takeFirst().at(0).toStringList(), QStringList{valid.toString()});
         QVERIFY(service.receiveWidgetUrl(valid)); QCOMPARE(requested.size(), 1);
@@ -93,6 +100,25 @@ private slots:
         const auto cleanupUnit = qScopeGuard([&] { qunsetenv("PILON_SERVICE_TEST_MARKER"); service.configureStartup(false); });
         const auto file = QUrl::fromLocalFile(transfer.filePath("settings.piconfpack"));
         QVERIFY2(service.exportConfiguration(file), qPrintable(service.error()));
+        const auto hidden = QUrl::fromLocalFile(transfer.filePath(".settings.piconfpack"));
+        QFile hiddenFile(hidden.toLocalFile());
+        QVERIFY(hiddenFile.open(QIODevice::WriteOnly));
+        QCOMPARE(hiddenFile.write("existing"), 8);
+        hiddenFile.close();
+        QVERIFY(service.configurationExportTargetExists(hidden));
+        QVERIFY(!service.exportConfiguration(hidden, false));
+        QVERIFY(hiddenFile.open(QIODevice::ReadOnly));
+        QCOMPARE(hiddenFile.readAll(), QByteArray("existing"));
+        hiddenFile.close();
+        QVERIFY2(service.exportConfiguration(hidden, true), qPrintable(service.error()));
+        QVERIFY(service.prepareConfigurationExport("../settings.piconfpack").isEmpty());
+        const auto staged = service.prepareConfigurationExport("settings backup.PICONFPACK");
+        QVERIFY2(staged.isLocalFile(), qPrintable(service.error()));
+        QCOMPARE(QFileInfo(staged.toLocalFile()).fileName(), QString("settings backup.PICONFPACK"));
+        PiconfDocument stagedConfiguration;
+        QVERIFY2(PiconfBundle::open(staged, stagedConfiguration, error), qPrintable(error));
+        service.discardConfigurationExport();
+        QVERIFY(!QFileInfo::exists(staged.toLocalFile()));
         PiconfDocument imported;
         QVERIFY(PiconfBundle::open(file, imported, error));
         QVERIFY(imported.setValue(PiconfDocument::MainPath, {"appearance","frostiness"}, 41, error));
@@ -133,12 +159,12 @@ private slots:
         QVERIFY2(prefs.start(root,error), qPrintable(error));
         QCOMPARE(PilonSettings().value("Pilon/glassFrostiness").toInt(), 41);
         QVERIFY(!service.previewConfiguration(file, {}).value("different").toBool());
-        // An unreadable editable file can be restored from the saved bundle.
-        prefs.stop();
+        // An editable file corrupted after startup can be restored from the saved bundle.
         QFile broken(workspace.filePath(PiconfDocument::MainPath));
         QVERIFY(broken.open(QIODevice::WriteOnly | QIODevice::Truncate));
         broken.write("invalid graph\n"); broken.close();
-        QVERIFY(!prefs.start(root, error));
+        QVERIFY(!prefs.flush(error));
+        QVERIFY(prefs.active());
         const auto restore = service.previewConfiguration(file, {});
         QVERIFY2(restore.value("summary").toString().contains("Restore"), qPrintable(service.error()));
         QVERIFY(restore.value("details").toString().contains(PiconfDocument::MainPath));
@@ -148,6 +174,41 @@ private slots:
         QVERIFY2(service.finishConfigurationImport(error), qPrintable(error));
         QVERIFY2(prefs.start(root, error), qPrintable(error));
         QCOMPARE(PilonSettings().value("Pilon/glassFrostiness").toInt(), 41);
+    }
+    void backgroundSettingFailureRestoresRegistration() {
+        QTemporaryDir workspace;
+        QSettings bootstrap(PilonWorkspace::bootstrapFile(), QSettings::IniFormat);
+        const auto original = bootstrap.value("workspace/root");
+        bootstrap.setValue("workspace/root", workspace.path()); bootstrap.sync();
+        const auto restore = qScopeGuard([&] { bootstrap.setValue("workspace/root", original); bootstrap.sync(); });
+        const auto path = workspace.filePath(".pilon/settings.ini");
+        QVERIFY(QDir().mkpath(path));
+        ApplicationService service(false);
+        const auto cleanUnit = qScopeGuard([&] { service.configureStartup(false); });
+        const auto unit = QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + "/systemd/user/pilon.service";
+        QVERIFY(!service.setBackgroundEnabled(true));
+        QVERIFY(!service.backgroundEnabled());
+        QVERIFY(!service.error().isEmpty());
+        QVERIFY(!QFileInfo::exists(unit));
+        QVERIFY(QDir().rmdir(path));
+        QVERIFY(!PilonSettings().value("app/backgroundEnabled", false).toBool());
+    }
+    void backgroundRemovalFailsWhenFinalReloadFails() {
+        ApplicationService service(false);
+        const auto cleanUnit = qScopeGuard([&] {
+            qunsetenv("PILON_SERVICE_TEST_RELOAD_UNIT");
+            service.configureStartup(false);
+            QFile::remove(service.workspaceRoot() + "/.pilon/piconf-startup-pending");
+        });
+        QVERIFY(service.setBackgroundEnabled(true));
+        const auto unit = QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + "/systemd/user/pilon.service";
+        const auto original = contents(unit);
+        QVERIFY(!original.isEmpty());
+        qputenv("PILON_SERVICE_TEST_RELOAD_UNIT", unit.toUtf8());
+        QVERIFY(!service.setBackgroundEnabled(false));
+        QVERIFY(service.backgroundEnabled());
+        QCOMPARE(contents(unit), original);
+        QVERIFY(PilonSettings().value("app/backgroundEnabled").toBool());
     }
     void handEditedStartupSettingRollsBackIfServiceRegistrationFails() {
         ApplicationService service(false);
@@ -172,6 +233,7 @@ private slots:
         const QString marker = service.workspaceRoot() + "/.pilon/piconf-startup-pending";
         const QString calls = commands.filePath("calls");
         const auto cleanup = qScopeGuard([&] {
+            PiconfPreferences::instance().stop();
             qunsetenv("PILON_SERVICE_TEST_FAIL");
             QFile::remove(marker);
             service.configureStartup(false);
@@ -184,17 +246,17 @@ private slots:
         QVERIFY(writeFile(marker, "1\n"));
         qputenv("PILON_SERVICE_TEST_FAIL", "1");
         QString error;
-        QVERIFY(!service.reconcileConfiguredStartup(enabled, error));
+        QVERIFY(!service.startConfiguration(error));
         QVERIFY(!error.isEmpty());
         QVERIFY(QFileInfo::exists(marker));
         QCOMPARE(PilonSettings().value("app/backgroundEnabled").toBool(), enabled);
         qunsetenv("PILON_SERVICE_TEST_FAIL");
         QVERIFY(writeFile(calls, ""));
-        QVERIFY2(service.reconcileConfiguredStartup(enabled, error), qPrintable(error));
+        QVERIFY2(service.startConfiguration(error), qPrintable(error));
         QVERIFY(!QFileInfo::exists(marker));
         const auto recoveryCalls = contents(calls);
         QVERIFY(recoveryCalls.contains(enabled ? "--user enable pilon.service" : "--user disable pilon.service"));
-        QVERIFY(service.reconcileConfiguredStartup(enabled, error));
+        QVERIFY(service.startConfiguration(error));
         QCOMPARE(contents(calls), recoveryCalls);
     }
     void setupIsOptionalAndCompletionPersists() {
@@ -299,7 +361,7 @@ private slots:
     void resetErasesOnlyDeclaredDeselectedData() {
         QTemporaryDir directory;
         const ApplicationReset::Locations paths{directory.filePath("Root")};
-        const QStringList files{"Documents/Note.pin", "Downloads/model.bin", "addon-data/org.example.test/settings.ini",
+        const QStringList files{"Documents/Note.pin", "Downloads/model.bin", "addons/org.example.test/data/settings.ini",
                                 "Other/Personal.txt", "addons/org.example.test.piext", ".pilon/addons/registry.json"};
         for (const auto &relative : files) QVERIFY(writeFile(QDir(paths.workspaceRoot).filePath(relative)));
         const auto external = directory.filePath("External.txt"); QVERIFY(writeFile(external));
@@ -396,6 +458,52 @@ private slots:
         QVERIFY(QFile::link(external,root+"/Data/link"));
         QVERIFY(!ApplicationReset::removeSelected({{"personal",false}},{{"personal",QStringList{"Data"}}},{root},&error));
         QVERIFY(error.contains("linked")); QCOMPARE(contents(external),QByteArray("personal"));
+    }
+    void interruptedResetRestoresNestedSelectedData() {
+        QTemporaryDir workspace;
+        const auto stage = workspace.filePath(".pilon/.reset-fixture");
+        const auto journal = workspace.filePath(".pilon/reset-journal.json");
+        QVERIFY(writeFile(stage + "/0", "first staged note"));
+        QVERIFY(writeFile(workspace.filePath("Documents/Next.pin"), "not yet moved"));
+        QVERIFY(writeFile(workspace.filePath("Documents/Kept.pin"), "keep"));
+        QVERIFY(writeFile(journal, QJsonDocument(QJsonObject{{"stage", ".reset-fixture"},
+            {"paths", QJsonArray{"Documents/Note.pin", "Documents/Next.pin"}},
+            {"committing", false}, {"clearPreferences", true}}).toJson()));
+        QString error;
+        QVERIFY2(ApplicationReset::recover({workspace.path()}, &error), qPrintable(error));
+        QCOMPARE(contents(workspace.filePath("Documents/Note.pin")), QByteArray("first staged note"));
+        QCOMPARE(contents(workspace.filePath("Documents/Next.pin")), QByteArray("not yet moved"));
+        QCOMPARE(contents(workspace.filePath("Documents/Kept.pin")), QByteArray("keep"));
+        QVERIFY(!QFileInfo::exists(stage));
+        QVERIFY(!QFileInfo::exists(journal));
+    }
+    void resetKeepsStagedFilesUntilPreferencesCommit() {
+        QTemporaryDir workspace;
+        QSettings bootstrap(PilonWorkspace::bootstrapFile(), QSettings::IniFormat);
+        const auto previous = bootstrap.value("workspace/root");
+        bootstrap.setValue("workspace/root", workspace.path()); bootstrap.sync();
+        const auto restoreRoot = qScopeGuard([&] { bootstrap.setValue("workspace/root", previous); bootstrap.sync(); });
+        const auto stage = workspace.filePath(".pilon/.reset-fixture");
+        const auto journal = workspace.filePath(".pilon/reset-journal.json");
+        QVERIFY(writeFile(stage + "/0", "staged note"));
+        QVERIFY(writeFile(journal, QJsonDocument(QJsonObject{{"stage", ".reset-fixture"},
+            {"paths", QJsonArray{"Documents/Note.pin"}}, {"committing", true}, {"clearPreferences", true}}).toJson()));
+        PilonSettings settings;
+        settings.setValue("Pilon/touchMode", true); settings.sync();
+        const auto folder = workspace.filePath(".pilon");
+        const auto permissions = QFileInfo(folder).permissions();
+        const auto restorePermissions = qScopeGuard([&] { QFile::setPermissions(folder, permissions); });
+        QVERIFY(QFile::setPermissions(folder, QFile::ReadOwner | QFile::ExeOwner));
+        QString error;
+        QVERIFY(!ApplicationReset::recover({workspace.path()}, &error));
+        QCOMPARE(contents(stage + "/0"), QByteArray("staged note"));
+        QVERIFY(PilonSettings().value("Pilon/touchMode").toBool());
+        QVERIFY(QFile::setPermissions(folder, permissions));
+        QVERIFY2(ApplicationReset::recover({workspace.path()}, &error), qPrintable(error));
+        QVERIFY(!QFileInfo::exists(stage));
+        QVERIFY(!QFileInfo::exists(journal));
+        QVERIFY(PilonSettings().value("app/setupPending").toBool());
+        QVERIFY(!PilonSettings().contains("Pilon/touchMode"));
     }
     void resetPreparedRootMustStillMatchTheReviewedWorkspace() {
         const auto original=PilonWorkspace::configuredRoot();
@@ -501,10 +609,11 @@ private slots:
     }
     void startupPreferenceDoesNotChangeTrayOrWindowState() {
         ApplicationService service(false); QVERIFY(service.claimInstance());
+        const bool canHide = service.canHideToTray();
         QVERIFY(!service.backgroundEnabled());
         QVERIFY(service.trayEnabled());
         QVERIFY(service.setBackgroundEnabled(true));
-        QVERIFY(service.backgroundEnabled()); QVERIFY(!qApp->quitOnLastWindowClosed());
+        QVERIFY(service.backgroundEnabled()); QCOMPARE(qApp->quitOnLastWindowClosed(), !canHide);
         QFile unit(QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + "/systemd/user/pilon.service");
         QVERIFY(unit.open(QIODevice::ReadOnly));
         const auto contents = unit.readAll(); unit.close();
@@ -512,10 +621,10 @@ private slots:
         QVERIFY(contents.contains("Restart=on-failure"));
         QVERIFY(PilonSettings().value("app/backgroundEnabled").toBool());
         QWindow window; service.setWindow(&window);
-        window.show(); service.hideWindow(); QVERIFY(!window.isVisible());
+        window.show(); service.hideWindow(); QCOMPARE(window.isVisible(), !canHide);
         QVERIFY(service.setBackgroundEnabled(false));
         QVERIFY(!unit.exists()); QVERIFY(!PilonSettings().value("app/backgroundEnabled").toBool());
-        QVERIFY(!window.isVisible()); QVERIFY(service.trayEnabled()); QVERIFY(!qApp->quitOnLastWindowClosed());
+        QCOMPARE(window.isVisible(), !canHide); QVERIFY(service.trayEnabled()); QCOMPARE(qApp->quitOnLastWindowClosed(), !canHide);
         QFile calls(commands.filePath("calls")); QVERIFY(calls.open(QIODevice::ReadOnly));
         const auto arguments = calls.readAll();
         QVERIFY(arguments.contains("--user enable pilon.service")); QVERIFY(arguments.contains("--user disable pilon.service"));
@@ -523,10 +632,11 @@ private slots:
     }
     void trayPreferenceIsIndependentOfStartupAndPersists() {
         ApplicationService service(false); QVERIFY(service.claimInstance());
+        const bool canHide = service.canHideToTray();
         QVERIFY(service.trayEnabled()); QVERIFY(!service.backgroundEnabled());
-        QVERIFY(!qApp->quitOnLastWindowClosed());
+        QCOMPARE(qApp->quitOnLastWindowClosed(), !canHide);
         QWindow window; service.setWindow(&window); window.show();
-        service.hideWindow(); QVERIFY(!window.isVisible());
+        service.hideWindow(); QCOMPARE(window.isVisible(), !canHide);
         QVERIFY(service.setTrayEnabled(false)); QVERIFY(!service.trayEnabled());
         QVERIFY(window.isVisible()); QVERIFY(qApp->quitOnLastWindowClosed());
         service.hideWindow(); QVERIFY(window.isVisible());
@@ -537,10 +647,10 @@ private slots:
         QVERIFY(unit.open(QIODevice::ReadOnly)); const auto contents = unit.readAll(); unit.close();
         ApplicationService reloaded(false); QVERIFY(!reloaded.trayEnabled()); QVERIFY(reloaded.backgroundEnabled());
         QVERIFY(service.setTrayEnabled(true)); QVERIFY(service.trayEnabled());
-        QVERIFY(service.backgroundEnabled()); QVERIFY(!qApp->quitOnLastWindowClosed());
+        QVERIFY(service.backgroundEnabled()); QCOMPARE(qApp->quitOnLastWindowClosed(), !canHide);
         QVERIFY(unit.open(QIODevice::ReadOnly)); QCOMPARE(unit.readAll(), contents);
         QVERIFY(service.setBackgroundEnabled(false)); QVERIFY(service.trayEnabled());
-        QVERIFY(!qApp->quitOnLastWindowClosed());
+        QCOMPARE(qApp->quitOnLastWindowClosed(), !canHide);
     }
     void trayPersistenceFailureLeavesCurrentBehaviorUnchanged() {
         ApplicationService service(false); QVERIFY(service.setTrayEnabled(false));
@@ -564,6 +674,19 @@ private slots:
         QVERIFY(window.isVisible()); QVERIFY(service.backgroundEnabled()); QVERIFY(!service.trayEnabled());
         service.hideWindow(); QVERIFY(window.isVisible());
     }
+    void missingSystemTrayCannotHideAnEnabledWindow() {
+        QVERIFY(!QSystemTrayIcon::isSystemTrayAvailable());
+        PilonSettings().setValue("app/backgroundEnabled", true);
+        ApplicationService service(true);
+        QVERIFY(service.claimInstance());
+        QWindow window;
+        service.setWindow(&window);
+        QVERIFY(service.trayEnabled());
+        QVERIFY(window.isVisible());
+        QVERIFY(qApp->quitOnLastWindowClosed());
+        service.hideWindow();
+        QVERIFY(window.isVisible());
+    }
     void failureKeepsPreferenceAndPreviousService() {
         ApplicationService service(false); QVERIFY(service.setBackgroundEnabled(true));
         qputenv("PILON_SERVICE_TEST_FAIL", "1");
@@ -579,10 +702,11 @@ private slots:
     void singleInstanceReopensTheExistingWindow() {
         PilonSettings().setValue("app/backgroundEnabled", true);
         ApplicationService first(true); QVERIFY(first.claimInstance());
-        QWindow window; first.setWindow(&window); QVERIFY(!window.isVisible());
+        QWindow window; first.setWindow(&window); QCOMPARE(window.isVisible(), !first.canHideToTray());
+        window.hide();
         ApplicationService second(false); QVERIFY(!second.claimInstance()); QVERIFY(second.error().isEmpty());
         QTRY_VERIFY(window.isVisible());
-        first.hideWindow(); QVERIFY(!window.isVisible());
+        window.hide();
         ApplicationService startup(true); QVERIFY(!startup.claimInstance());
         QTest::qWait(30); QVERIFY(!window.isVisible());
         first.showWindow(); QVERIFY(window.isVisible());
@@ -618,8 +742,38 @@ private slots:
         socket.write(QJsonDocument(QJsonObject{{"open", QJsonArray{note, extension, "https://example.invalid/evil.piext"}}}).toJson(QJsonDocument::Compact) + '\n');
         socket.flush();
         QTRY_COMPARE(opened.count(), 1);
-        QCOMPARE(opened.first().first().toStringList(), QStringList({note, extension}));
+        QCOMPARE(opened.first().first().toStringList(), QStringList({QUrl(note).toString(QUrl::FullyEncoded), extension}));
+        QTRY_VERIFY(socket.canReadLine());
+        QCOMPARE(socket.readLine(), QByteArray("accepted\n"));
         QVERIFY(window.isVisible());
+    }
+    void secondaryLaunchForwardsEveryFileAcrossFrames() {
+        ApplicationService service(false);
+        QVERIFY(service.claimInstance());
+        QWindow window;
+        service.setWindow(&window);
+        QStringList received;
+        connect(&service, &ApplicationService::filesRequested, this, [&](const QStringList &files) { received += files; });
+        QStringList paths, expected;
+        for (int i = 0; i < 145; ++i) {
+            const auto folder = i < 70 ? QString("Folder with spaces %1").arg(i) : QString(80, 'd').append('/').repeated(15);
+            const auto path = QDir::cleanPath(commands.filePath(folder + QString("/%1 #revision?.pin").arg(i)));
+            QVERIFY(QDir().mkpath(QFileInfo(path).absolutePath()));
+            QFile file(path);
+            QVERIFY(file.open(QIODevice::WriteOnly));
+            file.close();
+            const auto url = QUrl::fromLocalFile(path).toString(QUrl::FullyEncoded);
+            paths << (i % 2 ? url : path);
+            expected << url;
+        }
+        QProcess client;
+        auto environment = QProcessEnvironment::systemEnvironment();
+        environment.insert("PILON_TEST_OPEN_CLIENT", "1");
+        client.setProcessEnvironment(environment);
+        client.start(QCoreApplication::applicationFilePath(), QStringList{"-platform", "offscreen"} + paths);
+        QTRY_COMPARE_WITH_TIMEOUT(client.state(), QProcess::NotRunning, 10000);
+        QCOMPARE(client.exitCode(), 0);
+        QCOMPARE(received, expected);
     }
     void servicePathEscapesSystemdExpansion() {
         const auto unit = ApplicationService::unitContents("/folder with space/100% $test/\"pilon\"");
@@ -634,17 +788,45 @@ private slots:
         QCOMPARE(quitting.size(), 1);
         QVERIFY(window.isVisible());
     }
+    void trayQuitOnlyRevealsHiddenWindowAfterRejection() {
+        ApplicationService service(false);
+        QWindow window; service.setWindow(&window);
+        auto *quit = service.m_menu.actions().constLast();
+        QSignalSpy requested(&service, &ApplicationService::quitRequested);
+        QSignalSpy visibility(&window, &QWindow::visibleChanged);
+        const auto defer = connect(&service, &ApplicationService::quitRequested, &service, &ApplicationService::deferQuit);
+        quit->trigger();
+        QCOMPARE(requested.size(), 1);
+        QVERIFY(!window.isVisible());
+        disconnect(defer);
+        quit->trigger();
+        QCOMPARE(requested.size(), 2);
+        QVERIFY(visibility.isEmpty());
+
+        connect(&service, &ApplicationService::quitRequested, &service, &ApplicationService::cancelQuit);
+        quit->trigger();
+        QCOMPARE(requested.size(), 3);
+        QCOMPARE(visibility.size(), 1);
+        QVERIFY(window.isVisible());
+    }
 };
 int main(int argc, char **argv) {
     QTemporaryDir directory;
-    qputenv("XDG_CONFIG_HOME", directory.filePath("config").toUtf8());
-    qputenv("XDG_DATA_HOME", directory.filePath("data").toUtf8());
-    qputenv("XDG_CACHE_HOME", directory.filePath("cache").toUtf8());
+    const bool secondary = qEnvironmentVariableIsSet("PILON_TEST_OPEN_CLIENT");
+    if (!secondary) {
+        qputenv("XDG_CONFIG_HOME", directory.filePath("config").toUtf8());
+        qputenv("XDG_DATA_HOME", directory.filePath("data").toUtf8());
+        qputenv("XDG_CACHE_HOME", directory.filePath("cache").toUtf8());
+    }
     // These service tests do not exercise networking; keep Qt backend probes off the host buses.
     qputenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=" + directory.filePath("session-bus-unavailable").toUtf8());
     qputenv("DBUS_SYSTEM_BUS_ADDRESS", "unix:path=" + directory.filePath("system-bus-unavailable").toUtf8());
     QApplication app(argc, argv);
     QCoreApplication::setOrganizationName("PilonTests"); QCoreApplication::setApplicationName("ApplicationService");
+    if (secondary) {
+        ApplicationService service(false);
+        return !service.claimInstance() && service.error().isEmpty() ? 0 : 1;
+    }
     const auto root=directory.filePath("Root");
     if (!QDir().mkpath(root+"/.pilon")) return 1;
     QSettings bootstrap(PilonWorkspace::bootstrapFile(),QSettings::IniFormat);

@@ -31,6 +31,12 @@ Item {
     property bool canOpenFiles: true
     property var deviceDiscovery: null
     property bool sshEnabled: true
+    readonly property bool tailnetDisconnected: sshEnabled && deviceDiscovery?.usesTailscale === true
+        && tailscaleManager.vpnDisconnected === true
+    readonly property string tailscaleConnectionMessage: qsTr("Connect Tailscale to access its devices.")
+    readonly property string emptyLocationStatus: tailnetDisconnected && (tailscaleManager.loggedIn === true
+        || tailscaleManager.usedByPilon === true || tailscaleManager.discoveryConnected === true)
+        ? tailscaleConnectionMessage : ""
     readonly property var sshDeviceOptions: {
         const saved = tailscaleManager.savedDevices || []
         const discovered = deviceDiscovery ? deviceDiscovery.devices : []
@@ -47,19 +53,19 @@ Item {
     property bool sharingNote: false
     readonly property bool exportingNote: exportDialog.opened
     property var shareErrorOwner: null
+    property Item shareOverlay: null
     property string shareDeviceId: ""
     readonly property bool filePickerOpen: uploadDialog.opened || selectionDialog.opened
         || destinationDialog.opened || exportDialog.opened
+    readonly property bool generatedFilePickerOpen: destinationDialog.opened && destinationDialog.generated !== null
     signal usernameCommitted(string value)
     signal filesChanged()
     signal bookmarksChanged(var source)
 
-    function withOpacity(colour, opacity) { return Qt.rgba(colour.r, colour.g, colour.b, opacity) }
-
     function folderIcon(entry) {
         const path = (entry.path || "").replace(/\/+$/, "")
-        if ((entry.deviceId === "local" && path === notesDirectory) || path.endsWith("/Pilon/Notes")) return "icons/note.svg"
-        if ((entry.deviceId === "local" && path === calendarDirectory) || path.endsWith("/Pilon/Calendar")) return "icons/calendar.svg"
+        if ((entry.deviceId === "local" && path === notesDirectory) || /\/Pilon\/[Nn]otes$/.test(path)) return "icons/note.svg"
+        if ((entry.deviceId === "local" && path === calendarDirectory) || /\/Pilon\/[Cc]alendar$/.test(path)) return "icons/calendar.svg"
         return "icons/folder.svg"
     }
 
@@ -113,9 +119,30 @@ Item {
         return null
     }
 
-    function deviceAvailable(deviceId) {
+    function deviceAvailabilityMessage(deviceId) {
+        if (!deviceId || deviceId === "local") return ""
         const device = deviceForId(deviceId)
-        return device !== null && (device.online === true || device.onlineKnown === false)
+        if (tailnetDisconnected && (device !== null ? !device.saved : !deviceId.startsWith("external:")))
+            return tailscaleConnectionMessage
+        return device !== null && !device.cached && (device.online === true || device.onlineKnown === false)
+            ? "" : qsTr("This device is unavailable.")
+    }
+
+    function deviceAvailable(deviceId) {
+        return !!deviceId && !deviceAvailabilityMessage(deviceId)
+    }
+
+    function locationAvailable(manager) {
+        return !!manager && manager.cachedListing !== true && deviceAvailable(manager.currentDeviceId)
+    }
+
+    function entriesAvailable(entries) {
+        return entries.length > 0 && entries.every(entry => deviceAvailable(entry.deviceId))
+    }
+
+    function localFileUrl(path, name) {
+        const folder = path.split("/").map(encodeURIComponent).join("/")
+        return "file://" + folder + (folder.endsWith("/") ? "" : "/") + encodeURIComponent(name)
     }
 
     property bool propagatingBookmarks: false
@@ -132,11 +159,11 @@ Item {
         propagatingBookmarks = false
     }
     function uploadFiles(tile) {
+        if (!locationAvailable(tile.remoteFiles)) return
         uploadDialog.destination = tile
         if (uploadDialog.picker) uploadDialog.picker.clearSelection()
         uploadManager.reloadBookmarks()
-        uploadManager.browse(uploadManager.localDevice, uploadManager.localDevice.username,
-            localHomePath)
+        uploadManager.browseLocalHome(localHomePath, false)
         uploadDialog.open()
     }
     FileSelector {
@@ -152,21 +179,30 @@ Item {
         pickerLoaderName: ""
         onClosed: if (fileWorkspace.uploadManager) fileWorkspace.uploadManager.cancel()
 
+        Label {
+            objectName: "fileUploadDestinationStatus"
+            width: parent.width
+            text: fileWorkspace.deviceAvailabilityMessage(uploadDialog.destination?.remoteFiles.currentDeviceId)
+            visible: text.length > 0
+            color: fileWorkspace.textColour
+            wrapMode: Text.Wrap
+        }
+
         acceptText: qsTr("Upload")
         acceptObjectName: "confirmFileUpload"
         acceptEnabled: uploadDialog.destination !== null && uploadDialog.picker !== null
+                        && fileWorkspace.locationAvailable(uploadDialog.destination.remoteFiles)
                         && !uploadDialog.destination.remoteFiles.busy
                         && !fileWorkspace.uploadManager.busy && uploadDialog.picker.selectedEntries.length > 0
                         && uploadDialog.picker.selectedEntries.every(entry => !entry.directory)
         onAccepted: {
-const tile = uploadDialog.destination, entries = uploadDialog.picker.selectedEntries
-                        const destination = fileWorkspace.deviceForId(tile.remoteFiles.currentDeviceId)
-                        if (destination === null) return
-                        tile.usernameCommitted(tile.operationUsername())
-                        // The same transfer path handles one or several selected source files.
-                        tile.remoteFiles.pasteEntries(entries.map(entry => uploadDialog.picker.entryWithAccount(entry)),
-                            destination, tile.operationUsername(), tile.remoteFiles.currentPath, false)
-                        uploadDialog.close()
+            if (!acceptEnabled) return
+            const tile = uploadDialog.destination, entries = uploadDialog.picker.selectedEntries
+            const destination = fileWorkspace.deviceForId(tile.remoteFiles.currentDeviceId)
+            tile.usernameCommitted(tile.operationUsername())
+            tile.remoteFiles.pasteEntries(entries.map(entry => uploadDialog.picker.entryWithAccount(entry)),
+                destination, tile.operationUsername(), tile.remoteFiles.currentPath, false)
+            uploadDialog.close()
         }
     }
 
@@ -177,8 +213,7 @@ const tile = uploadDialog.destination, entries = uploadDialog.picker.selectedEnt
         selectionDialog.title = title
         selectionDialog.callback = callback
         if (selectionDialog.picker) selectionDialog.picker.clearSelection()
-        selectionManager.browse(selectionManager.localDevice, selectionManager.localDevice.username,
-            localHomePath)
+        selectionManager.browseLocalHome(localHomePath, false)
         selectionDialog.open()
     }
     function selectFiles(title, callback, initialPath, suffix, parentWindow) {
@@ -188,16 +223,21 @@ const tile = uploadDialog.destination, entries = uploadDialog.picker.selectedEnt
         selectionDialog.title = title
         selectionDialog.callback = callback
         if (selectionDialog.picker) selectionDialog.picker.clearSelection()
-        selectionManager.browse(selectionManager.localDevice, selectionManager.localDevice.username,
-            initialPath || localHomePath)
+        if (initialPath) selectionManager.browse(selectionManager.localDevice, selectionManager.localDevice.username, initialPath)
+        else selectionManager.browseLocalHome(localHomePath, false)
         selectionDialog.open()
     }
     FileSelector {
         id: selectionDialog
         objectName: "connectedFileSelection"
-        property string suffix: ""
+        property var suffix: ""
         property bool folderMode: false
         property var callback: null
+        function acceptsFile(entry) {
+            if (entry.directory) return false
+            const name = entry.name.toLowerCase()
+            return !suffix || (Array.isArray(suffix) ? suffix.some(value => name.endsWith(value)) : name.endsWith(suffix))
+        }
         workspace: fileWorkspace; remoteFiles: fileWorkspace.selectionManager
         transientParent: fileWorkspace.ownerWindow
         pickerLoaderName: "connectedFilePicker"
@@ -206,8 +246,14 @@ const tile = uploadDialog.destination, entries = uploadDialog.picker.selectedEnt
         acceptText: folderMode ? qsTr("Select") : suffix === ".pin" ? qsTr("Insert") : qsTr("Select")
         acceptEnabled: picker !== null && !remoteFiles.busy
             && (folderMode ? remoteFiles.currentDeviceId === "local"
-                : picker.selectedEntries.length > 0 && picker.selectedEntries.every(entry => !entry.directory && (!suffix || entry.name.toLowerCase().endsWith(suffix))))
+                : fileWorkspace.entriesAvailable(picker.selectedEntries)
+                  && picker.selectedEntries.every(entry => selectionDialog.acceptsFile(entry)))
+        onClosed: {
+            callback = null
+            if (remoteFiles.promptText) remoteFiles.cancelPrompt()
+        }
         onAccepted: {
+            if (!acceptEnabled || remoteFiles.cachedListing === true) return
             if (folderMode) {
                 const action = callback, path = remoteFiles.currentPath
                 close(); if (action) action(path)
@@ -217,7 +263,12 @@ const tile = uploadDialog.destination, entries = uploadDialog.picker.selectedEnt
             target: fileWorkspace.selectionManager
             function onSelectionReady(files) {
                 const callback = selectionDialog.callback
-                selectionDialog.close(); if (callback) callback(files)
+                if (selectionDialog.opened && callback) {
+                    selectionDialog.close()
+                    callback(files)
+                } else {
+                    for (const file of files) fileWorkspace.selectionManager.discardPreparedSelection(file)
+                }
             }
         }
     }
@@ -231,7 +282,8 @@ const tile = uploadDialog.destination, entries = uploadDialog.picker.selectedEnt
         palette: picker ? picker.palette : fileWorkspace.ownerWindow.palette
         message: qsTr("Replace “%1”?").arg(filename)
         confirmText: qsTr("Replace")
-        perform: () => { if (picker?.opened && replace) replace() }
+        confirmButton.enabled: picker?.acceptEnabled === true && picker?.remoteFiles.cachedListing !== true
+        perform: () => picker?.opened && confirmButton.enabled && replace ? replace() : false
         onClosed: replace = null
         function ask(origin, name, action) {
             picker = origin; filename = name; replace = action
@@ -239,85 +291,175 @@ const tile = uploadDialog.destination, entries = uploadDialog.picker.selectedEnt
         }
     }
     function saveFiles(tile, entries) {
+        if (destinationDialog.uploading || tile.remoteFiles.cachedListing === true || !entriesAvailable(entries)) return
+        destinationDialog.generated = null
+        destinationDialog.title = qsTr("Save file")
+        destinationDialog.transientParent = fileWorkspace.ownerWindow
         destinationDialog.sourceTile = tile
         destinationDialog.nameConflict = false
+        destinationDialog.saveError = ""
         destinationDialog.entries = entries.map(entry => tile.entryWithAccount(entry))
         destinationName.text = entries.length === 1 ? entries[0].name : ""
-        destinationManager.browse(destinationManager.localDevice, destinationManager.localDevice.username,
-            localHomePath)
+        destinationManager.browseLocalHome(localHomePath, false)
+        destinationDialog.open()
+    }
+    function saveGeneratedFile(title, name, initialPath, parentWindow, exporter) {
+        if (destinationDialog.uploading) return
+        destinationDialog.generated = exporter
+        destinationDialog.sourceTile = null
+        destinationDialog.entries = []
+        destinationDialog.nameConflict = false
+        destinationDialog.saveError = ""
+        destinationDialog.title = title
+        destinationDialog.transientParent = parentWindow || fileWorkspace.ownerWindow
+        destinationName.text = name
+        destinationManager.reloadBookmarks()
+        if (initialPath) destinationManager.browse(destinationManager.localDevice, destinationManager.localDevice.username, initialPath)
+        else destinationManager.browseLocalHome(localHomePath, false)
         destinationDialog.open()
     }
     FileSelector {
         id: destinationDialog
         objectName: "connectedFileDestination"
         property var sourceTile: null
+        property var generated: null
+        property bool uploading: false
         property bool nameConflict: false
+        property string saveError: ""
         property var entries: []
+        readonly property bool singleFile: generated !== null || entries.length === 1
+        readonly property string rawName: destinationName.text.trim()
+        readonly property string filename: generated && !rawName.toLowerCase().endsWith(generated.suffix)
+            ? rawName + generated.suffix : rawName
+        readonly property bool validName: rawName.length > 0 && rawName !== "." && rawName !== ".."
+            && !/[\\/]/.test(rawName) && (!generated || !/[\x00-\x1f\x7f]/.test(rawName))
         title: qsTr("Save file")
         transientParent: fileWorkspace.ownerWindow
         closeOnOutside: false
         workspace: fileWorkspace; remoteFiles: fileWorkspace.destinationManager
         pickerName: ""
         pickerLoaderName: ""
+        chooseSaveDestination: generated !== null
+        onSelectionChanged: if (generated && picker?.selectedEntry && !picker.selectedEntry.directory)
+            destinationName.text = picker.selectedEntry.name
+        function finishUpload(saved) {
+            if (!uploading) return
+            uploading = false
+            generated.discard()
+            if (saved && opened) close()
+        }
+        function saveGenerated(device, name, exists) {
+            saveError = ""
+            if (device.id === "local") {
+                const url = fileWorkspace.localFileUrl(remoteFiles.currentPath, name)
+                const save = replace => {
+                    if (generated.save(url, replace)) close()
+                    else saveError = generated.error()
+                }
+                if (generated.exists(url)) replaceFile.ask(destinationDialog, name, () => save(true))
+                else save(false)
+            } else if (exists) {
+                nameConflict = true
+            } else {
+                const source = generated.prepare(name)
+                if (!source || !source.toString()) { saveError = generated.error(); return }
+                uploading = true
+                remoteFiles.uploadFile(device, picker.operationUsername(), remoteFiles.currentPath, source)
+                if (!remoteFiles.busy && !remoteFiles.promptText) finishUpload(false)
+            }
+        }
         onClosed: {
             if (replaceFile.picker === destinationDialog && replaceFile.opened) replaceFile.close()
-            fileWorkspace.destinationManager.cancel()
+            if (remoteFiles.promptText) remoteFiles.cancelPrompt()
         }
         Connections {
             target: fileWorkspace.destinationManager
-            function onLocationChanged() { destinationDialog.nameConflict = false }
+            function onLocationChanged() {
+                destinationDialog.nameConflict = false
+                destinationDialog.saveError = ""
+            }
+            function onUploadFinished(saved) { destinationDialog.finishUpload(saved) }
         }
 
         Column {
             id: destinationBottom
             width: parent.width
             spacing: 8
+            Label {
+                width: parent.width
+                text: fileWorkspace.deviceAvailabilityMessage(
+                    destinationDialog.entries.find(entry => !fileWorkspace.deviceAvailable(entry.deviceId))?.deviceId)
+                visible: text.length > 0
+                color: fileWorkspace.textColour
+                wrapMode: Text.Wrap
+            }
             PilonTextField {
                 id: destinationName
+                objectName: "fileDestinationFilename"
                 width: parent.width
-                visible: destinationDialog.entries.length === 1
+                visible: destinationDialog.singleFile
+                enabled: !destinationDialog.uploading
+                placeholderText: qsTr("File name")
                 color: fileWorkspace.textColour; selectByMouse: true
-                onTextEdited: destinationDialog.nameConflict = false
+                onTextEdited: {
+                    destinationDialog.nameConflict = false
+                    destinationDialog.saveError = ""
+                }
+                onAccepted: if (destinationDialog.acceptEnabled && !fileWorkspace.destinationManager.cachedListing)
+                    destinationDialog.accepted()
                 background: Rectangle { radius: 8; color: fileWorkspace.secondaryColour }
             }
         }
         PilonErrorPopup {
             objectName: "destinationNameError"
             owner: destinationDialog.contentItem
-            message: destinationDialog.opened && destinationDialog.nameConflict ? qsTr("A file with this name exists. Choose a different file name.") : ""
-            onDismissed: destinationDialog.nameConflict = false
+            message: !destinationDialog.opened ? "" : destinationDialog.nameConflict
+                ? qsTr("A file with this name exists. Choose a different file name.") : destinationDialog.saveError
+            onDismissed: {
+                destinationDialog.nameConflict = false
+                destinationDialog.saveError = ""
+            }
         }
 
         acceptText: qsTr("Save")
         acceptObjectName: "confirmConnectedFileDestination"
-        acceptEnabled: destinationDialog.picker !== null && !fileWorkspace.destinationManager.busy
-                        && !!fileWorkspace.destinationManager.currentPath
-                        && (destinationDialog.entries.length !== 1 || (!!destinationName.text.trim() && !/[\\/]/.test(destinationName.text)))
+        acceptEnabled: picker !== null && !remoteFiles.busy && !remoteFiles.promptText
+            && !uploading && !!remoteFiles.currentPath
+            && fileWorkspace.locationAvailable(remoteFiles) && (!singleFile || validName)
+            && (generated !== null || (sourceTile?.remoteFiles.cachedListing !== true
+                && fileWorkspace.entriesAvailable(entries)))
         onAccepted: {
-            const entries = destinationDialog.entries.map(entry => Object.assign({}, entry))
+            if (!acceptEnabled) return
             const destination = fileWorkspace.destinationManager
+            const device = fileWorkspace.deviceForId(destination.currentDeviceId)
+            if (!device) return
+            const exists = singleFile && (device.id === "local" ? destination.localEntryExists(filename)
+                : destination.entries.some(entry => entry.name === filename))
+            if (generated) { saveGenerated(device, filename, exists); return }
+            const entries = destinationDialog.entries.map(entry => Object.assign({}, entry))
             const manager = destinationDialog.sourceTile.remoteFiles
-            if (entries.length === 1) entries[0].name = destinationName.text.trim()
-            if (entries.length === 1 && destination.entries.some(entry => entry.name === entries[0].name)) {
+            if (singleFile) entries[0].name = filename
+            if (exists) {
                 if (destination.currentDeviceId !== "local") { destinationDialog.nameConflict = true; return }
-                const folder = destination.currentPath.split("/").map(encodeURIComponent).join("/")
-                const url = "file://" + folder + (folder.endsWith("/") ? "" : "/") + encodeURIComponent(entries[0].name)
+                const url = fileWorkspace.localFileUrl(destination.currentPath, entries[0].name)
                 replaceFile.ask(destinationDialog, entries[0].name, () => {
+                    if (!destinationDialog.acceptEnabled) return false
                     manager.downloadFile(entries[0], entries[0].username, url)
                     destinationDialog.close()
                 })
                 return
             }
-            manager.pasteEntries(entries, fileWorkspace.deviceForId(destination.currentDeviceId),
+            manager.pasteEntries(entries, device,
                 destinationDialog.picker.operationUsername(), destination.currentPath, false)
             destinationDialog.close()
         }
     }
 
-    function shareEntry(entry, username, owner) {
+    function shareEntry(entry, username, owner, overlay) {
         if (shareManager.busy || shareManager.promptText || entry.directory || !deviceAvailable(entry.deviceId)) return
         sharingNote = false
         shareErrorOwner = owner
+        shareOverlay = overlay || null
         shareDeviceId = entry.deviceId
         shareManager.prepareSelection([entry], username)
     }
@@ -335,8 +477,14 @@ const tile = uploadDialog.destination, entries = uploadDialog.picker.selectedEnt
             })
         }
     }
-    FileAccessPopup { workspace: fileWorkspace; remoteFiles: fileWorkspace.sharingNote ? null : fileWorkspace.shareManager }
-    FileTransferPopup { workspace: fileWorkspace; remoteFiles: fileWorkspace.shareManager }
+    FileAccessPopup {
+        workspace: fileWorkspace; remoteFiles: fileWorkspace.sharingNote ? null : fileWorkspace.shareManager
+        parent: fileWorkspace.shareOverlay || fileWorkspace.Overlay.overlay
+    }
+    FileTransferPopup {
+        workspace: fileWorkspace; remoteFiles: fileWorkspace.shareManager
+        parent: fileWorkspace.shareOverlay || fileWorkspace.Overlay.overlay
+    }
 
     function exportNote(notes) {
         if (!notes.save()) return
@@ -348,8 +496,7 @@ const tile = uploadDialog.destination, entries = uploadDialog.picker.selectedEnt
         exportFirstPageHeading.checked = true
         exportPageNumbers.checked = true
         exportManager.reloadBookmarks()
-        exportManager.browse(exportManager.localDevice, exportManager.localDevice.username,
-            localHomePath)
+        exportManager.browseLocalHome(localHomePath, false)
         exportDialog.open()
     }
     FileSelector {
@@ -398,14 +545,14 @@ const tile = uploadDialog.destination, entries = uploadDialog.picker.selectedEnt
                 sharing = false
                 fileWorkspace.shareManager.cancel()
             }
-            if (fileWorkspace.exportManager !== null) fileWorkspace.exportManager.cancel()
+            if (fileWorkspace.exportManager.promptText) fileWorkspace.exportManager.cancelPrompt()
         }
         readonly property var exportOptions: ({firstPageHeadingOnly: exportFirstPageHeading.checked, pageNumbers: exportPageNumbers.checked})
         readonly property string filename: exportName.text.trim().toLowerCase().endsWith(".pdf") ? exportName.text.trim() : exportName.text.trim() + ".pdf"
         readonly property bool validFilename: exportName.text.trim().length > 0 && !/[\\/]/.test(exportName.text)
-        readonly property bool canSaveToFolder: validFilename && fileWorkspace.exportManager !== null && fileWorkspace.exportManager.cachedListing !== true
+        readonly property bool canSaveToFolder: validFilename && fileWorkspace.locationAvailable(fileWorkspace.exportManager)
             && fileWorkspace.exportManager.currentPath.length > 0 && !fileWorkspace.exportManager.busy && !sharing
-            && !fileWorkspace.exportManager.promptText
+            && !fileWorkspace.exportManager.promptText && !uploading
             && !nameConflict
         readonly property bool canShare: !!note && validFilename && !uploading && !sharing
             && !fileWorkspace.shareManager.busy && !fileWorkspace.shareManager.promptText
@@ -416,6 +563,7 @@ const tile = uploadDialog.destination, entries = uploadDialog.picker.selectedEnt
             if (source.toString().length === 0) return
             fileWorkspace.sharingNote = true
             fileWorkspace.shareErrorOwner = null
+            fileWorkspace.shareOverlay = null
             sharing = true
             fileWorkspace.shareManager.shareFile(source, true)
         }
@@ -423,19 +571,20 @@ const tile = uploadDialog.destination, entries = uploadDialog.picker.selectedEnt
             if (!note || !canSaveToFolder) return
             const manager = fileWorkspace.exportManager
             const name = filename, folder = manager.currentPath, options = exportOptions
-            const exists = manager.entries.some(entry => entry.name === name)
             if (manager.currentDeviceId === "local") {
                 const save = () => { if (note.exportToFolder(folder, name, options)) close() }
-                if (exists) replaceFile.ask(exportDialog, name, save)
+                if (manager.localEntryExists(name)) replaceFile.ask(exportDialog, name, save)
                 else save()
-            } else if (exists) {
+            } else if (manager.entries.some(entry => entry.name === name)) {
                 nameConflict = true
             } else {
                 const source = note.preparePdf(filename, exportOptions)
                 if (source.toString().length === 0) return
-                const device = fileWorkspace.deviceForId(fileWorkspace.exportManager.currentDeviceId)
+                const device = fileWorkspace.deviceForId(manager.currentDeviceId)
+                if (!device) return
                 uploading = true
-                fileWorkspace.exportManager.uploadFile(device, exportDialog.picker.operationUsername(), fileWorkspace.exportManager.currentPath, source)
+                manager.uploadFile(device, picker.operationUsername(), manager.currentPath, source)
+                if (!manager.busy && !manager.promptText) uploading = false
             }
         }
 
@@ -461,7 +610,7 @@ const tile = uploadDialog.destination, entries = uploadDialog.picker.selectedEnt
                     selectByMouse: true
                     onTextEdited: { exportDialog.nameConflict = false; exportDialog.shareError = "" }
                     onAccepted: if (exportDialog.acceptEnabled) exportDialog.accepted()
-                    background: Rectangle { radius: 8; color: fileWorkspace.secondaryColour; border.color: fileWorkspace.withOpacity(fileWorkspace.textColour, .22) }
+                    background: Rectangle { radius: 8; color: fileWorkspace.secondaryColour; border.color: Qt.alpha(fileWorkspace.textColour, .22) }
                 }
                 Item {
                     id: inlineExportOptions
@@ -526,7 +675,7 @@ const tile = uploadDialog.destination, entries = uploadDialog.picker.selectedEnt
             palette.highlight: fileWorkspace.accentColour; palette.highlightedText: fileWorkspace.accentTextColour
             width: Math.min(380, exportDialog.availableWidth, maximumContentWidth)
             padding: 16; modal: true; focus: true
-            background: Rectangle { radius: 8; color: fileWorkspace.mainColour; border.color: fileWorkspace.withOpacity(fileWorkspace.textColour, .2) }
+            background: Rectangle { radius: 8; color: fileWorkspace.mainColour; border.color: Qt.alpha(fileWorkspace.textColour, .2) }
             contentItem: Column {
                 id: compactExportOptions
                 spacing: 8
@@ -536,12 +685,10 @@ const tile = uploadDialog.destination, entries = uploadDialog.picker.selectedEnt
         Connections {
             target: fileWorkspace.exportManager
             function onLocationChanged() { exportDialog.nameConflict = false }
-            function onBusyChanged() {
-                if (exportDialog.uploading && !fileWorkspace.exportManager.busy) {
-                    if (fileWorkspace.exportManager.promptText.length > 0) return
-                    exportDialog.uploading = false
-                    if (fileWorkspace.exportManager.errorMessage.length === 0) exportDialog.close()
-                }
+            function onUploadFinished(saved) {
+                if (!exportDialog.uploading) return
+                exportDialog.uploading = false
+                if (saved) exportDialog.close()
             }
         }
 

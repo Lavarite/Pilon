@@ -40,7 +40,7 @@ private:
     QMap<QString, std::shared_ptr<Cache>> m_caches;
     qint64 m_revision = 0;
     bool m_writing = false, m_active = true;
-    QString m_id, m_root;
+    QString m_id, m_workerProgram;
     QByteArray m_output, m_request;
     QVariantList m_lines;
 };

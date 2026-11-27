@@ -50,7 +50,7 @@ Control {
     }
     palette.windowText: textColour; palette.text: textColour; palette.buttonText: textColour
     palette.base: secondaryColour; palette.button: secondaryColour; palette.highlight: accentColour
-    function iso(d) { return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0") }
+    function iso(d) { return String(d.getFullYear()).padStart(4,"0") + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0") }
     function dateAt(year,month,day) {let d=new Date(2000,0,1,12);d.setFullYear(year,month,day);return d}
     function addDays(d,n) { return dateAt(d.getFullYear(),d.getMonth(),d.getDate()+n) }
     function startOfWeek(d) { let first = calendar.preferences.firstDay || 1; return addDays(d,-((d.getDay()+6)%7 - (first-1)+7)%7) }
@@ -61,6 +61,23 @@ Control {
         if (gesture) return gestureEvents
         let revision = calendar.revision
         return calendar.events(iso(rangeStart),iso(addDays(rangeStart,dayCount)))
+    }
+    readonly property var eventsByDate: {
+        const keys = Array.from({length: dayCount}, (_, index) => iso(addDays(rangeStart, index)))
+        const indices = Object.create(null)
+        const events = Object.create(null)
+        for (let index = 0; index < keys.length; ++index) {
+            indices[keys[index]] = index
+            events[keys[index]] = []
+        }
+        for (const event of visibleEvents) {
+            const first = event.displayDate < keys[0] ? 0 : indices[event.displayDate]
+            const last = event.displayEndDate > keys[keys.length - 1] ? keys.length - 1
+                : indices[event.displayEndDate] - (event.endMinute > 0 ? 0 : 1)
+            for (let index = first; index <= last; ++index)
+                events[keys[index]].push(event)
+        }
+        return events
     }
     onRangeStartChanged: calendar.setVisibleRange(iso(rangeStart),iso(addDays(rangeStart,dayCount)))
     onDayCountChanged: calendar.setVisibleRange(iso(rangeStart),iso(addDays(rangeStart,dayCount)))
@@ -83,7 +100,17 @@ Control {
     readonly property int monthDateHeight: Math.max(24, Math.ceil(monthHeaderMetrics.height))
     readonly property int monthMoreHeight: Math.max(32, Math.ceil(monthHeaderMetrics.height) + 14)
     readonly property int minimumMonthRowHeight: monthDateHeight + monthEventHeight + monthMoreHeight + 14
+    readonly property int fullMonthWidth: 7 * Math.max(96,
+        Math.ceil(monthHeaderMetrics.advanceWidth(qsTr("+%1 more").arg(99))) + 10) + 6
     readonly property int timelineDays: viewMode === 2 ? 0 : dayCount
+    readonly property var timelineLayouts: {
+        const layouts = Object.create(null)
+        for (let index = 0; index < timelineDays; ++index) {
+            const date = addDays(rangeStart, index)
+            layouts[iso(date)] = layoutTimelineEvents(date)
+        }
+        return layouts
+    }
     readonly property var timelineColumnWidths: {
         const count = timelineDays
         if (!count) return []
@@ -117,10 +144,13 @@ Control {
     }
     function dayEvents(d) {
         const key = iso(d)
-        return visibleEvents.filter(e => e.displayDate <= key
+        return eventsByDate[key] || visibleEvents.filter(e => e.displayDate <= key
             && (e.displayEndDate > key || (e.displayEndDate === key && e.endMinute > 0)))
     }
     function timelineEvents(d) {
+        return timelineLayouts[iso(d)] || layoutTimelineEvents(d)
+    }
+    function layoutTimelineEvents(d) {
         const key = iso(d)
         let items = dayEvents(d).map(e => {
             let item = Object.assign({}, e)
@@ -135,17 +165,22 @@ Control {
         function intersects(a,b) { return a.topMinute < b.bottomMinute && b.topMinute < a.bottomMinute }
         function assign() {
             let ends = []
+            let lanes = []
             for (let event of group) {
                 let lane = ends.findIndex(end => end <= event.topMinute)
-                if (lane < 0) lane = ends.length
+                if (lane < 0) {
+                    lane = ends.length
+                    lanes.push([])
+                }
                 ends[lane] = event.bottomMinute
+                lanes[lane].push(event)
                 event.lane = lane
             }
             for (let event of group) {
                 event.lanes = ends.length
                 event.span = 1
                 for (let lane = event.lane + 1; lane < ends.length; ++lane) {
-                    if (group.some(other => other.lane === lane && intersects(event, other))) break
+                    if (lanes[lane].some(other => intersects(event, other))) break
                     ++event.span
                 }
             }
@@ -387,7 +422,23 @@ Control {
                         FontMetrics { id: viewModeMetrics; font: viewSelector.font }
                     }
                     CalendarAction { id: newEventAction; text: qsTr("New event"); objectName: "calendarNewEvent"; icon.source: "icons/plus.svg"; onClicked: page.create(page.selectedDate,540) }
-                    CalendarAction { objectName: "calendarSync"; text: qsTr("Refresh"); icon.source: "icons/refresh.svg"; enabled: !page.calendar.syncing; onClicked: page.calendar.sync() }
+                    CalendarAction {
+                        objectName: "calendarSync"
+                        text: qsTr("Refresh")
+                        icon.source: "icons/refresh.svg"
+                        enabled: !page.calendar.syncing
+                        onClicked: page.calendar.sync()
+                        ProgressBar {
+                            objectName: "calendarRefreshIndicator"
+                            anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
+                            anchors.margins: 4
+                            height: 3
+                            visible: page.calendar.syncing
+                            indeterminate: visible
+                            palette.highlight: page.accentColour
+                            Accessible.name: qsTr("Syncing calendar")
+                        }
+                    }
                     CalendarAction { objectName: "calendarShare"; text: qsTr("Share"); icon.source: "icons/share.svg"; onClicked: { sharesLoader.active = true; sharesLoader.item.open() } }
                 }
             }
@@ -395,7 +446,6 @@ Control {
         GridLayout {
             Layout.fillWidth: true; columns: page.width < 540 ? 1 : 4; columnSpacing: 8; rowSpacing: 8
             Label { Layout.fillWidth: true; Layout.minimumWidth: 0; wrapMode: Text.Wrap; text: page.calendar.preferences.timeZone; color: page.mutedTextColour }
-            Label { visible: page.calendar.syncing; text: qsTr("Syncing…"); color: page.mutedTextColour }
             CalendarButton { objectName: "calendarProposals"; visible: page.calendar.proposals.length > 0; text: qsTr("Proposals (%1)").arg(page.calendar.proposals.length); onClicked: page.openProposal(page.calendar.proposals[0].id) }
             CalendarButton { objectName: "calendarConflicts"; visible: page.calendar.conflicts.length > 0; text: qsTr("Resolve conflicts (%1)").arg(page.calendar.conflicts.length); onClicked: conflictsPopup.open() }
         }
@@ -426,7 +476,9 @@ Control {
                 id: month
                 objectName: "calendarMonth"
                 Layout.fillWidth: true; Layout.fillHeight: true; Layout.minimumHeight: 0
-                contentWidth: Math.max(width, 7 * page.minimumEventWidth + 6); contentHeight: monthGrid.height; clip: true
+                contentWidth: width >= page.fullMonthWidth ? width
+                    : Math.max(page.fullMonthWidth, 7 * page.minimumEventWidth + 6)
+                contentHeight: monthGrid.height; clip: true
                 bottomMargin: monthHorizontal.visible ? monthHorizontal.height : 0
                 flickableDirection: Flickable.HorizontalAndVerticalFlick
                 PilonScrollMotion { view: month }
@@ -434,11 +486,23 @@ Control {
                 onContentWidthChanged: contentX = Math.min(contentX, Math.max(0, contentWidth - width))
                 Keys.onUpPressed: contentY = Math.max(0, contentY - monthGrid.height / 6)
                 Keys.onDownPressed: contentY = Math.min(Math.max(0, contentHeight - height), contentY + monthGrid.height / 6)
-                ScrollBar.vertical: PilonScrollBar {}
-                ScrollBar.horizontal: PilonScrollBar { id: monthHorizontal; visible: month.contentWidth > month.width + .5 }
+                ScrollBar.vertical: PilonScrollBar {
+                    policy: month.contentHeight > month.height + .5 ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff
+                    palette.mid: page.mutedTextColour
+                    palette.dark: page.textColour
+                }
+                ScrollBar.horizontal: PilonScrollBar {
+                    id: monthHorizontal
+                    objectName: "calendarMonthHorizontalScroll"
+                    policy: month.contentWidth > month.width + .5 ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff
+                    palette.mid: page.mutedTextColour
+                    palette.dark: page.textColour
+                }
                 GridLayout {
                     id: monthGrid
-                    width: month.contentWidth; height: Math.max(month.height, 6 * page.minimumMonthRowHeight + 5)
+                    width: month.contentWidth
+                    height: Math.max(month.height, 6 * (page.visibleEvents.length
+                        ? page.minimumMonthRowHeight : page.monthDateHeight + 14) + 5)
                     columns: 7; rowSpacing: 1; columnSpacing: 1
             Repeater {
                 model: page.viewMode === 2 ? 42 : 0

@@ -179,20 +179,6 @@ void TerminalItem::setAccentColor(const QColor &color)
     emit accentColorChanged();
 }
 
-QColor TerminalItem::warningColor() const
-{
-    return m_warningColor;
-}
-
-void TerminalItem::setWarningColor(const QColor &color)
-{
-    if (m_warningColor == color)
-        return;
-    m_warningColor = color;
-    update();
-    emit warningColorChanged();
-}
-
 QColor TerminalItem::borderColor() const
 {
     return m_borderColor;
@@ -205,20 +191,6 @@ void TerminalItem::setBorderColor(const QColor &color)
     m_borderColor = color;
     update();
     emit borderColorChanged();
-}
-
-QString TerminalItem::warningText() const
-{
-    return m_warningText;
-}
-
-void TerminalItem::setWarningText(const QString &text)
-{
-    if (m_warningText == text)
-        return;
-    m_warningText = text;
-    update();
-    emit warningTextChanged();
 }
 
 void TerminalItem::feed(const QByteArray &data)
@@ -243,6 +215,8 @@ void TerminalItem::reset()
         QGuiApplication::inputMethod()->reset();
     m_scrollback.clear();
     m_scrollOffset = 0;
+    m_scrollWheelRemainder = 0;
+    m_scrollPixelRemainder = 0;
     m_cursorPosition = {0, 0};
     m_cursorVisible = true;
     setHasContent(false);
@@ -263,20 +237,19 @@ void TerminalItem::paint(QPainter *painter)
     const qreal cellWidth = std::max<qreal>(1, std::ceil(metrics.horizontalAdvance(QLatin1Char('M'))));
     const qreal cellHeight = std::max<qreal>(1, std::ceil(metrics.height()));
     const qreal baselineOffset = (cellHeight - metrics.height()) / 2 + metrics.ascent();
+    const int firstLine = m_scrollback.size() - m_scrollOffset;
+    unsigned int lastStyle = 16;
 
     for (int row = 0; row < m_rows; ++row) {
         for (int column = 0; column < m_columns; ++column) {
             VTermScreenCell cell{};
-            if (!screenCell(row, column, cell))
+            if (!documentCell(firstLine + row, column, cell) || cell.chars[0] == uint32_t(-1))
                 continue;
 
-            QColor foreground = terminalColor(cell.fg, false);
-            QColor background = terminalColor(cell.bg, true);
+            QColor foreground = terminalColor(cell.fg);
+            QColor background = terminalColor(cell.bg);
             if (cell.attrs.reverse)
                 std::swap(foreground, background);
-            if (!m_warningText.isEmpty())
-                foreground = m_warningColor;
-
             const QRectF cellBounds(terminalPadding + column * cellWidth,
                                     terminalPadding + row * cellHeight,
                                     cellWidth * std::max<int>(1, cell.width),
@@ -300,12 +273,18 @@ void TerminalItem::paint(QPainter *painter)
                 text.append(QString::fromUcs4(&codepoint, 1));
             }
 
-            QFont cellFont = m_font;
-            cellFont.setBold(cell.attrs.bold);
-            cellFont.setItalic(cell.attrs.italic);
-            cellFont.setUnderline(cell.attrs.underline != VTERM_UNDERLINE_OFF);
-            cellFont.setStrikeOut(cell.attrs.strike);
-            painter->setFont(cellFont);
+            const bool underlined = cell.attrs.underline != VTERM_UNDERLINE_OFF;
+            const unsigned int style = cell.attrs.bold | (cell.attrs.italic << 1)
+                                       | (underlined << 2) | (cell.attrs.strike << 3);
+            if (style != lastStyle) {
+                QFont cellFont = m_font;
+                cellFont.setBold(cell.attrs.bold);
+                cellFont.setItalic(cell.attrs.italic);
+                cellFont.setUnderline(underlined);
+                cellFont.setStrikeOut(cell.attrs.strike);
+                painter->setFont(cellFont);
+                lastStyle = style;
+            }
             painter->setPen(foreground);
             painter->drawText(QPointF(cellBounds.left(), cellBounds.top() + baselineOffset), text);
         }
@@ -351,15 +330,6 @@ void TerminalItem::paint(QPainter *painter)
         }
     }
 
-    if (!m_warningText.isEmpty() && !m_hasContent) {
-        painter->setFont(m_font);
-        painter->setPen(m_warningColor);
-        painter->drawText(itemBounds.adjusted(terminalPadding, terminalPadding,
-                                              -terminalPadding, -terminalPadding),
-                          Qt::AlignLeft | Qt::AlignTop | Qt::TextWordWrap,
-                          m_warningText);
-    }
-
     painter->setClipping(false);
     painter->setRenderHint(QPainter::Antialiasing, true);
     painter->setBrush(Qt::NoBrush);
@@ -381,7 +351,6 @@ void TerminalItem::keyPressEvent(QKeyEvent *event)
         return;
     }
 
-    m_scrollOffset = 0;
     const Qt::KeyboardModifiers qtModifiers = event->modifiers()
         | (m_controlModifier ? Qt::ControlModifier : Qt::NoModifier);
     setControlModifier(false);
@@ -389,18 +358,25 @@ void TerminalItem::keyPressEvent(QKeyEvent *event)
 
     const auto bindings = KeyBindings::instance();
     const auto matches = [&](const char *id) { return bindings->matches(QLatin1String(id), event->key(), int(qtModifiers)); };
+    if (matches("terminalCopy") || (m_hasSelection && event->key() == Qt::Key_C
+                                   && qtModifiers == Qt::ControlModifier)) {
+        copySelection();
+        event->accept();
+        return;
+    }
     if (matches("zoomIn") || matches("zoomOut")) {
         zoomFont(matches("zoomOut") ? -1 : 1); event->accept(); return;
     }
-    if (matches("terminalPaste")) {
-        clearSelection(); pasteClipboard(); event->accept(); return;
+    if (const bool paste = matches("terminalPaste"); paste || matches("terminalDeleteWord")) {
+        m_scrollOffset = 0;
+        clearSelection();
+        if (paste)
+            pasteClipboard();
+        else
+            vterm_keyboard_unichar(m_terminal, 0x17, VTERM_MOD_NONE);
+        event->accept();
+        return;
     }
-    if (matches("terminalCopy")) { copySelection(); event->accept(); return; }
-    if (matches("terminalDeleteWord")) {
-        clearSelection(); vterm_keyboard_unichar(m_terminal, 0x17, VTERM_MOD_NONE); event->accept(); return;
-    }
-
-    clearSelection();
 
     VTermKey terminalKey = VTERM_KEY_NONE;
     switch (event->key()) {
@@ -426,29 +402,26 @@ void TerminalItem::keyPressEvent(QKeyEvent *event)
         break;
     }
 
-    if (terminalKey != VTERM_KEY_NONE) {
-        vterm_keyboard_key(m_terminal, terminalKey, modifiers);
-        event->accept();
-        update();
+    const bool controlLetter = qtModifiers.testFlag(Qt::ControlModifier)
+        && event->key() >= Qt::Key_A && event->key() <= Qt::Key_Z;
+    if (terminalKey == VTERM_KEY_NONE && !controlLetter && event->text().isEmpty()) {
+        event->ignore();
         return;
     }
 
-    if (qtModifiers.testFlag(Qt::ControlModifier)
-        && event->key() >= Qt::Key_A && event->key() <= Qt::Key_Z) {
+    m_scrollOffset = 0;
+    clearSelection();
+    if (terminalKey != VTERM_KEY_NONE) {
+        vterm_keyboard_key(m_terminal, terminalKey, modifiers);
+    } else if (controlLetter) {
         vterm_keyboard_unichar(m_terminal,
                               static_cast<uint32_t>('a' + event->key() - Qt::Key_A),
                               modifiers);
-        event->accept();
-        return;
-    }
-
-    if (!event->text().isEmpty()) {
+    } else {
         sendText(event->text(), modifiers);
-        event->accept();
-        return;
     }
-
-    event->ignore();
+    event->accept();
+    update();
 }
 
 void TerminalItem::inputMethodEvent(QInputMethodEvent *event)
@@ -571,6 +544,10 @@ QVariant TerminalItem::inputMethodQuery(Qt::InputMethodQuery query) const
 
 void TerminalItem::mousePressEvent(QMouseEvent *event)
 {
+    if (event->button() != Qt::LeftButton && event->button() != Qt::MiddleButton) {
+        event->ignore();
+        return;
+    }
     if (event->source() != Qt::MouseEventNotSynthesized
         && event->pointingDevice()->type() == QInputDevice::DeviceType::TouchScreen) {
         event->ignore();
@@ -717,14 +694,31 @@ void TerminalItem::wheelEvent(QWheelEvent *event)
         return;
     }
 
-    const int lines = event->angleDelta().y() / 120 * 3;
-    if (lines == 0) {
+    if (event->phase() == Qt::ScrollBegin)
+        m_scrollPixelRemainder = 0;
+    const int pixels = event->pixelDelta().y();
+    const int angle = event->angleDelta().y();
+    if (pixels == 0 && angle == 0) {
         event->ignore();
         return;
     }
-    m_scrollOffset = std::clamp(m_scrollOffset + lines, 0,
-                                static_cast<int>(m_scrollback.size()));
-    update();
+    int lines = 0;
+    if (pixels != 0) {
+        const qreal lineHeight = std::max<qreal>(1, std::ceil(QFontMetricsF(m_font).height()));
+        m_scrollPixelRemainder += pixels / lineHeight;
+        lines = static_cast<int>(m_scrollPixelRemainder);
+        m_scrollPixelRemainder -= lines;
+    } else {
+        constexpr int anglePerLine = 40;
+        m_scrollWheelRemainder += angle;
+        lines = m_scrollWheelRemainder / anglePerLine;
+        m_scrollWheelRemainder %= anglePerLine;
+    }
+    if (lines != 0) {
+        m_scrollOffset = std::clamp(m_scrollOffset + lines, 0,
+                                    static_cast<int>(m_scrollback.size()));
+        update();
+    }
     event->accept();
 }
 
@@ -822,10 +816,12 @@ int TerminalItem::clearScrollbackCallback(void *user)
     auto *terminal = static_cast<TerminalItem *>(user);
     terminal->m_scrollback.clear();
     terminal->m_scrollOffset = 0;
+    terminal->m_scrollWheelRemainder = 0;
+    terminal->m_scrollPixelRemainder = 0;
+    terminal->clearSelection();
     terminal->update();
     return 1;
 }
-
 int TerminalItem::oscFallback(int command, VTermStringFragment fragment, void *user)
 {
     if ((command != 10 && command != 11) || !fragment.final)
@@ -1040,50 +1036,13 @@ bool TerminalItem::documentCell(int line, int column, VTermScreenCell &cell) con
     return vterm_screen_get_cell(m_screen, {screenRow, column}, &cell);
 }
 
-QColor TerminalItem::terminalColor(VTermColor color, bool background) const
+QColor TerminalItem::terminalColor(VTermColor color) const
 {
     if (VTERM_COLOR_IS_DEFAULT_FG(&color))
         return m_foregroundColor;
     if (VTERM_COLOR_IS_DEFAULT_BG(&color))
         return m_backgroundColor;
 
-    if (background)
-        return m_backgroundColor;
-
-    if (VTERM_COLOR_IS_INDEXED(&color)) {
-        const int baseIndex = color.indexed.idx % 8;
-        if (baseIndex == 0 || baseIndex == 7)
-            return m_foregroundColor;
-        if (baseIndex == 1 || baseIndex == 3)
-            return m_warningColor;
-        return m_accentColor;
-    }
-
     vterm_screen_convert_color_to_rgb(m_screen, &color);
-    const int maximum = std::max({color.rgb.red, color.rgb.green, color.rgb.blue});
-    const int minimum = std::min({color.rgb.red, color.rgb.green, color.rgb.blue});
-    if (maximum - minimum < 24)
-        return m_foregroundColor;
-    if (color.rgb.red > color.rgb.blue
-        && color.rgb.red >= static_cast<int>(color.rgb.green) * 4 / 5) {
-        return m_warningColor;
-    }
-    return m_accentColor;
-}
-
-bool TerminalItem::screenCell(int row, int column, VTermScreenCell &cell) const
-{
-    const int firstLine = m_scrollback.size() - m_scrollOffset;
-    const int sourceLine = firstLine + row;
-    if (sourceLine < m_scrollback.size()) {
-        if (sourceLine < 0 || column >= m_scrollback.at(sourceLine).size())
-            return false;
-        cell = m_scrollback.at(sourceLine).at(column);
-        return true;
-    }
-
-    const int screenRow = sourceLine - m_scrollback.size();
-    if (screenRow < 0 || screenRow >= m_rows)
-        return false;
-    return vterm_screen_get_cell(m_screen, {screenRow, column}, &cell);
+    return QColor(color.rgb.red, color.rgb.green, color.rgb.blue);
 }

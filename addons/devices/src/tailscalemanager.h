@@ -21,6 +21,7 @@ class TailscaleManager : public QObject
 
     Q_PROPERTY(bool serviceRunning READ serviceRunning NOTIFY serviceRunningChanged)
     Q_PROPERTY(bool loggedIn READ loggedIn NOTIFY loggedInChanged)
+    Q_PROPERTY(bool vpnDisconnected READ vpnDisconnected NOTIFY vpnDisconnectedChanged)
     Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
     Q_PROPERTY(bool statusKnown READ statusKnown NOTIFY statusKnownChanged)
     Q_PROPERTY(bool usedByPilon READ usedByPilon NOTIFY usedByPilonChanged)
@@ -40,6 +41,7 @@ public:
 
     [[nodiscard]] bool serviceRunning() const;
     [[nodiscard]] bool loggedIn() const;
+    [[nodiscard]] bool vpnDisconnected() const { return m_vpnDisconnected; }
     [[nodiscard]] bool busy() const;
     bool statusKnown() const { return m_statusKnown; }
     bool usedByPilon() const;
@@ -72,6 +74,7 @@ public:
 signals:
     void serviceRunningChanged();
     void loggedInChanged();
+    void vpnDisconnectedChanged();
     void busyChanged();
     void statusKnownChanged();
     void usedByPilonChanged();
@@ -94,6 +97,7 @@ private:
 
     void setServiceRunning(bool running);
     void setLoggedIn(bool loggedIn);
+    void setVpnDisconnected(bool disconnected);
     void setBusy(bool busy);
     void setStatusKnown(bool known);
     bool persistUseReceipt(const QString &identity = {});
@@ -142,6 +146,7 @@ private:
     QByteArray m_actionOutput;
     bool m_serviceRunning = false;
     bool m_loggedIn = false;
+    bool m_vpnDisconnected = false;
     bool m_busy = false;
     QString m_errorMessage;
     QString m_loginUrl;

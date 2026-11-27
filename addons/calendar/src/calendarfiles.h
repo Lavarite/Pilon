@@ -7,6 +7,7 @@
 #include <QRegularExpression>
 #include <QSaveFile>
 #include <QVariantMap>
+#include <optional>
 
 // Portable calendar records, filenames and deletion history.
 namespace CalendarFiles {
@@ -98,26 +99,56 @@ inline QMap<QString, QByteArray> contents(const Records &records) {
 }
 inline bool write(const QString &directory, const Records &records, QString &error) {
     if (!QDir().mkpath(directory)) { error = QObject::tr("Unable to create the calendar folder."); return false; }
+    const QDir folder(directory);
     const auto desired = contents(records);
     // Commit deletion metadata before removing files, so a interrupted sync cannot revive them.
     auto names = desired.keys(); names.removeAll(deletionsFile); names.prepend(deletionsFile);
-    for (const auto &name : names) {
-        const auto bytes = desired.value(name);
-        const auto path = QDir(directory).filePath(name);
-        QFile previous(path);
-        if (QFileInfo(path).isSymLink()) { error = QObject::tr("A calendar file cannot be a symbolic link."); return false; }
-        if (previous.open(QIODevice::ReadOnly) && previous.readAll() == bytes) continue;
-        previous.close();
-        QSaveFile file(path);
-        if (bytes.size() > 8 * 1024 * 1024 || !file.open(QIODevice::WriteOnly)
-            || file.write(bytes) != bytes.size() || !file.commit()) {
-            error = QObject::tr("Unable to save calendar file %1.").arg(name); return false;
-        }
-    }
     for (const auto &name : files(directory))
-        if (!desired.contains(name) && !QFile::remove(QDir(directory).filePath(name))) {
-            error = QObject::tr("Unable to remove old calendar file %1.").arg(name); return false;
+        if (!desired.contains(name)) names.append(name);
+
+    using Contents = std::optional<QByteArray>;
+    struct Change { QString name; Contents before, after; };
+    QList<Change> changes;
+    constexpr qsizetype maxSize = 8 * 1024 * 1024;
+    const auto readContents = [&](const QString &name, Contents &contents) {
+        const auto path = folder.filePath(name);
+        const QFileInfo info(path);
+        if (info.isSymLink() || (info.exists() && !info.isFile())) return false;
+        if (!info.exists()) { contents.reset(); return true; }
+        QFile file(path);
+        if (!file.open(QIODevice::ReadOnly)) return false;
+        contents = file.read(maxSize + 1);
+        return contents->size() <= maxSize && file.error() == QFile::NoError;
+    };
+    for (const auto &name : names) {
+        const auto target = desired.constFind(name);
+        Change change{name, {}, target == desired.cend() ? Contents{} : Contents{target.value()}};
+        if (!readContents(name, change.before) || (change.after && change.after->size() > maxSize)) {
+            error = QObject::tr("Unable to prepare calendar file %1 for saving.").arg(name);
+            return false;
         }
+        if (change.before != change.after) changes.append(std::move(change));
+    }
+    const auto replace = [&](const QString &name, const Contents &expected, const Contents &replacement) {
+        Contents current;
+        if (!readContents(name, current) || current != expected) return false;
+        const auto path = folder.filePath(name);
+        if (!replacement) return QFile::remove(path);
+        QSaveFile file(path);
+        return file.open(QIODevice::WriteOnly) && file.write(*replacement) == replacement->size() && file.commit();
+    };
+    for (qsizetype i = 0; i < changes.size(); ++i) {
+        const auto &change = changes[i];
+        if (replace(change.name, change.before, change.after)) continue;
+        error = QObject::tr("Unable to save calendar file %1.").arg(change.name);
+        // Undo only the files still containing this operation's own changes.
+        for (qsizetype applied = i; applied > 0; --applied) {
+            const auto &earlier = changes[applied - 1];
+            if (!replace(earlier.name, earlier.after, earlier.before))
+                error += '\n' + QObject::tr("Unable to restore calendar file %1.").arg(earlier.name);
+        }
+        return false;
+    }
     return true;
 }
 }

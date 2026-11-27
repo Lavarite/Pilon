@@ -130,7 +130,7 @@ PilonPopup {
         result.url = urlField.text; result.recurrence = recurrenceControl.rule; result.destinations = destinations
         result.organizerCalendar = organiser; result.colour = selectedColour; result.privacy = privacyBox.currentIndex === 1 ? "private" : "default"
         result.availability = busyBox.currentIndex === 1 ? "free" : "busy"
-        result.reminders = reminderField.text.trim() ? reminderField.text.split(",").map(x => Number(x.trim())) : []
+        result.reminders = reminderField.text.split(",").map(x => x.trim()).filter(x => x.length).map(Number)
         result.guests = guestField.text.split(",").map(x => x.trim()).filter(x => x.length).map(email => {
             let previous = (draft.guests || []).find(g => g.email === email)
             return previous || {email: email, name: "", status: "NEEDS-ACTION"}
@@ -138,10 +138,18 @@ PilonPopup {
         return result
     }
     function save() {
+        if (recurrenceControl.requiresEndDate) {
+            message = qsTr("Choose a recurrence end date.")
+            return
+        }
         const value = buildDraft()
         let ok = proposalId ? calendar.updateProposal(proposalId, proposalIndex, value)
                             : calendar.saveEvent(value, actionScope, occurrence).length > 0
         if (ok) { close(); saved() }
+        else message = calendar.error
+    }
+    function respond(status) {
+        if (calendar.respondEvent(draft.id, status)) close()
         else message = calendar.error
     }
     readonly property var availableCalendars: calendar.calendars.filter(c => c.id !== "pilon"
@@ -412,9 +420,9 @@ PilonPopup {
                 Flow {
                     visible: !!editor.draft.canRespond && !editor.proposalId
                     Layout.fillWidth: true; Layout.leftMargin: editor.compact ? 0 : 108; spacing: 8
-                    CalendarButton { objectName: "calendarEventAccept"; text: qsTr("Accept"); onClicked: if(editor.calendar.respondEvent(editor.draft.id,"accepted"))editor.close() }
-                    CalendarButton { objectName: "calendarEventTentative"; text: qsTr("Tentative"); onClicked: if(editor.calendar.respondEvent(editor.draft.id,"tentative"))editor.close() }
-                    CalendarButton { objectName: "calendarEventDecline"; text: qsTr("Decline"); onClicked: if(editor.calendar.respondEvent(editor.draft.id,"declined"))editor.close() }
+                    CalendarButton { objectName: "calendarEventAccept"; text: qsTr("Accept"); onClicked: editor.respond("accepted") }
+                    CalendarButton { objectName: "calendarEventTentative"; text: qsTr("Tentative"); onClicked: editor.respond("tentative") }
+                    CalendarButton { objectName: "calendarEventDecline"; text: qsTr("Decline"); onClicked: editor.respond("declined") }
                 }
                 CalendarButton {
                     objectName: "calendarEventMoreOptions"
@@ -438,13 +446,22 @@ PilonPopup {
                     CalendarRecurrenceEditor {
                         id: recurrenceControl
                         objectName: "calendarEventRecurrence"
-                        Layout.fillWidth: true; Layout.minimumWidth: 0; enabled: !editor.readOnly
+                        Layout.fillWidth: true; Layout.minimumWidth: 0
+                        visible: editableRule
+                        enabled: !editor.readOnly && editableRule
                         calendar: editor.calendar; allDay: allDay.checked; timeZone: zoneField.text
+                    }
+                    Label {
+                        visible: !recurrenceControl.editableRule
+                        Layout.fillWidth: true; Layout.minimumWidth: 0
+                        text: qsTr("This recurrence uses settings Pilon cannot edit.")
+                        color: editor.mutedTextColour
+                        wrapMode: Text.Wrap
                     }
                     FieldLabel { text: qsTr("Reminders") }
                     RowLayout {
                         Layout.fillWidth: true; Layout.minimumWidth: 0; Layout.preferredWidth: 1; spacing: 8
-                        EventField { id: reminderField; placeholderText: "10, 60"; Accessible.name: qsTr("Reminder minutes before event") }
+                        EventField { id: reminderField; objectName: "calendarEventReminders"; placeholderText: "10, 60"; Accessible.name: qsTr("Reminder minutes before event") }
                         Label { text: qsTr("min before"); color: editor.mutedTextColour }
                     }
                     FieldLabel { text: qsTr("Availability") }

@@ -1,7 +1,10 @@
 #include "applicationservice.h"
 #include "applicationreset.h"
+#include "../core/workspace/piconftransaction.h"
+#include "../core/widgets/widgetroute.h"
 #include <QApplication>
 #include <QCryptographicHash>
+#include <QDeadlineTimer>
 #include <QDir>
 #include <QFile>
 #include <QFileDialog>
@@ -11,8 +14,6 @@
 #include <QJsonObject>
 #include <QKeyEvent>
 #include <QUrl>
-#include <QUrlQuery>
-#include <QRegularExpression>
 #include <QFileOpenEvent>
 #include <QLocalSocket>
 #include <QPainter>
@@ -21,10 +22,12 @@
 #include <QSaveFile>
 #include "../core/workspace/pilonsettings.h"
 #include <QStandardPaths>
+#include <QTemporaryDir>
 #include <QTimer>
 #include <QNetworkInformation>
 #include <QEvent>
 #ifdef Q_OS_ANDROID
+#include "../platform/android/androidstorage.h"
 #include <QJniEnvironment>
 #include <QJniObject>
 #else
@@ -33,6 +36,9 @@
 #endif
 
 namespace {
+constexpr qsizetype maximumOpenFrame = 65536, maximumOpenFiles = 64, maximumPendingFileBytes = 1024 * 1024;
+const QByteArray openPrefix = QByteArrayLiteral("{\"open\":["), openSuffix = QByteArrayLiteral("]}\n");
+const QByteArray accepted = QByteArrayLiteral("accepted\n"), rejected = QByteArrayLiteral("rejected\n");
 #ifdef Q_OS_ANDROID
 QPointer<ApplicationService> androidService;
 #else
@@ -122,27 +128,39 @@ ApplicationService::ApplicationService(bool startHidden, QObject *parent)
     });
     connect(&m_server, &QLocalServer::newConnection, this, [this] {
         while (auto socket = m_server.nextPendingConnection()) {
+            socket->setReadBufferSize(maximumOpenFrame + 1);
             const auto read = [this, socket] {
-                if (!socket->canReadLine()) return;
-                const auto command = socket->readLine(65537).trimmed();
-                if (command.size() > 65536) { socket->disconnectFromServer(); return; }
-                if (command == "show") showWindow();
-                else if (command == "quit") quit();
-                else {
-                    QStringList files;
+                if (!socket->canReadLine()) {
+                    if (socket->bytesAvailable() >= maximumOpenFrame) socket->disconnectFromServer();
+                    return;
+                }
+                const auto frame = socket->readLine(maximumOpenFrame + 1);
+                if (frame.size() > maximumOpenFrame || !frame.endsWith('\n')) { socket->disconnectFromServer(); return; }
+                const auto command = frame.trimmed();
+                QStringList files;
+                const bool simple = command == "show" || command == "quit" || command == "background";
+                bool deliver = simple;
+                if (!simple) {
                     const auto entries = QJsonDocument::fromJson(command).object().value("open").toArray();
-                    for (const auto &entry : entries) {
-                        const QUrl url(entry.toString());
-                        const auto suffix = QFileInfo(url.toLocalFile()).suffix().toLower();
-                        if (url.isLocalFile() && (suffix == "pin" || suffix == "pical" || suffix == "piext")) files << url.toString();
-                        if (files.size() >= 64) break;
-                    }
-                    if (!files.isEmpty()) {
+                    if (entries.size() <= maximumOpenFiles && (m_window || m_pendingFileBytes + frame.size() <= maximumPendingFileBytes))
+                        for (const auto &entry : entries) {
+                            const QUrl url(entry.toString());
+                            if (!fileOpenKind(url).isEmpty()) files << url.toString(QUrl::FullyEncoded);
+                        }
+                    deliver = !files.isEmpty();
+                }
+                socket->write(deliver ? accepted : rejected);
+                socket->flush();
+                socket->disconnectFromServer();
+                if (deliver) {
+                    if (command == "show") showWindow();
+                    else if (command == "quit") quit();
+                    else if (!files.isEmpty()) {
                         showWindow();
-                        if (m_window) emit filesRequested(files); else m_pendingFiles += files;
+                        if (m_window) emit filesRequested(files);
+                        else { m_pendingFiles += files; m_pendingFileBytes += frame.size(); }
                     }
                 }
-                socket->disconnectFromServer();
             };
             connect(socket, &QLocalSocket::readyRead, this, read);
             connect(socket, &QLocalSocket::disconnected, socket, &QObject::deleteLater);
@@ -218,26 +236,12 @@ bool ApplicationService::eventFilter(QObject *object, QEvent *event) {
     if (object == qApp && event->type() == QEvent::FileOpen
         && receiveWidgetUrl(static_cast<QFileOpenEvent *>(event)->url())) return true;
     if (object == m_window && event->type() == QEvent::DevicePixelRatioChange) emit foldChanged();
+    if (object == m_window && event->type() == QEvent::Close) updateTray();
     return QObject::eventFilter(object, event);
 }
 
 bool ApplicationService::receiveWidgetUrl(const QUrl &url) {
-    if (!url.isValid() || url.toEncoded().size() > 2048 || url.scheme() != "pilon"
-        || url.authority() != "widget" || url.hasFragment()) return false;
-    const auto parts = url.path().split('/');
-    static const QRegularExpression owner("^([a-z][a-z0-9-]*\\.)*[a-z][a-z0-9-]*$");
-    static const QRegularExpression widget("^[a-z][a-z0-9-]{0,63}$"), action("^[A-Za-z0-9_-]{1,128}$");
-    static const QRegularExpression workspace("^[a-f0-9]{64}$"), generation("^[1-9][0-9]{0,15}$");
-    if (parts.size() != 3 || !parts[0].isEmpty() || parts[1].size() > 128
-        || !owner.match(parts[1]).hasMatch() || !widget.match(parts[2]).hasMatch()) return false;
-    const auto query = QUrlQuery(url).queryItems(QUrl::FullyDecoded);
-    if (query.size() != 3) return false;
-    QMap<QString, QString> fields;
-    for (const auto &item : query) { if (fields.contains(item.first)) return false; fields.insert(item.first, item.second); }
-    if (fields.keys() != QStringList{"action", "generation", "workspace"}
-        || !action.match(fields.value("action")).hasMatch() || !workspace.match(fields.value("workspace")).hasMatch()
-        || !generation.match(fields.value("generation")).hasMatch()
-        || fields.value("generation").toULongLong() > 9007199254740991ULL) return false;
+    if (!PilonWidgetRoute::parse(url)) return false;
     const auto value = url.toString(QUrl::FullyEncoded);
     if (m_window) { showWindow(); emit filesRequested({value}); }
     else if (!m_pendingFiles.contains(value)) {
@@ -313,12 +317,22 @@ void ApplicationService::reloadPreferences(bool startHidden) {
 }
 bool ApplicationService::changeWorkspace(const QString &destination, int resumeStep) {
     m_error.clear();
-    if (!PilonWorkspace::validateRoot(destination, &m_error)) { emit changed(); return false; }
-    if (QDir::cleanPath(destination) == workspaceRoot()) return true;
+    QString target = destination;
+#ifdef Q_OS_ANDROID
+    target = AndroidStorage::normalizeSharedPath(target, AndroidStorage::sharedStoragePath());
+    if (AndroidStorage::needsSharedAccess(target)) {
+        AndroidStorage::requestAccess(this, [](bool) {});
+        m_error = tr("Allow file access, then choose the Pilon folder again.");
+        emit changed();
+        return false;
+    }
+#endif
+    if (!PilonWorkspace::validateRoot(target, &m_error)) { emit changed(); return false; }
+    if (QDir::cleanPath(target) == workspaceRoot()) return true;
     m_quitCancelled = false;
     emit quitRequested();
     if (m_quitCancelled) { showWindow(); return false; }
-    m_workspaceDestination = QDir::cleanPath(destination); m_setupResumeStep = resumeStep;
+    m_workspaceDestination = QDir::cleanPath(target); m_setupResumeStep = resumeStep;
     qApp->exit(WorkspaceExitCode);
     return true;
 }
@@ -406,9 +420,46 @@ bool ApplicationService::claimInstance() {
         socket.connectToServer(socketName());
         if (!socket.waitForConnected(300)) return false;
         const auto files = launchFiles();
-        socket.write(files.isEmpty() ? QByteArray(m_startHidden ? "background\n" : "show\n")
-            : QJsonDocument(QJsonObject{{"open", QJsonArray::fromStringList(files)}}).toJson(QJsonDocument::Compact) + '\n');
-        socket.waitForBytesWritten(1000);
+        const auto write = [&](const QByteArray &bytes, bool expectReply) {
+            socket.setReadBufferSize(64);
+            if (socket.write(bytes) != bytes.size()) return false;
+            QDeadlineTimer deadline(2000);
+            while (socket.bytesToWrite() && !deadline.hasExpired())
+                if (!socket.waitForBytesWritten(int(deadline.remainingTime()))) break;
+            if (!expectReply) return socket.bytesToWrite() == 0;
+            while (!socket.canReadLine() && !deadline.hasExpired())
+                if (!socket.waitForReadyRead(int(deadline.remainingTime()))) break;
+            return socket.readLine() == accepted;
+        };
+        if (files.isEmpty()) {
+            if (!write(m_startHidden ? "background\n" : "show\n", false)) m_error = tr("The running Pilon instance could not be reached.");
+            return true;
+        }
+        QByteArray frame = openPrefix;
+        qsizetype count = 0, forwarded = 0;
+        const auto sendFrame = [&] {
+            if (forwarded) {
+                socket.abort();
+                socket.connectToServer(socketName());
+                if (!socket.waitForConnected(1000)) return false;
+            }
+            if (!write(frame + openSuffix, true)) return false;
+            forwarded += count;
+            frame = openPrefix;
+            count = 0;
+            return true;
+        };
+        for (const auto &file : files) {
+            const auto json = QJsonDocument(QJsonArray{file}).toJson(QJsonDocument::Compact);
+            const auto entry = QByteArrayView(json).sliced(1, json.size() - 2);
+            if (openPrefix.size() + entry.size() + openSuffix.size() > maximumOpenFrame) break;
+            if (count && (count == maximumOpenFiles || frame.size() + 1 + entry.size() + openSuffix.size() > maximumOpenFrame) && !sendFrame()) break;
+            if (count) frame.append(',');
+            frame.append(entry);
+            ++count;
+        }
+        if (count && forwarded + count == files.size()) sendFrame();
+        if (forwarded != files.size()) m_error = tr("The running Pilon instance acknowledged %1 of %2 files. Open the remaining files again.").arg(forwarded).arg(files.size());
         return true;
     };
     if (contact()) return false;
@@ -429,10 +480,14 @@ QStringList ApplicationService::launchFiles() const {
     QStringList files;
     for (const auto &argument : QCoreApplication::arguments().mid(1)) {
         const QUrl url = argument.startsWith("file:") ? QUrl(argument) : QUrl::fromLocalFile(QFileInfo(argument).absoluteFilePath());
-        const auto suffix = QFileInfo(url.toLocalFile()).suffix().toLower();
-        if (url.isLocalFile() && (suffix == "pin" || suffix == "pical" || suffix == "piext")) files << url.toString();
+        if (!fileOpenKind(url).isEmpty()) files << url.toString(QUrl::FullyEncoded);
     }
     return files;
+}
+QString ApplicationService::fileOpenKind(const QUrl &url) const {
+    if (!url.isValid() || !url.isLocalFile() || url.hasQuery() || url.hasFragment()) return {};
+    const auto suffix = QFileInfo(url.toLocalFile()).suffix().toLower();
+    return suffix == "pin" || suffix == "pical" || suffix == "piext" ? suffix : QString{};
 }
 
 void ApplicationService::setWindow(QWindow *window) {
@@ -448,8 +503,8 @@ void ApplicationService::setWindow(QWindow *window) {
         attachAndroidFoldObserver();
     }
 #endif
-    if (m_window && !m_pendingFiles.isEmpty()) { emit filesRequested(m_pendingFiles); m_pendingFiles.clear(); }
-    if (m_showPending || (m_startHidden && !m_trayEnabled)) showWindow();
+    if (m_window && !m_pendingFiles.isEmpty()) { emit filesRequested(m_pendingFiles); m_pendingFiles.clear(); m_pendingFileBytes = 0; }
+    if (m_showPending || (m_startHidden && !canHideToTray())) showWindow();
 }
 bool ApplicationService::setIconColours(const QColor &foreground, const QColor &background, const QColor &accent) {
     if (!foreground.isValid() || !background.isValid() || !accent.isValid()) return false;
@@ -503,17 +558,25 @@ void ApplicationService::showWindow() {
     m_window->raise(); m_window->requestActivate();
 }
 void ApplicationService::hideWindow() {
-    if (!m_trayEnabled) return;
+    if (!canHideToTray()) return;
     for (auto *window : QGuiApplication::topLevelWindows()) window->hide();
 }
 void ApplicationService::quit() {
     m_quitCancelled = false;
+    m_quitDeferred = false;
     emit quitRequested();
-    if (m_quitCancelled) { showWindow(); return; }
-    qApp->quit();
+    if (!m_quitCancelled) qApp->quit();
+    else if (!m_quitDeferred) showWindow();
+}
+bool ApplicationService::canHideToTray() const {
+#ifdef Q_OS_ANDROID
+    return m_trayEnabled;
+#else
+    return m_trayEnabled && QSystemTrayIcon::isSystemTrayAvailable();
+#endif
 }
 void ApplicationService::updateTray() {
-    QApplication::setQuitOnLastWindowClosed(!m_trayEnabled);
+    QApplication::setQuitOnLastWindowClosed(!canHideToTray());
     if (QGuiApplication::platformName() != "offscreen" && QGuiApplication::platformName() != "minimal")
         m_tray.setVisible(m_trayEnabled);
 }
@@ -526,15 +589,17 @@ QString ApplicationService::unitContents(const QString &executable) {
 bool ApplicationService::configureStartup(bool enabled) {
     const auto folder = QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + "/systemd/user";
     const auto path = folder + "/pilon.service";
-    if (!enabled && !QFileInfo::exists(path)
-        && !QFileInfo(folder + "/default.target.wants/pilon.service").isSymLink()) return true;
+    const bool wasRegistered = QFileInfo(folder + "/default.target.wants/pilon.service").isSymLink();
+    if (!enabled && !QFileInfo::exists(path) && !wasRegistered) return true;
     const auto systemctl = QStandardPaths::findExecutable("systemctl");
     if (systemctl.isEmpty()) { m_error = tr("systemctl is required to manage background startup."); return false; }
     QFile old(path); const bool existed = old.exists();
     QByteArray previous;
     if (existed) {
         if (!old.open(QIODevice::ReadOnly)) { m_error = old.errorString(); return false; }
-        previous = old.readAll(); old.close();
+        previous = old.readAll();
+        if (old.error() != QFileDevice::NoError) { m_error = old.errorString(); return false; }
+        old.close();
     }
     const auto write = [&](const QByteArray &bytes) {
         if (!QDir().mkpath(folder)) return false;
@@ -549,20 +614,45 @@ bool ApplicationService::configureStartup(bool enabled) {
         if (!process.waitForFinished(5000)) { process.kill(); process.waitForFinished(); return false; }
         return process.exitStatus() == QProcess::NormalExit && process.exitCode() == 0;
     };
-    if (!run({"daemon-reload"}) || !run({enabled ? "enable" : "disable", "pilon.service"})) {
-        if (enabled) { if (existed) write(previous); else QFile::remove(path); run({"daemon-reload"}); }
-        m_error = tr("Unable to change background startup. Check that your user systemd service is available.");
-        return false;
+    const bool reloaded = run({"daemon-reload"});
+    const bool registered = reloaded && run({enabled ? "enable" : "disable", "pilon.service"});
+    if (registered && (enabled || !existed || (QFile::remove(path) && run({"daemon-reload"})))) return true;
+
+    const bool restoredFile = existed ? write(previous) : !QFileInfo::exists(path) || QFile::remove(path);
+    bool restoredRegistration = true;
+    if (reloaded) {
+        const bool registeredNow = QFileInfo(folder + "/default.target.wants/pilon.service").isSymLink();
+        if (registeredNow != wasRegistered)
+            restoredRegistration = run({wasRegistered ? "enable" : "disable", "pilon.service"});
     }
-    if (!enabled && QFile::exists(path)) { QFile::remove(path); run({"daemon-reload"}); }
-    return true;
+    const bool restoredService = (!enabled && !registered) || run({"daemon-reload"});
+    m_error = tr("Unable to change background startup. Check that your user systemd service is available.");
+    if (!restoredFile || !restoredRegistration || !restoredService)
+        m_error += '\n' + tr("Unable to restore the previous background service. Pilon will retry when it opens.");
+    return false;
 }
 bool ApplicationService::setBackgroundEnabled(bool enabled) {
     if (enabled == m_enabled) return true;
     m_error.clear();
+    if (!PiconfTransaction::setStartupPending(workspaceRoot(), true, m_error)) { emit changed(); return false; }
     if (!configureStartup(enabled)) { emit changed(); return false; }
+    PilonSettings settings;
+    const auto previous = settings.value("app/backgroundEnabled");
+    settings.setValue("app/backgroundEnabled", enabled);
+    settings.sync();
+    if (settings.status() != QSettings::NoError) {
+        if (previous.isValid()) settings.setValue("app/backgroundEnabled", previous);
+        else settings.remove("app/backgroundEnabled");
+        settings.sync();
+        const bool restored = configureStartup(m_enabled);
+        const auto recoveryError = m_error;
+        m_error = tr("Unable to save the background setting. Check your settings folder permissions and try again.");
+        if (!restored) m_error += '\n' + recoveryError;
+        emit changed();
+        return false;
+    }
     m_enabled = enabled;
-    PilonSettings().setValue("app/backgroundEnabled", enabled);
+    PiconfTransaction::setStartupPending(workspaceRoot(), false, m_error);
     emit changed();
     return true;
 }

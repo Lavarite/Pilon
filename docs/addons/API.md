@@ -3,7 +3,7 @@
 The executable contracts are [the compiler](../../src/scripts/compile-addon.py),
 [AddonRegistry](../../src/core/addons/addonregistry.h), [AddonHost](../../src/core/addons/ui/AddonHost.qml),
 [AddonSettingsContent](../../src/core/addons/ui/AddonSettingsContent.qml), and the context factory
-in [Main.qml](../../src/app/ui/Main.qml). Integration and storage-owner protocols are in
+in [Main.qml](../../src/app/ui/Main.qml). Integration contracts are in
 [INTEGRATIONS](INTEGRATIONS.md); Home Screen publication is in
 [WIDGETS](WIDGETS.md).
 
@@ -23,7 +23,7 @@ in [Main.qml](../../src/app/ui/Main.qml). Integration and storage-owner protocol
 
 | Field | Contract |
 | --- | --- |
-| `id` | Stable lowercase namespaced ID, at most 128 characters. Dot-separated segments start with a letter and contain letters, digits or hyphens. Reserved shipped IDs: `files`, `ssh`, `assistant`, `notes`, `calendar`, `git`, `devices`. |
+| `id` | Stable lowercase namespaced ID, at most 128 characters. Dot-separated segments start with a letter and contain letters, digits or hyphens. Reserved shipped IDs: `files`, `ssh`, `assistant`, `notes`, `calendar`, `devices`. |
 | `name` | Nonblank plain text, at most 128 characters, without control characters. |
 | `source` | Optional HTTPS acquisition URL included in portable configurations. |
 | `portableSettings` | Optional array of scoped preference keys to include in the add-on configuration. Declare preferences such as a display option or increment step. Keep user-created records and secrets outside this list. |
@@ -185,8 +185,7 @@ and checks loaded entries on the next event-loop turn. An entry may provide
 stopped; it must not return a Promise. Built-in native owner runtimes acknowledge
 their manager's inactive state. A false acknowledgement stops cleanup before
 authentication changes. Failed cleanup releases the pause; successful reset
-keeps owners paused until destruction. This pause is separate from ordinary Git
-preparation, whose native begin/reload transaction owns the storage lease.
+keeps owners paused until destruction.
 
 A declared lifecycle entry provides all three methods:
 
@@ -194,7 +193,7 @@ A declared lifecycle entry provides all three methods:
 function prepareCleanup() { return true }
 function signOutAll() { return true }
 function ownedPaths() {
-    return {personal: [], downloads: [], addonData: ["addon-data/" + addon.addonId]}
+    return {personal: [], downloads: [], addonData: ["addons/" + addon.addonId + "/data"]}
 }
 ```
 
@@ -222,8 +221,8 @@ and Checklist's items share storage with their preferences. Removal does not
 invoke this hook.
 
 For scoped preferences, use `addon.canWriteSettings()` in the false phase. It
-checks the registered owner's path safety and writability and opens/cancels an
-atomic save without changing settings contents or leaving a new settings file.
+checks the add-on's settings path and writability, then cancels a trial atomic
+save without changing settings contents or leaving a new settings file.
 It is not a lock: permissions, disk space or the filesystem can change before
 the apply phase, so every actual write must still be checked.
 
@@ -235,9 +234,12 @@ removal and does not sign out accounts.
 
 ## Storage, discovery and trust
 
-The selected root contains `addons/`, `addon-data/<id>/`, `Models/`, `Artifacts/`
-and private `.pilon/` state, including central settings and registry receipts.
-Scoped preferences live in `addon-data/<id>/settings.ini`. Installation validates
+The selected root holds each installed package at `addons/<id>/<id>.piext` and
+its data under `addons/<id>/data/`. Downloads go in `data/models/`, and scoped
+settings live in `data/settings.ini`. Private `.pilon/` state includes central
+settings and registry receipts. Pilon creates `artifacts/` when it generates a
+file. Portable declarations and preferences use the [workspace configuration](../configuration.md).
+Installation validates
 a staged package before replacement. Files dropped into `addons/` are discovered
 automatically; repaired/renamed files cause watches to be rearmed. A loaded valid
 snapshot remains active when its source changes/disappears and requires restart

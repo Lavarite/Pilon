@@ -3,7 +3,6 @@
 #include "../../../src/core/workspace/piconfpreferences.h"
 #include "notedocument.h"
 #include "../../../src/core/documents/noteimport.h"
-#include "../../git/src/gitfolderguard.h"
 
 #include <QCoreApplication>
 #include <QGuiApplication>
@@ -25,6 +24,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QLockFile>
 #include <QSaveFile>
 #include <QScopeGuard>
 #include <QSet>
@@ -37,8 +37,6 @@ namespace {
 QString identifier() { return QUuid::createUuid().toString(QUuid::WithoutBraces); }
 bool validId(const QString &id) { return !QUuid(id).isNull(); }
 bool copyLibrary(const QString &source, const QString &destination, QString &error) {
-    error = GitFolderGuard::blockedReason(source, destination);
-    if (!error.isEmpty()) return false;
     if (!QDir().mkpath(destination)) { error = QObject::tr("Unable to create the notes folder."); return false; }
     struct Copy { QString source, destination; }; QList<Copy> files;
     QStringList directories{source};
@@ -69,7 +67,7 @@ QString defaultDirectory(bool migrate = true) {
     const auto previousDefault = QDir::homePath() + "/notes";
     const auto configured = settings.value("notes/directory").toString();
     if (!configured.isEmpty() && configured != previousDefault) return configured;
-    const auto destination = PilonWorkspace::publicDirectory("Notes");
+    const auto destination = PilonWorkspace::publicDirectory("notes");
     if (!migrate) {
         if (!configured.isEmpty()) return configured;
         const auto legacy = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/notes";
@@ -113,7 +111,7 @@ QString writeNoteJson(const QString &directory, const QString &name, const QVari
     if (!QDir().mkpath(directory)) return QObject::tr("Unable to create the notes folder.");
     auto stored = object;
     QString filename = name;
-    QStringList oldNames;
+    QString oldFilename;
     if (name.endsWith(".pin")) {
         filename = noteFilename(object);
         if (availableTitle(directory, object.value("title").toString(), object.value("id").toString()) != object.value("title").toString())
@@ -122,7 +120,7 @@ QString writeNoteJson(const QString &directory, const QString &name, const QVari
             QFile previous(QDir(directory).filePath(previousName));
             if (!previous.open(QIODevice::ReadOnly) || QJsonDocument::fromJson(previous.readAll()).object().value("id").toString() != object.value("id").toString())
                 return QObject::tr("The saved note changed on disk. Reopen it before renaming.");
-            oldNames.append(previousName);
+            oldFilename = previousName;
         }
     }
     if (name.endsWith(".pin")) {
@@ -141,17 +139,81 @@ QString writeNoteJson(const QString &directory, const QString &name, const QVari
         QString error; stored["pages"] = NoteDocument::renderPages(render, error);
         if (!error.isEmpty()) return error;
     }
-    QSaveFile file(QDir(directory).filePath(filename));
+    const QDir folder(directory);
+    const auto path = folder.filePath(filename);
+    const bool existingDestination = QFileInfo::exists(path);
+    QSaveFile file(path);
     if (!file.open(QIODevice::WriteOnly)) return file.errorString();
     const auto data = QJsonDocument::fromVariant(stored).toJson(QJsonDocument::Compact);
     if (file.write(data) != data.size() || !file.commit()) return file.errorString();
-    if (name.endsWith(".pin")) cacheNotePreview(stored, assetRoot);
-    for (const auto &old : oldNames) {
-        if (!QFile::remove(QDir(directory).filePath(old))) return QObject::tr("The note was saved, but its previous filename could not be removed: %1").arg(old);
+    if (!oldFilename.isEmpty() && !QFile::remove(folder.filePath(oldFilename))) {
+        QFile published(path);
+        if (!existingDestination && !QFileInfo(path).isSymLink() && published.open(QIODevice::ReadOnly)
+            && published.readAll() == data) {
+            published.close();
+            if (published.remove()) return QObject::tr("Could not remove the previous filename: %1. The original note was kept.").arg(oldFilename);
+        }
+        return QObject::tr("The previous filename could not be removed: %1. Both note files were kept.").arg(oldFilename);
     }
+    if (name.endsWith(".pin")) cacheNotePreview(stored, assetRoot);
     return {};
 }
 bool validName(const QString &name) { return !name.trimmed().isEmpty() && !name.contains('/') && !name.contains('\0') && !name.contains('\n'); }
+
+constexpr auto folderDeletionPrefix = ".folder-delete-";
+constexpr auto folderDeletionLock = ".folder-delete.lock";
+constexpr auto folderMetadata = ".folders.json";
+constexpr auto folderMetadataAfterDeletion = ".folders-after.json";
+
+QJsonValue readFolderList(const QString &path) {
+    if (QFileInfo(path).isSymLink() || !QFileInfo(path).isFile()) return {};
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) return {};
+    return QJsonDocument::fromJson(file.readAll()).object().value("folders");
+}
+
+bool recoverFolderDeletion(const QDir &library, const QFileInfo &entry) {
+    const QDir staging(entry.absoluteFilePath());
+    if (entry.isSymLink() || !entry.isReadable() || !entry.isExecutable()) return false;
+    const auto before = readFolderList(staging.filePath(folderMetadata));
+    const auto after = readFolderList(staging.filePath(folderMetadataAfterDeletion));
+    const auto current = readFolderList(library.filePath(folderMetadata));
+    // The live metadata is the commit record. Older stages have only the backup.
+    const bool restore = before.isArray() && current == before;
+    const bool committed = before.isArray() && after.isArray() && current == after;
+    const auto entries = staging.entryInfoList(QDir::AllEntries | QDir::Hidden | QDir::System | QDir::NoDotAndDotDot);
+    for (const auto &file : entries) {
+        const auto name = file.fileName();
+        if (file.isSymLink() || !file.isFile()) return false;
+        if (name == folderMetadata || name == folderMetadataAfterDeletion) continue;
+        if (!name.endsWith(".pin") || (!restore && !committed)) return false;
+    }
+    for (const auto &file : entries) {
+        if (!file.fileName().endsWith(".pin")) continue;
+        if (restore) {
+            if (!PilonWorkspace::moveWithoutReplacing(file.absoluteFilePath(), library.filePath(file.fileName()))) return false;
+        } else if (!QFile::remove(file.absoluteFilePath())) return false;
+    }
+    for (const auto &file : entries) {
+        if (file.fileName() != folderMetadata && file.fileName() != folderMetadataAfterDeletion) continue;
+        if (!QFile::remove(file.absoluteFilePath())) return false;
+    }
+    return library.rmdir(entry.fileName());
+}
+
+QString recoverFolderDeletions(const QDir &library) {
+    const auto staged = library.entryInfoList({QString(folderDeletionPrefix) + "??????"}, QDir::Dirs | QDir::Hidden);
+    if (staged.isEmpty()) return {};
+    QLockFile lock(library.filePath(folderDeletionLock));
+    if (!lock.tryLock(0))
+        return QObject::tr("Unable to recover interrupted folder deletion. Check folder access and reopen Notes.");
+    for (const auto &entry : staged) {
+        if (QFileInfo::exists(entry.absoluteFilePath()) && !recoverFolderDeletion(library, entry))
+            return QObject::tr("Some notes from an interrupted folder deletion are still stored in %1. Review that folder before trying again.")
+                .arg(entry.absoluteFilePath());
+    }
+    return {};
+}
 }
 QVariant NoteElements::data(const QModelIndex &index, int role) const {
     return role == Qt::UserRole && index.isValid() && index.row() < m_values.size() ? m_values[index.row()] : QVariant{};
@@ -198,7 +260,7 @@ NotesManager::NotesManager(const QString &directory, QObject *parent, bool async
         if (m_active && m_loading) applyLibrary(m_loadWatcher.result());
     });
     if (asynchronous) {
-        applySettings(readSettings(m_directory));
+        applySettings(readSettings(m_directory), false);
         m_loading = true;
         QTimer::singleShot(0, this, [this] { if (m_active) loadLibrary(); });
     } else loadLibrary(false);
@@ -217,12 +279,10 @@ bool NotesManager::resetPreferences(bool apply) {
     const auto blocked = disableBlockedReason();
     if (!blocked.isEmpty()) { error(blocked); return false; }
     const auto root = QDir::cleanPath(PilonWorkspace::configuredRoot());
-    QStringList folders{PilonWorkspace::publicDirectory("Notes")};
+    QStringList folders{PilonWorkspace::publicDirectory("notes")};
     const bool managed = QDir::cleanPath(m_directory).startsWith(root + '/');
     if (managed && !folders.contains(m_directory)) folders.append(m_directory);
     for (const auto &folder : folders) {
-        const auto guard = GitFolderGuard::blockedReason(folder, folder);
-        if (!guard.isEmpty()) { error(guard); return false; }
         const auto file = QDir(folder).filePath(".settings.json");
         for (QString part = file; part != "/"; part = QFileInfo(part).absolutePath())
             if (QFileInfo(part).isSymLink()) { error(tr("Note preferences cannot be reset through symbolic links.")); return false; }
@@ -250,102 +310,22 @@ bool NotesManager::prepareDisable() {
     return true;
 }
 QString NotesManager::disableBlockedReason() const {
-    if (m_gitUpdating) return tr("Finish or abort the Git update before disabling Notes.");
     if (m_importing) return tr("Wait for the note import to finish.");
     if (m_loadWatcher.isRunning()) return tr("Wait for Notes to finish loading.");
     if (m_writing) return tr("Finish the current stroke before disabling Notes.");
     return {};
 }
 void NotesManager::setActive(bool active) {
-    if (active && !m_gitUpdating) {
-        const auto blocked = GitFolderGuard::blockedReason(m_directory, m_directory);
-        if (!blocked.isEmpty()) { m_requestedActive = true; error(blocked); return; }
-    }
-    if (m_gitUpdating) { m_requestedActive = active; return; }
-    if (m_active == active) { m_requestedActive = active; return; }
+    if (m_active == active) return;
     if (!active && !prepareDisable()) return;
-    m_requestedActive = active;
     m_active = active;
     m_handwriting.setActive(active);
     if (active) loadLibrary();
     else if (m_loading) { m_loading = false; emit loadingChanged(); }
     emit activeChanged();
 }
-bool NotesManager::beginGitUpdate() {
-    if (m_gitUpdating) return true;
-    const auto reason = disableBlockedReason();
-    if (!reason.isEmpty()) { error(reason); return false; }
-    if (m_loading) { error(tr("Wait for Notes to finish loading.")); return false; }
-    if (!save()) return false;
-    m_requestedActive = m_requestedActive || m_active; m_gitUpdating = true; m_active = false;
-    m_saveTimer.stop(); m_handwriting.setActive(false);
-    if (m_loading) { m_loading = false; emit loadingChanged(); }
-    clearError(); emit gitUpdatingChanged(); emit activeChanged(); return true;
-}
-bool NotesManager::validateGitSnapshot(const QString &directory) {
-    QTemporaryDir assets;
-    if (!assets.isValid()) { error(tr("Unable to prepare the incoming notes cache.")); return false; }
-    const auto data = readGitSnapshot(directory, assets.path());
-    if (!data.error.isEmpty()) { error(data.error); return false; }
-    return true;
-}
-bool NotesManager::adoptGitDirectory(const QString &directory) {
-    const auto reason = disableBlockedReason();
-    if (!reason.isEmpty()) { error(reason); return false; }
-    if (m_loading) { error(tr("Wait for Notes to finish loading.")); return false; }
-    const auto blocked = GitFolderGuard::blockedReason(m_directory, directory);
-    if (!blocked.isEmpty()) { error(blocked); return false; }
-    const QFileInfo target(directory), source(m_directory);
-    const auto destination = target.canonicalFilePath(), original = source.canonicalFilePath();
-    if (!QDir::isAbsolutePath(directory) || !target.isDir() || target.isSymLink() || !target.isReadable() || original.isEmpty()) {
-        error(tr("Choose an existing local notes folder after checking the current folder.")); return false;
-    }
-    if (destination == original || destination.startsWith(original + '/') || original.startsWith(destination + '/')) {
-        error(tr("Choose a separate folder outside the current notes folder.")); return false;
-    }
-    QTemporaryDir assets;
-    if (!assets.isValid()) { error(tr("Unable to prepare the incoming notes cache.")); return false; }
-    const auto data = readGitSnapshot(destination, assets.path());
-    if (!data.error.isEmpty()) { error(data.error); return false; }
-    emit storageDirectoryChanging();
-    if (!beginGitUpdate()) return false;
-    const auto resume = qScopeGuard([this] {
-        m_gitUpdating = false; m_active = m_requestedActive; m_handwriting.setActive(m_active);
-        emit gitUpdatingChanged(); emit activeChanged();
-    });
-    if (!validateGitSnapshot(m_directory)) return false;
-    PilonSettings settings; const auto previous = settings.value("notes/directory");
-    settings.setValue("notes/directory", destination); settings.sync();
-    if (settings.status() != PilonSettings::NoError) {
-        if (previous.isValid()) settings.setValue("notes/directory", previous); else settings.remove("notes/directory");
-        settings.sync(); error(tr("Unable to save the notes folder setting.")); return false;
-    }
-    m_directory = destination; m_useDefaultDirectory = false;
-    m_assetDirectory.swap(assets); m_plainText.clear();
-    applySettings(data); applyLibrary(data); clearError();
-    ++m_previewRevision; emit previewsChanged(); emit storageDirectoryChanged();
-    return true;
-}
-bool NotesManager::finishGitUpdate() {
-    if (!m_gitUpdating) { error(tr("Notes are not paused for a Git update.")); return false; }
-    QTemporaryDir assets;
-    if (!assets.isValid()) { error(tr("Unable to prepare the incoming notes cache.")); return false; }
-    const auto data = readGitSnapshot(m_directory, assets.path());
-    if (!data.error.isEmpty()) { error(data.error); return false; }
-    m_assetDirectory.swap(assets); m_plainText.clear();
-    applySettings(data); applyLibrary(data); clearError();
-    m_gitUpdating = false; m_active = m_requestedActive; m_handwriting.setActive(m_active);
-    ++m_previewRevision; emit previewsChanged(); emit gitUpdatingChanged(); emit activeChanged();
-    for (const auto &id : m_notes.keys()) queueHandwriting(id);
-    return true;
-}
 void NotesManager::loadLibrary(bool asynchronous) {
     if (!m_active || m_loadWatcher.isRunning()) return;
-    const auto blocked = GitFolderGuard::blockedReason(m_directory, m_directory);
-    if (!blocked.isEmpty()) {
-        m_requestedActive = true; m_active = false; m_loading = false;
-        m_handwriting.setActive(false); error(blocked); emit activeChanged(); emit loadingChanged(); return;
-    }
     if (m_useDefaultDirectory) {
         const auto directory = defaultDirectory();
         if (directory != m_directory) { m_directory = directory; emit storageDirectoryChanged(); }
@@ -357,7 +337,7 @@ void NotesManager::loadLibrary(bool asynchronous) {
     if (asynchronous) m_loadWatcher.setFuture(QtConcurrent::run([directory, assetRoot] { return readLibrary(directory, assetRoot); }));
     else applyLibrary(readLibrary(directory, assetRoot));
 }
-void NotesManager::applySettings(const LoadedLibrary &data) {
+void NotesManager::applySettings(const LoadedLibrary &data, bool persistImported) {
     const bool portable = PiconfPreferences::instance().active() && m_directory == defaultDirectory(false);
     PilonSettings settings;
     const bool imported = portable && settings.value("notes/portablePreferencesPending").toBool();
@@ -367,7 +347,7 @@ void NotesManager::applySettings(const LoadedLibrary &data) {
     m_drawWithFinger = options.drawWithFinger; m_pressureSensitive = options.pressureSensitive;
     if (!options.pens.isEmpty()) m_pens = options.pens;
     if (!data.error.isEmpty()) error(data.error);
-    else if (imported) saveSettings();
+    else if (imported) { if (persistImported && m_active) saveSettings(); }
     else if (portable && settings.value("notes/portablePreferences").toMap() != preferenceValues())
         settings.setValue("notes/portablePreferences", preferenceValues());
     emit settingsChanged();
@@ -392,12 +372,17 @@ void NotesManager::queueHandwriting(const QString &id) {
         m_handwriting.enqueue(id, note.value("strokes").toList(), revision, index.value("version").toInt() == 4 ? index.value("lines").toList() : QVariantList{}, note.value("elements").toList(), m_assetDirectory.path());
 }
 void NotesManager::queueSave(const QString &id) {
-    if (m_gitUpdating || !m_notes.contains(id)) return;
-    m_pendingSaves[id] = m_notes.value(id); if (!m_writing) startSave();
+    if (!m_notes.contains(id)) return;
+    m_failedSaves.remove(id);
+    m_pendingSaves[id] = m_notes.value(id);
+    startSave();
 }
 void NotesManager::startSave() {
-    if (m_gitUpdating || !m_savingId.isEmpty() || m_pendingSaves.isEmpty() || m_flushing || m_writing) return;
-    const auto next = m_pendingSaves.begin(); m_savingId = next.key(); m_savingSnapshot = next.value(); m_pendingSaves.erase(next);
+    if (!m_savingId.isEmpty() || m_pendingSaves.isEmpty() || m_flushing || m_writing) return;
+    auto next = m_pendingSaves.begin();
+    while (next != m_pendingSaves.end() && m_failedSaves.contains(next.key())) ++next;
+    if (next == m_pendingSaves.end()) return;
+    m_savingId = next.key(); m_savingSnapshot = next.value(); m_pendingSaves.erase(next);
     const auto id = m_savingId, directory = m_directory, assetRoot = m_assetDirectory.path(), previousName = m_noteFiles.value(m_savingId); const auto note = m_savingSnapshot;
     m_saveWatcher.setFuture(QtConcurrent::run([id, directory, note, previousName, assetRoot] { return writeNoteJson(directory, id + ".pin", note, previousName, assetRoot); }));
 }
@@ -405,7 +390,16 @@ void NotesManager::finishSave() {
     if (m_savingId.isEmpty() || !m_saveWatcher.isFinished()) return;
     const auto id = m_savingId; const auto snapshot = m_savingSnapshot; const auto message = m_saveWatcher.result();
     m_savingId.clear(); m_savingSnapshot.clear();
-    if (!message.isEmpty()) { if (m_notes.contains(id)) m_pendingSaves[id] = m_notes.value(id); error(message); return; }
+    if (!message.isEmpty()) {
+        if (m_notes.contains(id)) {
+            m_pendingSaves[id] = m_notes.value(id);
+            if (m_pendingSaves.value(id) == snapshot) m_failedSaves.insert(id);
+        }
+        error(message);
+        startSave();
+        return;
+    }
+    m_failedSaves.remove(id);
     m_noteFiles[id] = noteFilename(snapshot);
     ++m_previewRevision; emit previewsChanged();
     if (id == m_currentId && current() == snapshot && m_dirty) { m_dirty = false; emit dirtyChanged(); }
@@ -436,7 +430,6 @@ QString NotesManager::currentFolder() const { return current().value("folder").t
 void NotesManager::error(const QString &message) { if (m_error != message) { m_error = message; emit errorChanged(); } }
 void NotesManager::clearError() { error({}); }
 bool NotesManager::writeJson(const QString &name, const QVariantMap &object) {
-    if (m_gitUpdating) { error(tr("Notes are paused for a Git update.")); return false; }
     const bool wasFlushing = m_flushing; m_flushing = true;
     const auto restore = qScopeGuard([&] { m_flushing = wasFlushing; });
     if (name == m_savingId + ".pin") { m_saveWatcher.waitForFinished(); finishSave(); }
@@ -474,32 +467,15 @@ NotesManager::LoadedLibrary NotesManager::decodeSettings(const QVariantMap &obje
     }
     return data;
 }
-NotesManager::LoadedLibrary NotesManager::readGitSnapshot(const QString &directory, const QString &assetRoot) {
-    LoadedLibrary data;
-    if (!QDir::isAbsolutePath(directory)) { data.error = tr("Choose an absolute notes folder path."); return data; }
-    if (QFileInfo(QDir(directory).filePath(".settings.json")).isSymLink()) { data.error = tr("Note settings cannot be a symbolic link."); return data; }
-    data = readSettings(directory);
-    if (!data.error.isEmpty()) return data;
-    const auto library = readLibrary(directory, assetRoot, true);
-    data.notes = library.notes; data.filenames = library.filenames; data.folders = library.folders;
-    data.current = library.current; data.library = library.library; data.error = library.error;
-    return data;
-}
-NotesManager::LoadedLibrary NotesManager::readLibrary(const QString &m_directory, const QString &assetRoot, bool strict) {
+NotesManager::LoadedLibrary NotesManager::readLibrary(const QString &m_directory, const QString &assetRoot) {
     LoadedLibrary data; data.paper = NoteDocument::defaultPaper();
     auto &m_notes = data.notes; auto &m_folders = data.folders; auto &m_currentId = data.current;
     const auto error = [&](const QString &message) { data.error = message; };
     const auto folderExists = [&](const QString &id) { return id.isEmpty() || std::any_of(m_folders.cbegin(), m_folders.cend(), [&](const QVariant &v) { return v.toMap().value("id") == id; }); };
     QDir directory(m_directory);
-    if (strict && (!directory.exists() || !QFileInfo(m_directory).isReadable())) { error(tr("The notes folder is missing or unreadable.")); return data; }
-    QMap<QString, QByteArray> imageAssets;
-    QSet<QUuid> noteIds, folderIds;
-    for (const auto &filename : directory.entryList({"*.json", "*.pin"}, QDir::Files | QDir::Hidden | (strict ? QDir::System : QDir::Filters{}), QDir::Name)) {
-        if (strict && (QFileInfo(directory.filePath(filename)).isSymLink() || !QFileInfo(directory.filePath(filename)).isFile())) { error(tr("Note data must be a regular file: %1").arg(filename)); continue; }
+    const auto deletionRecoveryError = recoverFolderDeletions(directory);
+    for (const auto &filename : directory.entryList({"*.json", "*.pin"}, QDir::Files | QDir::Hidden, QDir::Name)) {
         if (filename == ".settings.json") continue;
-        if (strict && filename.endsWith(".json") && filename != ".folders.json" && filename != ".library.json") {
-            error(tr("Convert legacy .json notes in Notes before synchronizing with Git: %1").arg(filename)); continue;
-        }
         QFile file(directory.filePath(filename));
         if (!file.open(QIODevice::ReadOnly)) { error(file.errorString()); continue; }
         QJsonParseError parse;
@@ -507,19 +483,13 @@ NotesManager::LoadedLibrary NotesManager::readLibrary(const QString &m_directory
         if (parse.error != QJsonParseError::NoError || !document.isObject()) { error(tr("Unable to read note data: %1").arg(filename)); continue; }
         const auto json = document.object(); const auto object = json.toVariantMap();
         if (filename == ".library.json") {
-            if (strict && json.contains("opened") && !json.value("opened").isObject()) { error(tr("Invalid note library metadata.")); continue; }
             data.library = object;
         } else if (filename == ".folders.json") {
-            if (strict && !json.value("folders").isArray()) { error(tr("Invalid note folder metadata.")); continue; }
             for (const auto &value : object.value("folders").toList()) {
                 const auto folder = value.toMap();
                 const auto id = folder.value("id").toString();
                 const bool valid = validId(id) && validName(folder.value("name").toString());
-                if (strict && (!valid || folder.value("name").metaType().id() != QMetaType::QString || folderIds.contains(QUuid(id))
-                    || (!folder.value("parent").toString().isEmpty() && !validId(folder.value("parent").toString())))) {
-                    error(tr("Invalid or duplicate note folder data.")); continue;
-                }
-                if (valid) { m_folders.append(folder); folderIds.insert(QUuid(id)); }
+                if (valid) m_folders.append(folder);
             }
         } else {
             auto note = object;
@@ -527,20 +497,13 @@ NotesManager::LoadedLibrary NotesManager::readLibrary(const QString &m_directory
             if (!validId(id) || (!filename.endsWith(".pin") && filename != id + ".json") || note.value("version").toInt() != 1) {
                 error(tr("Unsupported note data: %1").arg(filename)); continue;
             }
-            if (strict && (noteIds.contains(QUuid(id)) || !json.value("version").isDouble() || json.value("version").toDouble() != 1 || !json.value("strokes").isArray()
-                || (json.contains("elements") && !json.value("elements").isArray()) || (json.contains("paper") && !json.value("paper").isObject())
-                || (json.contains("text") && !json.value("text").isString()) || (json.contains("html") && !json.value("html").isString())
-                || (json.contains("assets") && !json.value("assets").isObject()))) {
-                error(tr("Invalid or duplicate note data: %1").arg(filename)); continue;
-            }
-            const auto basename = QFileInfo(filename).completeBaseName();
-            if (strict && (!validName(basename) || basename.contains('\\') || basename.trimmed() != basename || basename.toUtf8().size() > 220
-                || (json.contains("mode") && json.value("mode") != "text" && json.value("mode") != "ink"))) {
-                error(tr("Invalid note name or mode: %1").arg(filename)); continue;
+            if (m_notes.contains(id)) {
+                error(tr("Several files contain the same note. The newest saved version was loaded and all files were kept."));
+                if (note.value("modified").toLongLong() < m_notes.value(id).value("modified").toLongLong()) continue;
             }
             if (filename.endsWith(".json") && QFileInfo::exists(directory.filePath(id + ".pin"))) continue;
             if (filename.endsWith(".pin")) {
-                if (note.value("format") != "pilon-note" || note.value("formatVersion").toInt() != 1 || (strict && (!json.value("formatVersion").isDouble() || json.value("formatVersion").toDouble() != 1))) {
+                if (note.value("format") != "pilon-note" || note.value("formatVersion").toInt() != 1) {
                     error(tr("Unsupported note format: %1").arg(filename)); continue;
                 }
                 bool restored = true;
@@ -549,27 +512,11 @@ NotesManager::LoadedLibrary NotesManager::readLibrary(const QString &m_directory
                 for (const auto &value : note.value("elements").toList()) {
                     const auto element = value.toMap(); const auto asset = element.value("asset").toString();
                     const auto type = element.value("type").toString();
-                    if (strict) {
-                        if (value.metaType().id() != QMetaType::QVariantMap) restored = false;
-                        if (type == "image" || type == "page" || type == "text") {
-                            for (const auto &key : QStringList{"x", "y", "width", "height"}) {
-                                const auto field = QJsonValue::fromVariant(element.value(key));
-                                if (!field.isDouble() || !std::isfinite(field.toDouble()) || ((key == "width" || key == "height") && field.toDouble() <= 0)) restored = false;
-                            }
-                            if (element.contains("rotation") && (!QJsonValue::fromVariant(element.value("rotation")).isDouble() || !std::isfinite(element.value("rotation").toDouble()))) restored = false;
-                            if ((type == "image" || type == "page") && !safeAsset(asset)) restored = false;
-                        }
-                    }
                     if ((type == "image" || type == "page") && !asset.isEmpty()) images.insert(asset);
                 }
-                if (strict) for (const auto &asset : images) if (!assets.contains(asset)) restored = false;
                 for (auto it = assets.cbegin(); it != assets.cend(); ++it) {
-                    if (strict && (it.value().metaType().id() != QMetaType::QString
-                        || (!it.value().toString().isEmpty() && QByteArray::fromBase64(it.value().toString().toLatin1(), QByteArray::AbortOnBase64DecodingErrors).isEmpty()))) { restored = false; break; }
                     if (!images.contains(it.key())) continue; // Opaque attachments never become filesystem paths.
                     const auto bytes = QByteArray::fromBase64(it.value().toString().toLatin1());
-                    if (strict && (QImage::fromData(bytes).isNull() || (imageAssets.contains(it.key()) && imageAssets.value(it.key()) != bytes))) { restored = false; break; }
-                    imageAssets[it.key()] = bytes;
                     const auto path = QDir(assetRoot).filePath(it.key());
                     if (!safeAsset(it.key()) || !QDir().mkpath(QFileInfo(path).absolutePath())
                         || !QFileInfo(QFileInfo(path).absolutePath()).canonicalFilePath().startsWith(QFileInfo(assetRoot).canonicalFilePath() + '/')) {
@@ -616,7 +563,7 @@ NotesManager::LoadedLibrary NotesManager::readLibrary(const QString &m_directory
             note["paper"] = NoteDocument::normalizedPaper(note.value("paper").toMap());
             const bool legacyFilename = filename == id + ".pin" || filename.endsWith(".json");
             note["title"] = legacyFilename ? availableTitle(m_directory, note.value("title").toString(), id) : QFileInfo(filename).completeBaseName();
-            if (legacyFilename && !strict) {
+            if (legacyFilename) {
                 const auto message = writeNoteJson(m_directory, id + ".pin", note, filename.endsWith(".pin") ? filename : QString{}, assetRoot);
                 if (!message.isEmpty()) { error(message); continue; }
                 if (!filename.endsWith(".json")) { m_notes.insert(id, note); continue; }
@@ -625,18 +572,10 @@ NotesManager::LoadedLibrary NotesManager::readLibrary(const QString &m_directory
                     error(tr("Unable to preserve the legacy note backup: %1").arg(filename));
                 }
             }
-            m_notes.insert(id, note); noteIds.insert(QUuid(id)); data.filenames[id] = strict ? filename : noteFilename(note);
+            m_notes.insert(id, note); data.filenames[id] = noteFilename(note);
         }
     }
-    if (strict) for (const auto &value : m_folders) {
-        QSet<QString> ancestors; auto id = value.toMap().value("id").toString();
-        while (!id.isEmpty()) {
-            if (ancestors.contains(id) || !folderExists(id)) { error(tr("Invalid note folder ancestry.")); break; }
-            ancestors.insert(id);
-            for (const auto &entry : m_folders) if (entry.toMap().value("id") == id) { id = entry.toMap().value("parent").toString(); break; }
-        }
-    }
-    if (!strict && data.error.isEmpty() && QDir(directory.filePath("assets")).exists()) {
+    if (data.error.isEmpty() && QDir(directory.filePath("assets")).exists()) {
         const auto key = QString::fromLatin1(QCryptographicHash::hash(directory.absolutePath().toUtf8(), QCryptographicHash::Sha256).toHex());
         const auto backup = PilonWorkspace::appDataDirectory() + "/notes-backups/" + key;
         const auto oldAssets = directory.filePath("assets");
@@ -652,16 +591,15 @@ NotesManager::LoadedLibrary NotesManager::readLibrary(const QString &m_directory
     }
     // A removed or corrupt folder reference must not hide an otherwise readable note.
     for (auto it = m_notes.begin(); it != m_notes.end(); ++it)
-        if (!folderExists(it.value().value("folder").toString())) {
-            if (strict) error(tr("A note refers to a missing folder."));
-            else it.value()["folder"] = "";
-        }
+        if (!folderExists(it.value().value("folder").toString()))
+            it.value()["folder"] = "";
     if (!m_notes.isEmpty()) {
         auto latest = m_notes.cbegin();
         for (auto it = m_notes.cbegin(); it != m_notes.cend(); ++it)
             if (it.value().value("modified").toLongLong() > latest.value().value("modified").toLongLong()) latest = it;
         m_currentId = latest.key();
     }
+    if (!deletionRecoveryError.isEmpty()) data.error = deletionRecoveryError;
     return data;
 }
 
@@ -963,6 +901,8 @@ bool NotesManager::pasteContent(qreal x, qreal y, bool includeText) {
         const auto data = QJsonDocument::fromJson(mime->data("application/x-pilon-note-items")).toVariant().toMap();
         const qreal dx = x - data.value("x").toDouble(), dy = y - data.value("y").toDouble();
         auto ink = strokes(); auto values = current().value("elements").toList();
+        QStringList staged;
+        auto cleanup = qScopeGuard([&] { for (const auto &path : staged) QFile::remove(path); });
         for (const auto &value : data.value("strokes").toList()) {
             const auto stroke = NoteDocument::transformedStroke(value.toMap(), QTransform::fromTranslate(dx, dy));
             if (!stroke.isEmpty()) ink.append(stroke);
@@ -975,12 +915,15 @@ bool NotesManager::pasteContent(qreal x, qreal y, bool includeText) {
                 if (!QFileInfo::exists(source)) { error(tr("The copied image is no longer available.")); return true; }
                 const QString asset = "assets/" + identifier() + ".png";
                 QDir().mkpath(QDir(m_assetDirectory.path()).filePath("assets"));
-                if (!QFile::copy(source, QDir(m_assetDirectory.path()).filePath(asset))) { error(tr("Unable to paste the copied image.")); return true; }
+                const auto path = QDir(m_assetDirectory.path()).filePath(asset);
+                if (!QFile::copy(source, path)) { error(tr("Unable to paste the copied image.")); return true; }
+                staged.append(path);
                 item["asset"] = asset;
             }
             item.remove("url"); item["id"] = identifier(); item["x"] = item.value("x").toDouble() + dx; item["y"] = item.value("y").toDouble() + dy;
             values.append(item);
         }
+        cleanup.dismiss();
         setStrokes(ink); setElements(values); return true;
     }
     if (mime->hasImage()) {
@@ -1037,19 +980,25 @@ void NotesManager::notifyCurrent() {
     emit currentChanged(); emit titleChanged(); emit textChanged(); emit htmlChanged(); emit elementsChanged(); emit strokesChanged(); emit paperChanged(); emit modeChanged();
 }
 bool NotesManager::save() {
-    if (m_gitUpdating) return !m_dirty && m_pendingSaves.isEmpty() && m_savingId.isEmpty();
     m_saveTimer.stop();
     if (m_loading) return true;
     m_flushing = true; const auto done = qScopeGuard([this] { m_flushing = false; });
     if (!m_savingId.isEmpty()) { m_saveWatcher.waitForFinished(); finishSave(); }
     if (m_dirty && !m_currentId.isEmpty()) m_pendingSaves[m_currentId] = current();
-    while (!m_pendingSaves.isEmpty()) {
-        const auto job = m_pendingSaves.begin(); const auto id = job.key(); const auto note = job.value();
-        m_pendingSaves.erase(job);
-        if (!writeJson(id + ".pin", note)) { m_pendingSaves[id] = note; return false; }
+    QString failure;
+    const auto pending = m_pendingSaves.keys();
+    for (const auto &id : pending) {
+        const auto note = m_pendingSaves.value(id);
+        if (!writeJson(id + ".pin", note)) {
+            if (failure.isEmpty()) failure = m_error;
+            m_failedSaves.insert(id);
+            continue;
+        }
+        m_failedSaves.remove(id);
         if (id == m_currentId && m_dirty && current() == note) { m_dirty = false; emit dirtyChanged(); }
     }
-    return true;
+    if (!failure.isEmpty()) error(failure);
+    return m_pendingSaves.isEmpty();
 }
 bool NotesManager::selectNote(const QString &id) {
     if (!m_active || !m_notes.contains(id)) return false;
@@ -1200,7 +1149,10 @@ bool NotesManager::removeFolder(const QString &id) {
 
     // Keep every note recoverable until the folder metadata has committed. The
     // staging directory is on the same filesystem, so moving a file is atomic.
-    QTemporaryDir staging(QDir(m_directory).filePath(".folder-delete-XXXXXX"));
+    const QDir library(m_directory);
+    QLockFile lock(library.filePath(folderDeletionLock));
+    if (!lock.tryLock(0)) { error(tr("Unable to lock the notes folder for deletion. Check folder access and try again.")); return false; }
+    QTemporaryDir staging(library.filePath(QString(folderDeletionPrefix) + "XXXXXX"));
     if (!staging.isValid()) { error(tr("Unable to prepare the folder for deletion.")); return false; }
     staging.setAutoRemove(false);
     QStringList staged;
@@ -1212,22 +1164,24 @@ bool NotesManager::removeFolder(const QString &id) {
         else message += tr("\nSome note files remain safely stored at %1.").arg(staging.path());
         error(message); return false;
     };
-    const auto backupError = writeNoteJson(staging.path(), ".folders.json", {{"folders", m_folders}});
+    const auto backupError = writeNoteJson(staging.path(), folderMetadata, {{"folders", m_folders}});
     if (!backupError.isEmpty()) return rollback(backupError);
+    const auto planError = writeNoteJson(staging.path(), folderMetadataAfterDeletion, {{"folders", updated}});
+    if (!planError.isEmpty()) return rollback(planError);
     for (const auto &noteId : removedNotes) {
         const auto filename = m_noteFiles.value(noteId, noteFilename(m_notes.value(noteId))); QFile file(QDir(m_directory).filePath(filename));
         if (!QFileInfo(file).isFile()) return rollback(tr("The saved note %1 is unavailable; the folder was not deleted.").arg(m_notes.value(noteId).value("title").toString()));
         if (!file.rename(staging.filePath(filename))) return rollback(file.errorString());
         staged.append(filename);
     }
-    if (!writeJson(".folders.json", {{"folders", updated}})) return rollback(m_error);
+    if (!writeJson(folderMetadata, {{"folders", updated}})) return rollback(m_error);
     m_folders = updated;
     for (const auto &noteId : removedNotes) { QFile::remove(QDir(m_directory).filePath(noteId + ".json")); m_notes.remove(noteId); m_pendingSaves.remove(noteId); }
     if (removedNotes.contains(m_currentId)) {
         m_currentId = m_notes.isEmpty() ? "" : m_notes.firstKey(); notifyCurrent();
     }
     emit itemsChanged();
-    QDir(staging.path()).removeRecursively();
+    recoverFolderDeletion(library, QFileInfo(staging.path()));
     return true;
 }
 QVariantMap NotesManager::preferenceValues() const {
@@ -1235,8 +1189,6 @@ QVariantMap NotesManager::preferenceValues() const {
             {"drawWithFinger", m_drawWithFinger}, {"pressureSensitive", m_pressureSensitive}, {"pens", m_pens}};
 }
 bool NotesManager::saveSettings() {
-    const auto blocked = GitFolderGuard::blockedReason(m_directory, m_directory);
-    if (!blocked.isEmpty()) { error(blocked); return false; }
     const auto values = preferenceValues();
     if (!writeJson(".settings.json", values)) return false;
     if (PiconfPreferences::instance().active() && m_directory == defaultDirectory(false)) {
@@ -1306,12 +1258,9 @@ QUrl NotesManager::preparePdf(const QString &filename, const QVariantMap &option
 }
 
 bool NotesManager::setStorageDirectory(const QString &path) {
-    if (m_gitUpdating) { error(tr("Finish or abort the Git update before changing the notes folder.")); return false; }
     const auto destination = QDir::cleanPath(path);
     if (m_loading || m_importing || !QDir::isAbsolutePath(destination)) { error(tr("Choose a local absolute folder path after notes finish loading.")); return false; }
     if (destination == m_directory) return true;
-    const auto blocked = GitFolderGuard::blockedReason(m_directory, destination);
-    if (!blocked.isEmpty()) { error(blocked); return false; }
     if (destination.startsWith(QDir::cleanPath(m_directory) + '/')) { error(tr("Choose a folder outside the current notes folder.")); return false; }
     emit storageDirectoryChanging();
     if (!save()) return false;

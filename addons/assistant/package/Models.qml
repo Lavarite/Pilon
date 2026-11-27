@@ -14,6 +14,7 @@ ModelSettings {
     headerRightInset: 0
     anchors.fill: parent
     assistant: addon.assistantManager
+    openHuggingFaceAccount: () => addon.openOwnSettings("hugging-face")
     mainColour: addon.selectedMainColour
     secondaryColour: addon.selectedSecondaryColour
     textColour: addon.selectedTextColour

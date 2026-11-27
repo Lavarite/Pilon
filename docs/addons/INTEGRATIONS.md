@@ -1,4 +1,4 @@
-# Runtime integrations and workspace ownership
+# Runtime integrations
 
 Use a required dependency when a feature cannot function without its provider.
 Use an optional integration when both add-ons can work alone. Keep code in the
@@ -22,7 +22,7 @@ The contributor declares a package-local entry:
 
 ```json
 "integrations": [{
-  "id": "folder-action", "name": "Repository action",
+  "id": "folder-action", "name": "Folder action",
   "target": "org.example.files", "minVersion": "1.0.0",
   "point": "folder-actions", "apiVersion": 1, "entry": "FolderAction.qml"
 }]
@@ -38,9 +38,7 @@ meets `minVersion`, and the built-in or declared point name/API version match.
 A missing optional target does not disable its contributor.
 
 Configure these choices in the contributor's settings. `addon.integrations()`
-returns its owned choices for `AddonIntegrationsSettings`; a target's settings
-do not configure contributions owned by another add-on. Git's settings own its
-Files and Calendar integration choices.
+returns its owned choices for `AddonIntegrationsSettings`.
 
 `addon.contributions(point)` exposes records with owner ID, entry URL,
 configured choice, effective `enabled`, `available` and `reason`. The provider
@@ -66,8 +64,7 @@ may then use `activateRuntime()` followed by `runtimeExports()`. The first actio
 must survive any asynchronous startup instead of requiring a second click.
 `registerIntegrationHost`/`unregisterIntegrationHost` let Core include loaded
 contributions in preparation. Reconcile freezes while preparing; removed/disabled
-contributions are unloaded. Entry load failures are shown as integration errors,
-not permission to bypass storage safety.
+contributions are unloaded. Entry load failures are shown as integration errors.
 
 ### UI augmentation
 
@@ -120,48 +117,6 @@ in dependency order and resolves its exports. Provider-specific operations are
 not a universal SDK: document the export contract alongside the provider and
 keep it versioned with that package. Do not activate dependencies from passive
 settings or cleanup initialization.
-
-The current Git runtime owns its GitHubManager, coordinator, task/adoption
-windows and picker facade. Its exports contain manager, coordinator, workspace,
-`openGit(path,owner)` and `manageGitFolder(id,root,owner)`. Git is a real `.piext`;
-it can operate without Files. Its optional Files folder and Calendar storage
-commands default on when Git is enabled and the target is available. Users can
-turn either integration off in Git settings.
-
-## Native storage-owner safety
-
-Storage safety is not an optional integration checkbox. A native owner runtime
-registers through `registerWorkspaceOwner(owner)` and unregisters on destruction.
-The descriptor is `{id,name,manager,errorText()}`. The native manager supplies
-storageDirectory, gitUpdating, beginGitUpdate(), finishGitUpdate(),
-validateGitSnapshot(path), setStorageDirectory(path), and adoptGitDirectory(path)
-for this transaction protocol. Notes and Calendar use it; Core does not branch
-on their file formats or IDs.
-
-Git reads the live `addon.workspaceOwners` and registers a workspace guard before
-inspection. Core synchronizes starter runtime factories and waits for guards
-before owner activation. A guard exposes ready, managedLocked, operationBusy,
-resetBlocked, error, locked(id), canActivate(id), initialize(), suspendForSetup()
-and openRecovery(id). It is removed only after preparation permits shutdown.
-
-`prepareOwners(ids)` saves/checks affected UI and integrations. Its host freeze
-ends on completion; the transaction's preparing/held guard state must retain the
-edit lock through validation, conflict resolution and successful reload. Pending
-operations veto removal, reset and owner changes. Native folder/activation gates
-also reject unfinished checkout state when Git is disabled or absent.
-
-Git locks affected registered native owners while leaving registered owners in
-unrelated folders available. During a managed update it also blocks other writer
-pages, including Files, Assistant and external pages whose writes cannot be
-scoped through that native-owner protocol. Its own owner ID remains unlocked so
-Git recovery controls stay usable. Ordinary `prepareOwners(ids)` does not set
-the cleanup `quiesced` flag: `beginGitUpdate()` owns pausing and reloading native
-managers. See [the cleanup acknowledgement contract](API.md#preparation-and-cleanup).
-
-Generic ownership does not provide arbitrary native serialization or bypass a
-manager's format/history validators. Implementing a new native owner requires
-reviewed snapshot, rollback, tombstone and recovery tests. Independent Counter-
-style add-ons do not need this protocol.
 
 ## Design evidence
 

@@ -255,7 +255,7 @@ class OwnerLifetimeTests(unittest.TestCase):
                 status = pathlib.Path(f"/proc/{pid}/stat")
                 try:
                     state = status.read_text().split(")", 1)[1].split()[0]
-                except FileNotFoundError:
+                except (FileNotFoundError, ProcessLookupError):
                     break
                 if state == "Z":
                     break

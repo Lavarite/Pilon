@@ -1,7 +1,7 @@
 #include "documentpreview.h"
+#include "../workspace/pilonworkspace.h"
 #include <QClipboard>
 #include <QGuiApplication>
-#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -61,7 +61,7 @@ QRectF pdfRectangle(FPDF_PAGE page, double left, double bottom, double right, do
     return QRectF(pdfPoint(page, left, bottom), pdfPoint(page, right, top)).normalized();
 }
 QVariantList pdfBox(const QRectF &box) { return {box.x(), box.y(), box.width(), box.height()}; }
-QVariantMap pdfText(FPDF_PAGE page, const std::atomic_bool *cancel) {
+QVariantMap pdfText(FPDF_PAGE page, const std::atomic_bool *cancel, bool geometry = true) {
     if (pdfSize(page).isEmpty()) return {{"error", QObject::tr("Invalid PDF page dimensions.")}};
     ScopedFPDFTextPage textPage(FPDFText_LoadPage(page));
     if (!textPage) return {{"error", QObject::tr("Unable to read PDF text.")}};
@@ -73,12 +73,14 @@ QVariantMap pdfText(FPDF_PAGE page, const std::atomic_bool *cancel) {
         const char32_t codepoint = FPDFText_GetUnicode(textPage.get(), i);
         if (!codepoint || codepoint == '\r') continue;
         const auto value = QString::fromUcs4(&codepoint, 1);
-        QRectF box;
-        double left = 0, right = 0, bottom = 0, top = 0;
-        if (codepoint != '\n' && FPDFText_GetCharBox(textPage.get(), i, &left, &right, &bottom, &top))
-            box = pdfRectangle(page, left, bottom, right, top);
         text += value;
-        for (int unit = 0; unit < value.size(); ++unit) boxes.append(QVariant(pdfBox(box)));
+        if (geometry) {
+            QRectF box;
+            double left = 0, right = 0, bottom = 0, top = 0;
+            if (codepoint != '\n' && FPDFText_GetCharBox(textPage.get(), i, &left, &right, &bottom, &top))
+                box = pdfRectangle(page, left, bottom, right, top);
+            for (int unit = 0; unit < value.size(); ++unit) boxes.append(QVariant(pdfBox(box)));
+        }
     }
     return {{"text", text}, {"characters", boxes}};
 }
@@ -166,19 +168,24 @@ QVariantMap requestDocument(const QVariantMap &request, const std::atomic_bool *
             const int number = all ? offset : int((from % count + count) % count);
             ScopedFPDFPage page(FPDF_LoadPage(document.get(), number));
             if (!page) return {{"error", QObject::tr("Unable to load this PDF page.")}};
-            const auto text = pdfText(page.get(), cancel);
+            const auto text = pdfText(page.get(), cancel, false);
             if (text.contains("error")) return text;
             if (all) { pages.append(text); continue; }
             const auto content = text.value("text").toString();
-            QList<QRegularExpressionMatch> matches;
             auto iterator = pattern.globalMatch(content);
-            while (iterator.hasNext()) matches.append(iterator.next());
-            if (backwards) std::reverse(matches.begin(), matches.end());
-            for (const auto &match : matches) {
+            QRegularExpressionMatch selected;
+            while (iterator.hasNext()) {
+                const auto match = iterator.next();
                 const int start = match.capturedStart();
                 if (!offset && request.value("continuation").toBool()
                     && (backwards ? start >= request.value("anchor").toInt() : start < request.value("cursor").toInt())) continue;
-                return {{"page", number}, {"offset", start}, {"length", match.capturedLength()}, {"pages", QVariantList{text}}};
+                selected = match;
+                if (!backwards) break;
+            }
+            if (selected.hasMatch()) {
+                const auto matchPage = pdfText(page.get(), cancel);
+                if (matchPage.contains("error")) return matchPage;
+                return {{"page", number}, {"offset", selected.capturedStart()}, {"length", selected.capturedLength()}, {"pages", QVariantList{matchPage}}};
             }
         }
         return all ? QVariantMap{{"pages", pages}, {"all", true}} : QVariantMap{{"page", -1}};
@@ -228,12 +235,13 @@ QVariantMap requestDocument(const QVariantMap &request, const std::atomic_bool *
         }
         if (cancel->load() || pauseState.timer.elapsed() > 120000) return {{"error", QObject::tr("Document decoding cancelled or timed out.")}};
         if (status != FPDF_RENDER_DONE) return {{"error", QObject::tr("Unable to render this PDF page.")}};
-        auto result = pdfText(page.get(), cancel);
+        const bool imageOnly = request.value("imageOnly").toBool();
+        auto result = imageOnly ? QVariantMap{} : pdfText(page.get(), cancel);
         if (result.contains("error")) return result;
         QVariantList links;
         int position = 0;
         FPDF_LINK link = nullptr;
-        while (FPDFLink_Enumerate(page.get(), &position, &link)) {
+        while (!imageOnly && FPDFLink_Enumerate(page.get(), &position, &link)) {
             if (cancel->load()) return {{"error", QObject::tr("Document decoding cancelled.")}};
             auto target = pdfDestination(document.get(), pdfActionDestination(document.get(), FPDFLink_GetDest(document.get(), link), FPDFLink_GetAction(link)));
             FS_RECTF rectangle;
@@ -257,7 +265,7 @@ QVariantMap requestDocument(const QVariantMap &request, const std::atomic_bool *
 }
 #else
 QVariantMap requestDocument(const QVariantMap &request, const std::atomic_bool *cancel) {
-    const auto python = QDir(QCoreApplication::applicationDirPath()).filePath("../runtime/documents/bin/python");
+    const auto python = QDir(PilonWorkspace::runtimeDirectory()).filePath("documents/bin/python");
     if (!QFileInfo::exists(python)) return {{"error", QObject::tr("The document decoder is unavailable. Run src/scripts/setup_documents.sh.")}};
     QFile script(":/qt/qml/Pilon/document_worker.py");
     if (!script.open(QIODevice::ReadOnly)) return {{"error", QObject::tr("The document decoder script is unavailable.")}};
@@ -305,21 +313,30 @@ DocumentPreview::Page DocumentPreview::decodedPage(const QVariantMap &map) {
 }
 DocumentPreview::DocumentPreview(QObject *parent) : QAbstractListModel(parent) {
     connect(&m_searchWorker, &QFutureWatcher<Result>::finished, this, [this] {
-        m_searching = false; emit searchChanged();
+        m_searching = false;
         const auto result = m_searchWorker.result();
-        if (result.generation != m_generation || (m_searchCancel && m_searchCancel->load())) return;
-        if (result.page >= m_pages.size() || (result.length == -1 && result.pages.size() != m_pages.size())) return;
+        if (result.generation != m_generation || (m_searchCancel && m_searchCancel->load())) { emit searchChanged(); return; }
+        m_searchError = result.error;
+        if (m_searchError.isEmpty() && (result.page >= m_pages.size() ||
+                (result.page >= 0 && result.pages.size() != 1) ||
+                (result.length == -1 && result.pages.size() != m_pages.size())))
+            m_searchError = tr("Invalid search result from the document decoder.");
+        emit searchChanged();
+        if (!m_searchError.isEmpty()) return;
+        const auto previous = selectionPages();
         if (result.page >= 0) {
             auto &page = m_pages[result.page];
             page.text = result.pages.first().text; page.characters = result.pages.first().characters;
             m_anchor = {result.page, result.offset}; m_cursor = {result.page, result.offset + result.length};
         } else if (result.length == -1) {
             for (int i = 0; i < result.pages.size(); ++i) {
-                m_pages[i].text = result.pages[i].text; m_pages[i].characters = result.pages[i].characters;
+                auto &page = m_pages[i];
+                if (page.text != result.pages[i].text) page.characters.clear();
+                page.text = result.pages[i].text;
             }
             m_anchor = {0, 0}; m_cursor = {m_pages.size() - 1, std::numeric_limits<int>::max()};
         }
-        notifySelection(); if (result.length != -1) emit found(result.page);
+        notifySelection(previous); if (result.length != -1) emit found(result.page);
     });
     connect(&m_worker, &QFutureWatcher<Result>::finished, this, [this] {
         m_working = false;
@@ -330,14 +347,25 @@ DocumentPreview::DocumentPreview(QObject *parent) : QAbstractListModel(parent) {
             m_sectionModel.clear(); appendSections(m_sectionModel.invisibleRootItem(), m_sections);
             m_width = m_height = 0;
             for (auto &page : m_pages) { page.top = m_height; m_height += page.size.height(); m_width = std::max(m_width, page.size.width()); }
+            if (!m_pages.isEmpty()) m_visible = {0};
             m_error = result.error; m_loading = false;
             endResetModel(); emit changed();
         } else {
-            auto page = result.pages.first(); page.top = m_pages[result.page].top;
-            m_pages[result.page] = page;
+            auto updated = result.pages.first();
+            auto &page = m_pages[result.page];
+            if (updated.error.isEmpty()) {
+                if (!page.image.isEmpty()) QFile::remove(page.image.toLocalFile());
+                updated.top = page.top;
+                page = std::move(updated);
+                m_renderedPages.insert(result.page);
+            } else {
+                page.error = updated.error;
+                page.failedResolution = updated.failedResolution;
+            }
             emit dataChanged(index(result.page), index(result.page));
             emit pageRendered(result.page);
             emit selectionChanged();
+            trimImages();
         }
         schedule();
     });
@@ -377,8 +405,9 @@ void DocumentPreview::setSource(const QUrl &source) {
     if (m_searchCancel) *m_searchCancel = true;
     ++m_generation; m_source = source; m_state.reset();
     beginResetModel(); m_pages.clear(); m_sections.clear(); m_sectionModel.clear(); m_visible.clear(); m_width = m_height = 0;
+    m_renderedPages.clear(); m_searchError.clear(); m_scale = 1;
     m_anchor = m_cursor = {-1, 0}; m_error.clear(); m_loading = !source.isEmpty(); endResetModel();
-    emit changed(); emit selectionChanged(); schedule();
+    emit changed(); emit selectionChanged(); emit searchChanged(); schedule();
 }
 void DocumentPreview::schedule() {
     if (m_working || m_source.isEmpty() || !m_error.isEmpty()) return;
@@ -404,15 +433,18 @@ void DocumentPreview::schedule() {
         }));
         return;
     }
-    if (m_loading) return;
+    if (m_loading || m_visible.isEmpty()) return;
     int next = -1, resolution = 1500;
     for (const int i : m_visible) {
         const auto &page = m_pages[i];
-        const auto wanted = std::clamp(int(std::ceil(std::max(page.size.width(), page.size.height()) * m_scale)), 1500, 3600);
-        if (page.error.isEmpty() && page.resolution < wanted) { next = i; resolution = wanted; break; }
+        const auto wanted = int(std::clamp(std::ceil(std::max(page.size.width(), page.size.height()) * m_scale), 1500.0, 3600.0));
+        if (page.failedResolution != wanted && page.resolution < wanted) { next = i; resolution = wanted; break; }
     }
-    if (next < 0) for (int i = 0; i < m_pages.size(); ++i) {
-        if (m_pages[i].resolution == 0 && m_pages[i].error.isEmpty()) { next = i; break; }
+    if (next < 0) for (const int i : {m_visible.first() - 1, m_visible.last() + 1}) {
+        if (i >= 0 && i < m_pages.size() && m_pages[i].resolution == 0 && m_pages[i].failedResolution != resolution) {
+            next = i;
+            break;
+        }
     }
     if (next < 0) return;
     const auto state = m_state;
@@ -426,6 +458,10 @@ void DocumentPreview::schedule() {
         auto page = decodedPage(response); page.size = size;
         if (page.error.isEmpty() && QFileInfo::exists(output)) { page.image = QUrl::fromLocalFile(output); page.resolution = resolution; }
         else if (page.error.isEmpty()) page.error = tr("Unable to render page %1.").arg(next + 1);
+        if (!page.error.isEmpty()) {
+            QFile::remove(output);
+            page.failedResolution = resolution;
+        }
         result.pages.append(page); return result;
     }));
 }
@@ -439,10 +475,25 @@ int DocumentPreview::pageAt(qreal y, qreal scale) const {
     return lo;
 }
 void DocumentPreview::prioritize(qreal top, qreal bottom, qreal scale) {
+    if (!std::isfinite(top) || !std::isfinite(bottom) || !std::isfinite(scale) || scale <= 0 || top > bottom) return;
     m_scale = scale; m_visible.clear();
     const int first = pageAt(top, scale), last = pageAt(bottom, scale);
     for (int i = first; i >= 0 && i <= last; ++i) m_visible.append(i);
+    trimImages();
     schedule();
+}
+void DocumentPreview::trimImages() {
+    if (m_visible.isEmpty()) return;
+    const int first = m_visible.first() - 2, last = m_visible.last() + 2;
+    for (auto it = m_renderedPages.begin(); it != m_renderedPages.end();) {
+        const int i = *it;
+        if (i >= first && i <= last) { ++it; continue; }
+        auto &page = m_pages[i];
+        QFile::remove(page.image.toLocalFile());
+        page.image.clear(); page.resolution = 0;
+        it = m_renderedPages.erase(it);
+        emit dataChanged(index(i), index(i), {Image});
+    }
 }
 std::pair<int, int> DocumentPreview::position(qreal x, qreal y, qreal contentWidth, qreal scale) const {
     const int n = pageAt(y, scale); if (n < 0) return {-1, 0};
@@ -454,14 +505,21 @@ std::pair<int, int> DocumentPreview::position(qreal x, qreal y, qreal contentWid
         const qreal dx = std::max({box.left() - point.x(), point.x() - box.right(), 0.0});
         const qreal dy = std::max({box.top() - point.y(), point.y() - box.bottom(), 0.0});
         const auto d = dx * dx + dy * dy;
-        if (d < distance) { distance = d; offset = i + (point.x() > box.center().x() ? 1 : 0); }
+        if (d < distance) {
+            distance = d;
+            const bool after = point.x() > box.center().x();
+            offset = i + (after ? 1 : 0);
+            if (offset > 0 && offset < page.text.size() && page.text[offset - 1].isHighSurrogate() && page.text[offset].isLowSurrogate())
+                offset += after ? 1 : -1;
+        }
     }
     return {n, offset};
 }
 void DocumentPreview::select(qreal x, qreal y, qreal contentWidth, qreal scale, bool begin) {
     if (scale <= 0) return;
+    const auto previous = selectionPages();
     m_cursor = position(x, y, contentWidth, scale); if (begin) m_anchor = m_cursor;
-    notifySelection();
+    notifySelection(previous);
 }
 std::pair<int, int> DocumentPreview::range(int page) const {
     const auto start = std::min(m_anchor, m_cursor), end = std::max(m_anchor, m_cursor);
@@ -469,16 +527,23 @@ std::pair<int, int> DocumentPreview::range(int page) const {
     return {page == start.first ? start.second : 0, page == end.first ? end.second : m_pages[page].text.size()};
 }
 QString DocumentPreview::selectedText() const {
+    const auto [first, last] = selectionPages();
+    if (first < 0) return {};
     QStringList pages;
-    for (int i = 0; i < m_pages.size(); ++i) { const auto [start, end] = range(i); if (end > start) pages.append(m_pages[i].text.mid(start, end - start)); }
+    for (int i = first; i <= last; ++i) { const auto [start, end] = range(i); if (end > start) pages.append(m_pages[i].text.mid(start, end - start)); }
     return pages.join('\n');
 }
-void DocumentPreview::notifySelection() {
-    if (!m_pages.isEmpty()) emit dataChanged(index(0), index(m_pages.size() - 1), {Highlights});
+std::pair<int, int> DocumentPreview::selectionPages() const {
+    return std::minmax(m_anchor.first, m_cursor.first);
+}
+void DocumentPreview::notifySelection(std::pair<int, int> previous) {
+    const auto current = selectionPages();
+    if (previous.first >= 0) emit dataChanged(index(previous.first), index(previous.second), {Highlights});
+    if (current.first >= 0 && current != previous) emit dataChanged(index(current.first), index(current.second), {Highlights});
     emit selectionChanged();
 }
 void DocumentPreview::selectAll() { search({}, 0, false, true); }
-void DocumentPreview::copy() const { if (!selectedText().isEmpty()) QGuiApplication::clipboard()->setText(selectedText()); }
+void DocumentPreview::copy() const { const auto text = selectedText(); if (!text.isEmpty()) QGuiApplication::clipboard()->setText(text); }
 qreal DocumentPreview::selectionY(qreal scale) const {
     const auto start = std::min(m_anchor, m_cursor);
     if (start.first < 0 || start.first >= m_pages.size()) return 0;
@@ -498,7 +563,7 @@ void DocumentPreview::find(const QString &text, int fromPage, bool backwards) {
 }
 void DocumentPreview::search(const QString &text, int fromPage, bool backwards, bool all) {
     if (m_searching || m_pages.isEmpty()) return;
-    m_searching = true; emit searchChanged();
+    m_searching = true; m_searchError.clear(); emit searchChanged();
     const auto generation = m_generation;
     const auto source = m_source.toLocalFile();
     const auto anchor = m_anchor, cursor = m_cursor;

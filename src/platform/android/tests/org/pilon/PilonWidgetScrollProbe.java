@@ -231,6 +231,17 @@ public final class PilonWidgetScrollProbe extends Instrumentation {
         throw new AssertionError("Clock baseline did not reach stable IDLE scrolling");
     }
     private static int parcel(RemoteViews views) { Parcel parcel = Parcel.obtain(); views.writeToParcel(parcel, 0); int bytes = parcel.dataSize(); parcel.recycle(); return bytes; }
+    private void midnightGridChecks() throws Exception {
+        step = "midnight-grid-bounds";
+        Context context = getTargetContext();
+        JSONObject value = base("calendar", "agenda"), frame = value.getJSONArray("timeline").getJSONObject(0);
+        event(value, "midnight", "Late", 1439, 1440);
+        frame.put("timeGrid", new JSONObject().put("startMinute", 1439).put("endMinute", 1440));
+        PilonWidgetTimeGrid.Plan plan = PilonWidgetTimeGrid.scrollPlan(context, frame, 1);
+        check(plan.cards.size() == 1 && plan.hidden == 0, "one minute remains visible at midnight");
+        PilonWidgetTimeGrid.Card card = plan.cards.get(0);
+        check(card.top >= 0 && card.bottom > card.top && card.bottom <= plan.height, "card stays inside the narrow time range");
+    }
     private static JSONObject clock(String date, String zone, int start, int end) throws Exception {
         return new JSONObject().put("clock", new JSONObject().put("date", date).put("timeZone", zone))
             .put("timeGrid", new JSONObject().put("startMinute", start).put("endMinute", end));
@@ -239,29 +250,29 @@ public final class PilonWidgetScrollProbe extends Instrumentation {
         step = "clock-matching-date-zone";
         long now = Instant.parse("2026-11-09T10:15:30Z").toEpochMilli();
         JSONObject frame = clock("2026-11-09", "UTC", 540, 1440);
-        check(Math.abs(PilonWidgetClock.minute(frame, now) - 615.5) < .001, "clock position follows zone and seconds");
-        check(Double.isNaN(PilonWidgetClock.minute(clock("2026-11-10", "UTC", 540, 1440), now)), "future day has no current marker");
-        check(Double.isNaN(PilonWidgetClock.minute(clock("2026-11-09", "Unknown/Fixture", 540, 1440), now)), "unknown zone hides marker");
-        check(Double.isNaN(PilonWidgetClock.minute(clock("2026-11-09", "UTC", 720, 1440), now)), "outside period hides marker");
+        check(Math.abs(PilonWidgetSchedule.minute(frame, now) - 615.5) < .001, "clock position follows zone and seconds");
+        check(Double.isNaN(PilonWidgetSchedule.minute(clock("2026-11-10", "UTC", 540, 1440), now)), "future day has no current marker");
+        check(Double.isNaN(PilonWidgetSchedule.minute(clock("2026-11-09", "Unknown/Fixture", 540, 1440), now)), "unknown zone hides marker");
+        check(Double.isNaN(PilonWidgetSchedule.minute(clock("2026-11-09", "UTC", 720, 1440), now)), "outside period hides marker");
         JSONObject repeat = clock("2026-10-25", "Europe/London", 0, 1440);
-        check(PilonWidgetClock.minute(repeat, Instant.parse("2026-10-25T00:30:00Z").toEpochMilli()) == 90
-            && PilonWidgetClock.minute(repeat, Instant.parse("2026-10-25T01:30:00Z").toEpochMilli()) == 90, "DST repeated wall time uses same grid position");
+        check(PilonWidgetSchedule.minute(repeat, Instant.parse("2026-10-25T00:30:00Z").toEpochMilli()) == 90
+            && PilonWidgetSchedule.minute(repeat, Instant.parse("2026-10-25T01:30:00Z").toEpochMilli()) == 90, "DST repeated wall time uses same grid position");
         long from = Instant.parse("2026-11-09T00:00:00Z").toEpochMilli(), through = from + 3 * 86400000L;
-        check(PilonWidgetClock.nextUpdate(clock("2026-11-10", "UTC", 540, 1440), from, through, now)
+        check(PilonWidgetSchedule.nextUpdate(clock("2026-11-10", "UTC", 540, 1440), from, through, now)
             == Instant.parse("2026-11-10T09:00:00Z").toEpochMilli(), "future eligible start is known");
-        check(PilonWidgetClock.nextUpdate(frame, from, now + 5000, now) == now + 5000, "expiry hides clock without waiting for next minute");
+        check(PilonWidgetSchedule.nextUpdate(frame, from, now + 5000, now) == now + 5000, "expiry hides clock without waiting for next minute");
         long spring = Instant.parse("2026-03-28T00:00:00Z").toEpochMilli();
-        check(PilonWidgetClock.nextUpdate(clock("2026-03-29", "Europe/London", 90, 240), spring, spring + 3 * 86400000L, spring)
+        check(PilonWidgetSchedule.nextUpdate(clock("2026-03-29", "Europe/London", 90, 240), spring, spring + 3 * 86400000L, spring)
             == Instant.parse("2026-03-29T01:00:00Z").toEpochMilli(), "nonexistent start uses first valid moment after DST gap");
         long autumn = Instant.parse("2026-10-25T01:15:00Z").toEpochMilli();
-        check(PilonWidgetClock.nextUpdate(clock("2026-10-25", "Europe/London", 90, 120), autumn - 86400000, autumn + 86400000, autumn)
+        check(PilonWidgetSchedule.nextUpdate(clock("2026-10-25", "Europe/London", 90, 120), autumn - 86400000, autumn + 86400000, autumn)
             == Instant.parse("2026-10-25T01:30:00Z").toEpochMilli(), "second repeated start remains eligible");
         step = "clock-native-marker";
         Context context = getTargetContext(); JSONObject value = ordinary(); JSONObject current = value.getJSONArray("timeline").getJSONObject(0);
         java.time.ZonedDateTime utc = Instant.now().atZone(java.time.ZoneOffset.UTC); int anchor = utc.getHour() * 60;
         current.put("clock", new JSONObject().put("date", utc.toLocalDate().toString()).put("timeZone", "UTC"));
         current.put("timeGrid", new JSONObject().put("startMinute", anchor).put("endMinute", 1440));
-        PilonWidgetData.Snapshot snapshot = new PilonWidgetData.Snapshot(value, 1, 0, Long.MAX_VALUE);
+        PilonWidgetData.Snapshot snapshot = new PilonWidgetData.Snapshot(value, 1, 0, Long.MAX_VALUE, new long[]{0});
         PilonWidgets.Binding binding = new PilonWidgets.Binding(WORKSPACE, "calendar", "agenda");
         main(() -> {
             RemoteViews views = PilonWidgetTimeGrid.scrollItem(context, 12, binding, snapshot, current, 2);
@@ -270,7 +281,7 @@ public final class PilonWidgetScrollProbe extends Instrumentation {
             root.layout(0, 0, root.getMeasuredWidth(), root.getMeasuredHeight());
             View marker = root.findViewById(R.id.widget_grid_now_line), placement = root.findViewById(R.id.widget_grid_now_position);
             check(marker != null && marker.getHeight() == px(context, 1), "native clock line is one dp");
-            double minute = PilonWidgetClock.minute(current, System.currentTimeMillis()); float hour = PilonWidgetTimeGrid.scrollPlan(context, current, 2).hour;
+            double minute = PilonWidgetSchedule.minute(current, System.currentTimeMillis()); float hour = PilonWidgetTimeGrid.scrollPlan(context, current, 2).hour;
             check(Math.abs(placement.getPaddingTop() - (minute - anchor) * hour / 60) < px(context, 2), "marker uses full timeline hour scale");
             Bitmap painted = Bitmap.createBitmap(marker.getWidth(), marker.getHeight(), Bitmap.Config.ARGB_8888); marker.draw(new Canvas(painted));
             check(painted.getPixel(painted.getWidth() / 2, painted.getHeight() / 2) == 0xff80c5ef, "marker follows palette accent"); painted.recycle();
@@ -283,7 +294,47 @@ public final class PilonWidgetScrollProbe extends Instrumentation {
         main(() -> check(PilonWidgetTimeGrid.scrollItem(context, 12, binding, snapshot, current, 2).apply(context, new FrameLayout(context))
             .findViewById(R.id.widget_grid_now_line) == null, "unknown zone omits marker entirely"));
     }
-    @Override public void onCreate(Bundle arguments) { super.onCreate(arguments); getUiAutomation(android.app.UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES); start(); }
+    private boolean emptyAgendaOnly;
+    private void emptyAgendaChecks(Context context, JSONObject snapshot, int generation) throws Exception {
+        step = "empty-agenda-replaces-timeline-and-keeps-period-action";
+        JSONObject frame = snapshot.getJSONArray("timeline").getJSONObject(0);
+        JSONArray filledRows = frame.getJSONArray("rows");
+        frame.put("rows", new JSONArray()).put("actionId", "period");
+        snapshot.put("generation", generation);
+        snapshot.getJSONObject("actions").put("period", new JSONObject().put("kind", "period").put("date", "2026-11-09").put("minute", 540));
+        write(context, snapshot);
+        main(() -> PilonWidgets.update(context, activity.id, PilonWidgetData.catalog(PilonWidgets.directory(context))));
+        SystemClock.sleep(700); waitForIdleSync();
+        int[] centre = new int[2];
+        main(() -> {
+            check(activity.host.findViewById(R.id.widget_timeline_list) == null, "empty agenda removes the scrolling timeline");
+            check(title(activity.host, context.getString(R.string.pilon_widget_calendar_empty)) != null, "empty agenda explains the current period");
+            View header = title(activity.host, "9 November 2026");
+            check(header != null, "empty agenda retains the date header");
+            header.getLocationOnScreen(centre);
+            centre[0] += header.getWidth() / 2;
+            centre[1] += header.getHeight() / 2;
+        });
+        save("agenda-empty-placed");
+        clicked = "";
+        long began = SystemClock.uptimeMillis();
+        sendPointerSync(MotionEvent.obtain(began, began, MotionEvent.ACTION_DOWN, centre[0], centre[1], 0));
+        sendPointerSync(MotionEvent.obtain(began, began + 60, MotionEvent.ACTION_UP, centre[0], centre[1], 0));
+        SystemClock.sleep(400); waitForIdleSync();
+        check(clicked != null && clicked.startsWith("pilon://widget/calendar/agenda?")
+            && clicked.contains("action=period&generation=" + generation), "tapping the empty agenda date opens its Calendar period");
+        step = "populated-agenda-restores-timeline";
+        frame.put("rows", filledRows); snapshot.put("generation", generation + 1); write(context, snapshot);
+        main(() -> PilonWidgets.update(context, activity.id, PilonWidgetData.catalog(PilonWidgets.directory(context))));
+        SystemClock.sleep(700); waitForIdleSync();
+        check(activity.host.findViewById(R.id.widget_timeline_list) != null && cards(activity.host) == 3, "events replace the empty state");
+    }
+    @Override public void onCreate(Bundle arguments) {
+        super.onCreate(arguments);
+        emptyAgendaOnly = arguments != null && "empty-agenda".equals(arguments.getString("scenario"));
+        getUiAutomation(android.app.UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES);
+        start();
+    }
     @Override public void onStart() {
         Bundle result = new Bundle(); int resultCode = Activity.RESULT_CANCELED;
         android.app.UiAutomation automation = null; boolean adopted = false;
@@ -293,7 +344,7 @@ public final class PilonWidgetScrollProbe extends Instrumentation {
         if (android.os.Build.VERSION.SDK_INT >= 31)
             context.getPackageManager().setComponentEnabledSetting(new ComponentName(context, PilonWidgetTimelineService.class),
                 android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED, android.content.pm.PackageManager.DONT_KILL_APP);
-        clockChecks(); JSONObject normal = ordinary(); write(context, normal);
+        midnightGridChecks(); clockChecks(); JSONObject normal = ordinary(); write(context, normal);
         step = "production-host";
         automation = getUiAutomation(android.app.UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES);
         if (android.os.Build.VERSION.SDK_INT >= 29) { automation.adoptShellPermissionIdentity(android.Manifest.permission.BIND_APPWIDGET); adopted = true; }
@@ -303,6 +354,11 @@ public final class PilonWidgetScrollProbe extends Instrumentation {
         ListView list = activity.host.findViewById(R.id.widget_timeline_list);
         for (int count = 0; count < 50 && (list == null || list.getChildCount() == 0); ++count) { SystemClock.sleep(100); waitForIdleSync(); list = activity.host.findViewById(R.id.widget_timeline_list); }
         check(list != null && list.getAdapter() != null && list.getAdapter().getCount() == 1 && list.getChildCount() == 1, "one continuous timeline");
+        if (emptyAgendaOnly) {
+            emptyAgendaChecks(context, normal, 2);
+            result.putString("stream", "Widget empty-agenda host checks passed: " + checks + "\n");
+            resultCode = Activity.RESULT_OK;
+        } else {
         step = "launcher-reloads-default";
         main(() -> {
             activity.host.updateAppWidget(null);
@@ -385,7 +441,7 @@ public final class PilonWidgetScrollProbe extends Instrumentation {
         Intent fill = new Intent("unexpected").setComponent(new ComponentName(context, HostActivity.class)).putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, 0)
             .putExtra(Intent.EXTRA_STREAM, android.net.Uri.parse("content://fixture/unused"))
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-            .setData(PilonWidgets.actionUri(new PilonWidgets.Binding(WORKSPACE, "calendar", "agenda"), new PilonWidgetData.Snapshot(normal, 2, 0, Long.MAX_VALUE), "late"));
+            .setData(PilonWidgets.actionUri(new PilonWidgets.Binding(WORKSPACE, "calendar", "agenda"), new PilonWidgetData.Snapshot(normal, 2, 0, Long.MAX_VALUE, new long[]{0}), "late"));
         fill.setClipData(android.content.ClipData.newRawUri("Fixture", android.net.Uri.parse("content://fixture/unused"))); template.send(context, 0, fill);
         SystemClock.sleep(400); waitForIdleSync(); check(clicked != null && clicked.contains("action=late") && clickedId == activity.id && cleanIntent, "fill-in fixes component action ID and removes Qt file payload");
         Intent dirty = new Intent(Intent.ACTION_VIEW).setData(android.net.Uri.parse(clicked)).putExtra("fixture", "unused")
@@ -394,25 +450,7 @@ public final class PilonWidgetScrollProbe extends Instrumentation {
         check(neutral.getExtras() == null && neutral.getSelector() == null && neutral.getClipData() == null && neutral.getData() == null
             && neutral.getFlags() == Intent.FLAG_ACTIVITY_SINGLE_TOP && Intent.ACTION_MAIN.equals(neutral.getAction()), "header widget launch is neutral before Qt");
         String oldUri = clicked;
-        step = "empty-agenda-replaces-timeline-and-keeps-period-action";
-        JSONArray filledRows = timed.getJSONArray("rows");
-        timed.put("rows", new JSONArray()).put("actionId", "period"); normal.put("generation", 5);
-        normal.getJSONObject("actions").put("period", new JSONObject().put("kind", "period").put("date", "2026-11-09").put("minute", 540));
-        write(context, normal);
-        main(() -> PilonWidgets.update(context, activity.id, PilonWidgetData.catalog(PilonWidgets.directory(context)))); SystemClock.sleep(700); waitForIdleSync();
-        main(() -> {
-            check(activity.host.findViewById(R.id.widget_timeline_list) == null, "empty agenda removes the scrolling timeline");
-            check(title(activity.host, context.getString(R.string.pilon_widget_calendar_empty)) != null, "empty agenda explains the current period");
-            check(title(activity.host, "9 November 2026") != null, "empty agenda retains the date header");
-            check(activity.host.findViewById(R.id.widget_root).performClick(), "empty agenda keeps the widget click action");
-        });
-        SystemClock.sleep(400); waitForIdleSync();
-        check(clicked != null && clicked.startsWith("pilon://widget/calendar/agenda?") && clicked.contains("action=period&generation=5"),
-            "empty agenda opens its Calendar period");
-        step = "populated-agenda-restores-timeline";
-        timed.put("rows", filledRows); normal.put("generation", 6); write(context, normal);
-        main(() -> PilonWidgets.update(context, activity.id, PilonWidgetData.catalog(PilonWidgets.directory(context)))); SystemClock.sleep(700); waitForIdleSync();
-        check(activity.host.findViewById(R.id.widget_timeline_list) != null && cards(activity.host) == 3, "events replace the empty state");
+        emptyAgendaChecks(context, normal, 5);
         step = "maximum-valid-cache"; JSONObject maximum = maximum(); write(context, maximum);
         PilonWidgetData.Catalog catalog = PilonWidgetData.catalog(PilonWidgets.directory(context)); PilonWidgetData.Provider provider = catalog.find(OWNER, WIDGET);
         PilonWidgetData.Snapshot snapshot = PilonWidgetData.snapshot(PilonWidgets.directory(context), catalog, provider); check(snapshot != null, "maximum cache accepted by production reader");
@@ -429,6 +467,7 @@ public final class PilonWidgetScrollProbe extends Instrumentation {
         step = "revoke-clears-factory"; Files.delete(new File(PilonWidgets.directory(context), "catalog.json").toPath());
         main(() -> PilonWidgets.refresh(context)); SystemClock.sleep(500); waitForIdleSync(); check(cards(activity.host) == 0 && PilonWidgetClock.operation(context, false) == null, "revoked provider clears view and clock operation");
         result.putString("stream", "Widget scroll checks passed: " + checks + "; snapshotBytes=" + sourceBytes + "; collectionBytes=" + outer + "; item1=" + capacity1 + "; item2=" + capacity2 + "; outer=" + outer + "\n"); resultCode = Activity.RESULT_OK;
+        }
         } catch (Throwable error) { result.putString("stream", "Widget scroll check failed: step=" + step + " checks=" + checks + " error=" + error.getClass().getSimpleName() + " detail=" + error.getMessage() + "\n"); }
         finally {
             if (adopted && automation != null) automation.dropShellPermissionIdentity();

@@ -49,6 +49,7 @@ jobs:
     env:
       LC_ALL: C.UTF-8
       TZ: Etc/UTC
+      PILON_DEV_DIR: /tmp/pilon-ci-dev
       PILON_GOOGLE_CLIENT_ID: ${{ github.ref_type == 'tag' && needs.commits.outputs.scope == 'release' && vars.PILON_GOOGLE_CLIENT_ID || '' }}
       PILON_MICROSOFT_CLIENT_ID: ${{ github.ref_type == 'tag' && needs.commits.outputs.scope == 'release' && vars.PILON_MICROSOFT_CLIENT_ID || '' }}
     defaults:
@@ -63,10 +64,12 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
+      - name: Test AUR publishing rules
+        run: bash .github/scripts/update-aur-tests.sh
       - name: Install pinned Codex test runtime
         run: |
-          mkdir -p build/ci-tools
-          cd build/ci-tools
+          mkdir -p "$PILON_DEV_DIR/dev-deps/ci-tools"
+          cd "$PILON_DEV_DIR/dev-deps/ci-tools"
           curl --fail --silent --show-error --location --retry 3 \
             'https://github.com/openai/codex/releases/download/rust-v0.167.0/codex-x86_64-unknown-linux-musl.tar.gz' \
             --output codex.tar.gz
@@ -79,6 +82,7 @@ jobs:
           useradd -m -p '*' pilon-ci
           mkdir -p /run/sshd
           chown -R pilon-ci:pilon-ci "$GITHUB_WORKSPACE"
+          chown -R pilon-ci:pilon-ci "$PILON_DEV_DIR"
           runuser -u pilon-ci -- bash -euo pipefail -c '
             bash src/scripts/setup_documents.sh
             bash addons/assistant/scripts/setup_litert.sh
@@ -86,18 +90,18 @@ jobs:
       - name: Build Pilon and its test binaries
         run: |
           runuser -u pilon-ci -- env \
-            "PATH=$PWD/build/ci-tools:$PATH" \
+            "PATH=$PILON_DEV_DIR/dev-deps/ci-tools:$PATH" \
             "PILON_GOOGLE_CLIENT_ID=$PILON_GOOGLE_CLIENT_ID" \
             "PILON_MICROSOFT_CLIENT_ID=$PILON_MICROSOFT_CLIENT_ID" \
             bash -euo pipefail -c '
-            cmake -S src -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPILON_BUILD_TESTS=ON
-            cmake --build build --parallel 4
+            cmake -S src -B "$PILON_DEV_DIR/builds/work/linux" -G Ninja -DCMAKE_BUILD_TYPE=Release -DPILON_BUILD_TESTS=ON
+            cmake --build "$PILON_DEV_DIR/builds/work/linux" --parallel 4
           '
       - name: Run the Linux regression tests
         run: |
-          runuser -u pilon-ci -- env "PATH=$PWD/build/ci-tools:$PATH" bash -euo pipefail -c '
+          runuser -u pilon-ci -- env "PATH=$PILON_DEV_DIR/dev-deps/ci-tools:$PATH" bash -euo pipefail -c '
             codex --version
-            ctest --test-dir build --parallel 2 --no-tests=error --output-on-failure
+            ctest --test-dir "$PILON_DEV_DIR/builds/work/linux" --parallel 2 --no-tests=error --output-on-failure
           '
       - name: Verify and package Linux and source archives
         if: github.ref_type == 'tag' && needs.commits.outputs.scope == 'release'
@@ -107,7 +111,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: release-assets
-          path: release-assets/
+          path: /tmp/pilon-ci-dev/builds/releases/ci/
           if-no-files-found: error
           retention-days: 1
 
@@ -203,7 +207,7 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: release-assets
-          path: release-assets/
+          path: ${{ runner.temp }}/pilon-release-assets/
       - name: Prepare GitHub draft
         env:
           GH_TOKEN: ${{ github.token }}
@@ -211,9 +215,9 @@ jobs:
           version=${GITHUB_REF_NAME#v}
           if draft=$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft); then
             test "$draft" = true
-            gh release upload "$GITHUB_REF_NAME" release-assets/* --clobber
+            gh release upload "$GITHUB_REF_NAME" "$RUNNER_TEMP"/pilon-release-assets/* --clobber
           else
-            gh release create "$GITHUB_REF_NAME" release-assets/* --verify-tag --draft \
+            gh release create "$GITHUB_REF_NAME" "$RUNNER_TEMP"/pilon-release-assets/* --verify-tag --draft \
               --title "Pilon $version" \
-              --notes 'Linux x86_64 and source archives are validated in CI. Attach the verified Android preview before publishing.'
+              --notes 'Linux x86-64 and source archives are validated in CI.'
           fi

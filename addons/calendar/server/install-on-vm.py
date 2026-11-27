@@ -31,12 +31,26 @@ def compose_command(root, integrate=False):
 
 def integrate_compose(root):
     compose = root.parent / "docker-compose.yml"
-    text = compose.read_text()
-    include = f"  - {root.name}/docker-compose.yml"
-    if include not in text.splitlines():
-        if not any(line == "include:" for line in text.splitlines()):
-            raise SystemExit("Expected an existing parent Compose include layout; omit --integrate for standalone hosting")
-        compose.write_text(text.rstrip() + "\n" + include + "\n")
+    lines = compose.read_text().splitlines(keepends=True)
+    header = next((i for i, line in enumerate(lines) if re.fullmatch(r"include:[ \t]*(?:#.*)?", line.rstrip())), None)
+    if header is None:
+        raise SystemExit("Expected an existing parent Compose include layout; omit --integrate for standalone hosting")
+    end = header + 1
+    indentation = None
+    path = f"{root.name}/docker-compose.yml"
+    while end < len(lines):
+        line = lines[end]
+        entry = re.match(r"^( *)-\s+(.+?)\s*$", line)
+        if entry and (indentation is None or entry[1] == indentation):
+            indentation = entry[1]
+            if entry[2] == path:
+                return
+        elif line.strip() and not line.lstrip().startswith("#") and not line.startswith(" "):
+            break
+        end += 1
+    lines[end - 1] = lines[end - 1].rstrip("\n") + "\n"
+    lines.insert(end, f"{indentation if indentation is not None else '  '}- {path}\n")
+    compose.write_text("".join(lines))
 
 
 def nginx(domain, tls):
@@ -63,17 +77,21 @@ def nginx(domain, tls):
 def apply_site(domain, tls):
     previous = SITE.read_bytes() if SITE.exists() else None
     linked = ENABLED.is_symlink()
-    SITE.write_text(nginx(domain, tls))
-    if not linked:
-        ENABLED.symlink_to(SITE)
+    if (linked and ENABLED.resolve() != SITE.resolve()) or (not linked and ENABLED.exists()):
+        raise FileExistsError(f"Existing nginx configuration uses {ENABLED}")
+    new_link = False
     try:
+        SITE.write_text(nginx(domain, tls))
+        if not linked:
+            ENABLED.symlink_to(SITE)
+            new_link = True
         run("nginx", "-t")
-    except subprocess.CalledProcessError:
+        run("systemctl", "reload", "nginx")
+    except (OSError, subprocess.CalledProcessError):
         if previous is None: SITE.unlink(missing_ok=True)
         else: SITE.write_bytes(previous)
-        if not linked: ENABLED.unlink(missing_ok=True)
+        if new_link: ENABLED.unlink(missing_ok=True)
         raise
-    run("systemctl", "reload", "nginx")
 
 
 def main():

@@ -13,6 +13,82 @@ class PiconfPreferencesTests : public QObject {
     Q_OBJECT
   private slots:
     void cleanup() { PiconfPreferences::instance().stop(); }
+    void builtinDeclarationCanOmitItsPreferencesFile() {
+        QTemporaryDir workspace;
+        QVERIFY(QDir().mkpath(workspace.filePath("config")));
+        QFile main(workspace.filePath(PiconfDocument::MainPath));
+        QVERIFY(main.open(QIODevice::WriteOnly));
+        QVERIFY(main.write("format = 1\n[addons.notes]\nenabled = true\n") > 0);
+        main.close();
+        auto &preferences = PiconfPreferences::instance();
+        QString error;
+        QVERIFY2(preferences.start(workspace.path(), error), qPrintable(error));
+        QSettings settings(workspace.filePath(".pilon/settings.ini"), QSettings::IniFormat);
+        settings.setValue("notes/directory", workspace.filePath("Relocated Notes"));
+        settings.sync();
+        QVERIFY2(preferences.flush(error), qPrintable(error));
+        QVERIFY2(preferences.start(workspace.path(), error), qPrintable(error));
+        PiconfDocument doc;
+        QVERIFY2(doc.load(workspace.path(), error), qPrintable(error));
+        QVERIFY(!doc.addonFile("notes").isEmpty());
+        QVERIFY(doc.values().value("addons").toMap().value("notes").toMap().value("enabled").toBool());
+        QCOMPARE(doc.values(doc.addonFile("notes")).value("preferences").toMap().value("directory").toString(),
+                 QString("@workspace/Relocated Notes"));
+    }
+    void retiredBuiltinDeclarationsDoNotBlockConfiguration() {
+        QTemporaryDir workspace;
+        QVERIFY(QDir().mkpath(workspace.filePath("config")));
+        QFile main(workspace.filePath(PiconfDocument::MainPath));
+        QVERIFY(main.open(QIODevice::WriteOnly));
+        QVERIFY(main.write("format = 1\n[addons.retired-addon]\nsource = \"builtin\"\nenabled = true\n"
+                           "[appearance]\nfrostiness = 41\n") > 0);
+        main.close();
+        auto &preferences = PiconfPreferences::instance();
+        QString error;
+        QVERIFY2(preferences.start(workspace.path(), error), qPrintable(error));
+        QSettings settings(workspace.filePath(".pilon/settings.ini"), QSettings::IniFormat);
+        QCOMPARE(settings.value("Pilon/glassFrostiness").toInt(), 41);
+        QVERIFY(!settings.contains("addons/enabled/retired-addon"));
+        PiconfDocument doc;
+        QVERIFY2(doc.load(workspace.path(), error), qPrintable(error));
+        QVERIFY(doc.values().value("addons").toMap().contains("retired-addon"));
+    }
+    void unsupportedColourModeIsRejected() {
+        QTemporaryDir workspace;
+        auto &preferences = PiconfPreferences::instance();
+        QString error;
+        QVERIFY2(preferences.start(workspace.path(), error), qPrintable(error));
+        PiconfDocument doc;
+        QVERIFY2(doc.parse({{PiconfDocument::MainPath, "format = 1\n[appearance]\ncolourMode = 2\n"}}, error),
+                 qPrintable(error));
+        QVERIFY(!preferences.validate(doc, error));
+        QVERIFY(error.contains("colourMode"));
+    }
+    void removingAnEntireAddonFolderDoesNotRecreateIt() {
+        QTemporaryDir workspace;
+        auto &preferences = PiconfPreferences::instance();
+        QString error;
+        QVERIFY2(preferences.start(workspace.path(), error), qPrintable(error));
+        preferences.stop();
+        QVERIFY(QDir().mkpath(workspace.filePath(".pilon/addons")));
+        QFile receipts(workspace.filePath(".pilon/addons/registry.json"));
+        QVERIFY(receipts.open(QIODevice::WriteOnly));
+        QVERIFY(receipts.write(R"({"owners":{"notes":{"file":"notes/notes.piext"}}})") > 0);
+        receipts.close();
+        QVERIFY(QDir(workspace.filePath("addons/notes")).removeRecursively());
+        QVERIFY2(preferences.start(workspace.path(), error), qPrintable(error));
+        QVERIFY(!QFileInfo::exists(workspace.filePath("addons/notes")));
+        PiconfDocument document;
+        QVERIFY2(document.load(workspace.path(), error), qPrintable(error));
+        QVERIFY(document.addonFile("notes").isEmpty());
+        QVERIFY(document.missingAddonConfigs().isEmpty());
+        QVERIFY(QDir().mkpath(workspace.filePath("addons/notes")));
+        QFile reinstalled(workspace.filePath("addons/notes/notes.piext"));
+        QVERIFY(reinstalled.open(QIODevice::WriteOnly));
+        reinstalled.close();
+        QVERIFY2(preferences.prepareInstalled("notes", error), qPrintable(error));
+        QVERIFY(QFileInfo::exists(workspace.filePath("addons/notes/data/config.piconf")));
+    }
     void repairMalformedConfigurationFromBackup() {
         QTemporaryDir workspace;
         auto &preferences = PiconfPreferences::instance();
@@ -81,7 +157,7 @@ class PiconfPreferencesTests : public QObject {
                            QVariantMap{{"owners", QVariantMap{{id, manifest}, {"ssh", QVariantMap{{"removed", true}}}}}})
                            .toJson());
         receipts.close();
-        QSettings local(workspace.filePath("addon-data/" + id + "/settings.ini"), QSettings::IniFormat);
+        QSettings local(workspace.filePath("addons/" + id + "/data/settings.ini"), QSettings::IniFormat);
         local.setValue("scale", 2);
         PiconfPreferences::setScopedType(local, "scale", 2);
         local.setValue("mode", "quiet");
@@ -119,9 +195,9 @@ class PiconfPreferencesTests : public QObject {
     }
     void migrateDisabledAddonOptionsWithoutPersonalRecords() {
         QTemporaryDir workspace;
-        QVERIFY(QDir().mkpath(workspace.filePath("Notes")));
+        QVERIFY(QDir().mkpath(workspace.filePath("notes")));
         QVERIFY(QDir().mkpath(workspace.filePath(".pilon/calendar")));
-        QFile notes(workspace.filePath("Notes/.settings.json"));
+        QFile notes(workspace.filePath("notes/.settings.json"));
         QVERIFY(notes.open(QIODevice::WriteOnly));
         notes.write(R"({"drawWithFinger":true,"body":"private note"})");
         notes.close();
@@ -183,7 +259,7 @@ class PiconfPreferencesTests : public QObject {
         QVERIFY2(preferences.flush(error), qPrintable(error));
         QVERIFY2(preferences.prepareInstalled(id, error), qPrintable(error));
         QSettings host(workspace.filePath(".pilon/settings.ini"), QSettings::IniFormat);
-        QSettings addon(workspace.filePath("addon-data/" + id + "/settings.ini"), QSettings::IniFormat);
+        QSettings addon(workspace.filePath("addons/" + id + "/data/settings.ini"), QSettings::IniFormat);
         QVERIFY(!host.value("addons/enabled/" + id).toBool());
         QCOMPARE(PiconfPreferences::scopedValue(addon, "compact"), QVariant(true));
         QVERIFY(graph.load(workspace.path(), error));
@@ -231,6 +307,36 @@ class PiconfPreferencesTests : public QObject {
         QVERIFY(!preferences.validate(graph, error));
         QVERIFY(error.contains("servers"));
     }
+    void keepsAllProviderReasoningLevelsAcrossSettingsSync() {
+        QTemporaryDir workspace;
+        QSettings cache(workspace.filePath(".pilon/settings.ini"), QSettings::IniFormat);
+        const auto modelId = QStringLiteral("chatgpt/gpt-6-luna");
+        const auto key = "assistant/reasoning/" + modelId;
+        cache.setValue(key, 4);
+        cache.setValue("assistant/currentChat", "personal-chat");
+        cache.sync();
+
+        auto &preferences = PiconfPreferences::instance();
+        QString error;
+        QVERIFY2(preferences.start(workspace.path(), error), qPrintable(error));
+        PiconfDocument graph;
+        const auto storedReasoning = [&] {
+            return graph.values(graph.addonFile("assistant")).value("reasoning").toMap().value(modelId);
+        };
+        QVERIFY2(graph.load(workspace.path(), error), qPrintable(error));
+        QCOMPARE(storedReasoning().toInt(), 4);
+
+        cache.setValue(key, 5);
+        cache.sync();
+        QVERIFY2(preferences.flush(error), qPrintable(error));
+        QVERIFY2(graph.load(workspace.path(), error), qPrintable(error));
+        QCOMPARE(storedReasoning().toInt(), 5);
+
+        QVERIFY2(preferences.start(workspace.path(), error), qPrintable(error));
+        cache.sync();
+        QCOMPARE(cache.value(key).toInt(), 5);
+        QCOMPARE(cache.value("assistant/currentChat").toString(), "personal-chat");
+    }
     void migrateAndRoundTrip() {
         QTemporaryDir workspace;
         QVERIFY(workspace.isValid());
@@ -241,6 +347,7 @@ class PiconfPreferencesTests : public QObject {
         cache.setValue("assistant/currentChat", "personal-chat");
         cache.setValue("addons/integrations/notes/local", false);
         cache.setValue("assistant/reasoning/model", 2);
+        cache.setValue("assistant/fastMode/chatgpt/model", true);
         cache.setValue("files/bookmarks", QVariantList{QVariantMap{{"path", root + "/Notes"}, {"deviceId", "local"}}});
         cache.setValue("files/hostKeys/example", "private-trust-record");
         cache.sync();
@@ -257,6 +364,7 @@ class PiconfPreferencesTests : public QObject {
         QCOMPARE(bookmarks.first().toMap().value("path"), "@workspace/Notes");
         QCOMPARE(graph.values(graph.addonFile("notes")).value("integrations").toMap().value("local"), QVariant(false));
         QCOMPARE(graph.values(graph.addonFile("assistant")).value("reasoning").toMap().value("model").toInt(), 2);
+        QCOMPARE(graph.values(graph.addonFile("assistant")).value("fastMode").toMap().value("chatgpt/model"), QVariant(true));
         for (const auto &bytes : graph.files()) {
             QVERIFY(!bytes.contains("personal-chat"));
             QVERIFY(!bytes.contains("private-trust-record"));
@@ -268,13 +376,20 @@ class PiconfPreferencesTests : public QObject {
         QCOMPARE(graph.values().value("appearance").toMap().value("frostiness").toInt(), 47);
         preferences.stop();
         QVERIFY(graph.setValue(PiconfDocument::MainPath, {"appearance", "frostiness"}, 28, error));
+        const auto assistant = graph.addonFile("assistant");
+        QVERIFY(graph.setValue(assistant, {"fastMode", "chatgpt/model"}, false, error));
         QFile file(root + '/' + PiconfDocument::MainPath);
         QVERIFY(file.open(QIODevice::WriteOnly));
         file.write(graph.files().value(PiconfDocument::MainPath));
         file.close();
+        file.setFileName(root + '/' + PiconfDocument::storagePath(assistant));
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write(graph.files().value(assistant));
+        file.close();
         QVERIFY2(preferences.start(root, error), qPrintable(error));
         cache.sync();
         QCOMPARE(cache.value("Pilon/glassFrostiness").toInt(), 28);
+        QCOMPARE(cache.value("assistant/fastMode/chatgpt/model").toBool(), false);
         QCOMPARE(cache.value("assistant/currentChat").toString(), "personal-chat");
     }
 };

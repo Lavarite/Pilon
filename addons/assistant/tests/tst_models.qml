@@ -8,12 +8,11 @@ TestCase {
     name: "ModelSettings"
     width: 600; height: 760; visible: true; when: windowShown
     Rectangle { anchors.fill: parent; color: "#202020"; z: -1 }
+    property int openedHuggingFaceAccounts: 0
     QtObject {
         id: catalog
         property var installed: []
         property var supportModels: []
-        property string supportDownload: ""
-        function downloadSupport(id) { supportDownload = id; downloading = true }
         property var repository: ({})
         property bool inspecting: false
         property bool downloading: false
@@ -26,6 +25,7 @@ TestCase {
         property int downloadProjector: -1
         property string removedId: ""
         signal downloadCompleted()
+        signal modelDownloaded(string id)
         function inspect(link) { inspectedLink = link; repository = ({}) }
         function downloadWarning(variant, projector) { return "" }
         function download(variant, projector, nickname) {
@@ -52,6 +52,8 @@ TestCase {
         id: assistant
         property var models: catalog
         property var connections: null
+        property var codexRuntime: null
+        function checkForCodexUpdate() { codexUpdateFixture.checking = true }
         property int modelIndex: 0
         property string modelWarning: ""
         property bool busy: false
@@ -62,6 +64,13 @@ TestCase {
         property real preparationProgress: 0
         function cancelModelPreparation() { preparingModelId = ""; busy = false }
         function removeModel(id) { return catalog.removeModel(id) }
+    }
+    QtObject {
+        id: codexUpdateFixture
+        property bool supported: true
+        property bool checking: false
+        property string installedVersion: "0.172.0"
+        property string updateStatus: ""
     }
     QtObject {
         id: connectionFixture
@@ -93,12 +102,14 @@ TestCase {
         id: settings
         anchors.fill: parent; anchors.margins: 16
         assistant: assistant
+        openHuggingFaceAccount: () => ++test.openedHuggingFaceAccounts
         mainColour: "#202020"; secondaryColour: "#181818"; textColour: "#eeeeee"
         mutedTextColour: "#aaaaaa"; accentColour: "#aabbcc"; warningColour: "#ccbbaa"
     }
     function init() {
         assistant.connections = null
         connectionFixture.hasChatGptSession=false;connectionFixture.account=({});connectionFixture.signingOut=false
+        connectionFixture.usage=[];connectionFixture.refreshingUsage=false
         connectionFixture.signingIn=false;connectionFixture.userCode="";connectionFixture.verificationUrl="";connectionFixture.signInContinues=0
         connectionFixture.error="";copiedCode.text=""
         findChild(settings, "apiServerEditor").close()
@@ -115,6 +126,7 @@ TestCase {
         catalog.installed = [{id: "e4b", name: "google_gemma-4-E4B-it-Q4_K_M", canonicalName: "Gemma 4 E4B Q4_K_M", vision: true, audio: true, video: true}]
         catalog.inspectedLink = ""
         catalog.error = ""
+        openedHuggingFaceAccounts = 0
         assistant.modelIndex = 0
         wait(20)
     }
@@ -217,22 +229,91 @@ TestCase {
         connectionFixture.userCode = ""; connectionFixture.verificationUrl = ""; connectionFixture.signingIn = false
         tryCompare(code, "visible", false)
     }
-    function test_accountQuotaOnlyInModelsWithPercentBar() {
+    function test_accountQuotaShowsConcentricRingsAndMatchingFigures() {
         assistant.connections = connectionFixture
         connectionFixture.account = {type: "chatgpt", email: "fixture@example.test", planType: "plus"}
-        connectionFixture.usage = [{label: "Codex: 5 hours", remaining: 75}]
+        connectionFixture.usage = [
+            {bucket: "codex", windowMinutes: 10080, label: "Codex: 7 days", remaining: 56},
+            {bucket: "codex", windowMinutes: 300, label: "Codex: 5 hours", remaining: 75}
+        ]
         settings.contentItem.contentY = 0
         wait(50)
         verify(!findChild(settings, "chatgptSignIn").visible)
-        const bar = findChild(settings, "accountUsageBar")
-        verify(bar.visible); compare(bar.value, 75)
-        connectionFixture.refreshingUsage = true
+        const rings = findChild(settings, "accountUsageRings_codex")
+        verify(rings && rings.visible)
+        compare(rings.weeklyRemaining, 56)
+        compare(rings.fiveHourRemaining, 75)
+        compare(rings.fillColour, settings.accentColour)
+        for (const [minutes, percent] of [[300, 75], [10080, 56]]) {
+            const value = findChild(settings, "accountUsageValue_" + minutes)
+            verify(value.visible && value.text.includes(percent + "% remaining"))
+            verify(value.mapToItem(settings, 0, 0).x >= rings.mapToItem(settings, rings.width, 0).x)
+        }
         const refresh = findChild(settings, "chatgptRefreshUsage")
-        verify(refresh.visible); verify(!refresh.enabled); compare(refresh.text, qsTr("Refreshing usage…"))
-        compare(bar.value, 75)
+        const identity = findChild(settings, "chatgptAccountIdentity")
+        verify(identity && identity.visible)
+        verify(rings.mapToItem(settings, 0, rings.height / 2).x >=
+            identity.mapToItem(settings, identity.width, 0).x)
+        verify(rings.mapToItem(settings, 0, 0).y < refresh.mapToItem(settings, 0, refresh.height).y)
+        const position = rings.mapToItem(settings, 0, 0)
+        const width = refresh.width
+        connectionFixture.refreshingUsage = true
+        verify(refresh.visible); verify(!refresh.enabled); compare(refresh.text, qsTr("Refresh account"))
+        compare(refresh.width, width)
+        compare(rings.mapToItem(settings, 0, 0), position)
+        verify(findChild(settings, "chatgptRefreshUsageIndicator").visible)
+        compare(rings.fiveHourRemaining, 75)
         connectionFixture.refreshingUsage = false
         verify(refresh.enabled)
+        verify(!findChild(settings, "chatgptRefreshUsageIndicator").visible)
         grabImage(test).save("/tmp/pilon-model-quota.png")
+        connectionFixture.account = {}; connectionFixture.usage = []
+    }
+    function test_manualCodexUpdateReportsStatus() {
+        assistant.codexRuntime = codexUpdateFixture
+        try {
+            const update = findChild(settings, "checkCodexUpdate")
+            verify(update && update.visible && update.enabled)
+            compare(findChild(settings, "codexInstalledVersion").text, "0.172.0")
+            update.clicked()
+            verify(!update.enabled)
+            codexUpdateFixture.updateStatus = "Codex is up to date."
+            codexUpdateFixture.checking = false
+            verify(update.enabled)
+            compare(findChild(settings, "codexUpdateStatus").text, "Codex is up to date.")
+            codexUpdateFixture.supported = false
+            verify(!update.visible)
+        } finally {
+            assistant.codexRuntime = null
+            codexUpdateFixture.supported = true
+            codexUpdateFixture.checking = false
+            codexUpdateFixture.updateStatus = ""
+        }
+    }
+    function test_accountQuotaOmitsMissingRingsAndWrapsOnCompactSettings() {
+        test.width = 176
+        assistant.connections = connectionFixture
+        connectionFixture.account = {type: "chatgpt", email: "fixture@example.test", planType: "plus"}
+        connectionFixture.usage = [
+            {bucket: "codex", windowMinutes: 10080, label: "Codex: 7 days", remaining: 0},
+            {bucket: "other", windowMinutes: 60, label: "Other account quota with a long name: 1 hour", remaining: 100}
+        ]
+        wait(30)
+        const rings = findChild(settings, "accountUsageRings_codex")
+        verify(rings && rings.visible)
+        const refresh = findChild(settings, "chatgptRefreshUsage")
+        verify(rings.mapToItem(settings, 0, 0).y >= refresh.mapToItem(settings, 0, refresh.height).y)
+        compare(rings.weeklyRemaining, 0)
+        compare(rings.fiveHourRemaining, -1)
+        const other = findChild(settings, "accountUsageRings_other")
+        verify(other && !other.visible)
+        for (const minutes of [10080, 60]) {
+            const label = findChild(settings, "accountUsageValue_" + minutes)
+            verify(label.visible)
+            const extent = label.mapToItem(settings, label.width, label.height)
+            verify(extent.x <= settings.width + 1)
+            verify(label.contentHeight <= label.height + 1)
+        }
         connectionFixture.account = {}; connectionFixture.usage = []
     }
     function test_apiQuotaShowsWhenItWasObserved() {
@@ -363,6 +444,14 @@ TestCase {
     function test_lookupBecomesEditableNameAndDownloadCompletes() {
         const input = addModel()
         verify(!input.visible)
+        const repositoryLabel = input.parent.children.find(item => item.text === "Nickname")
+        repositoryLabel.palette.windowText = "#000000"
+        compare(repositoryLabel.color, settings.textColour)
+        catalog.repository = Object.assign({}, catalog.repository, {gated: true})
+        const terms = input.parent.children.find(item => item.text?.startsWith("Accept the model’s terms"))
+        terms.palette.windowText = "#000000"
+        verify(terms.visible)
+        compare(terms.color, settings.textColour)
         const nickname = findChild(findChild(settings, "newModelNickname"), "nicknameInput")
         verify(nickname.visible)
         compare(nickname.placeholderText, "gemma-4-E2B-it-GGUF")
@@ -373,6 +462,14 @@ TestCase {
         for (const icon of ["document-text", "photo", "microphone", "film"])
             verify(findChild(modalities, "modality_" + icon).visible)
         nickname.text = "Gemma 4 E2B"
+        const hubAccount = findChild(settings, "modelHuggingFaceAccount")
+        verify(hubAccount && hubAccount.visible)
+        hubAccount.clicked()
+        compare(openedHuggingFaceAccounts, 1)
+        // The audio settings use the same downloader while this draft is open.
+        catalog.downloadCompleted()
+        verify(nickname.visible)
+        compare(nickname.text, "Gemma 4 E2B")
         grabImage(test).save("/tmp/pilon-model-card-add.png")
         findChild(settings, "downloadModel").clicked()
         verify(catalog.downloading); verify(!input.enabled)
@@ -385,7 +482,7 @@ TestCase {
         findChild(settings, "downloadModel").clicked()
         catalog.installed = catalog.installed.concat([{id: "e2b", name: "gemma-4-E2B-it-Q4_K_M", nickname: "Gemma 4 E2B"}])
         catalog.downloading = false
-        catalog.downloadCompleted()
+        catalog.modelDownloaded("e2b")
         verify(findChild(settings, "installedModelCard_1"))
         verify(findChild(settings, "addModel").visible)
         verify(!input.visible)
@@ -528,6 +625,21 @@ TestCase {
         verify(add.y >= card.y + card.height)
         verify(card.width <= test.width - 32)
     }
+    function test_addTileMatchesTheTallerModelOnItsRow() {
+        catalog.installed = [{id: "e4b", name: "Gemma", nickname: "Local",
+            canonicalName: "Gemma 4 E4B Q4_K_M ".repeat(7), audio: true}]
+        const card = findChild(settings, "installedModelCard_0")
+        const add = findChild(settings, "addModelCard")
+        const button = findChild(add, "addModel")
+        verify(card && add && button)
+        tryVerify(() => card.height > 160 && add.y === card.y && add.height === card.height)
+        compare(add.y, card.y)
+        compare(add.width, card.width)
+        compare(add.height, card.height)
+        compare(button.text, "+")
+        mouseClick(button)
+        verify(findChild(settings, "modelRepositoryLink").visible)
+    }
     function test_narrowModelFieldsAndActionsFit_data() {
         return [{tag: "compact_touch", width: 176}, {tag: "narrow", width: 232}, {tag: "normal", width: 600}]
     }
@@ -543,8 +655,7 @@ TestCase {
         verify(contextEnd.x <= card.width - 11, "Context input stays inside card")
         const video = findChild(card, "modality_film")
         verify(video.mapToItem(card, video.width, video.height).x <= card.width - 11, "Modalities wrap inside card")
-        const support = findChild(settings, "supportModelName_whisper-large-v3-turbo")
-        verify(support.height >= support.implicitHeight - 1, "Support model label has room for wrapped text")
+        verify(!findChild(settings, "supportModelName_whisper-large-v3-turbo"))
         const actions = findChild(settings, "apiServerActions_server")
         for (const item of actions.children) {
             if (!item.visible || item.width === undefined) continue
@@ -555,20 +666,4 @@ TestCase {
         verify(signIn.contentItem.contentHeight <= signIn.contentItem.height + 1, "Account action keeps its whole label visible")
         connectionFixture.servers = []; catalog.supportModels = []
     }
-    function test_support_model_downloads() {
-        catalog.supportModels = [{id: "whisper-large-v3-turbo", name: "Speech recognition", bytes: 1024, installed: false}]
-        wait(20)
-        const download = findChild(settings, "downloadSupport_whisper-large-v3-turbo")
-        verify(download !== null)
-        verify(download.enabled)
-        download.clicked()
-        compare(catalog.supportDownload, "whisper-large-v3-turbo")
-        verify(catalog.downloading)
-        catalog.downloading = false
-        catalog.supportModels = [{id: "whisper-large-v3-turbo", name: "Speech recognition", bytes: 1024, installed: true}]
-        wait(20)
-        verify(!findChild(settings, "downloadSupport_whisper-large-v3-turbo").enabled)
-        catalog.supportModels = []
-    }
-
 }

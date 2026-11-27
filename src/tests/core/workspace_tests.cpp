@@ -2,7 +2,10 @@
 #include "pilonworkspace.h"
 #include "piconfpreferences.h"
 #include <QDir>
+#include <QCryptographicHash>
 #include <QFile>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QProcess>
 #include <QProcessEnvironment>
 #include <QScopeGuard>
@@ -35,6 +38,21 @@ class WorkspaceTests : public QObject {
         settings.sync();
         return root;
     }
+    void runAtPortableInstallation(const QString &test) {
+        QTemporaryDir installation, home;
+        const auto binary = installation.filePath(".bin/pilon");
+        QVERIFY(QDir().mkpath(QFileInfo(binary).absolutePath()));
+        QVERIFY(QFile::copy(QCoreApplication::applicationFilePath(), binary));
+        auto environment = QProcessEnvironment::systemEnvironment();
+        environment.insert("PILON_WORKSPACE_TEST_INSTALL", installation.path());
+        environment.insert("HOME", home.path());
+        QProcess child;
+        child.setProcessEnvironment(environment);
+        child.start(binary, {test});
+        QVERIFY(child.waitForFinished(15000));
+        QVERIFY2(child.exitStatus() == QProcess::NormalExit && child.exitCode() == 0,
+                 qPrintable(QString::fromUtf8(child.readAllStandardOutput() + child.readAllStandardError())));
+    }
   private slots:
     void initTestCase() {
         QVERIFY(profile.isValid());
@@ -59,10 +77,10 @@ class WorkspaceTests : public QObject {
         QCOMPARE(PilonWorkspace::configuredRoot(), root);
         QCOMPARE(PilonWorkspace::addonsDirectory(), root + "/addons");
         QCOMPARE(PilonWorkspace::addonDataDirectory("org.example.tasks"),
-                 root + "/addon-data/org.example.tasks");
+                 root + "/addons/org.example.tasks/data");
         QCOMPARE(PilonWorkspace::appDataDirectory(),
                  QStandardPaths::writableLocation(QStandardPaths::AppDataLocation));
-        QCOMPARE(PilonWorkspace::publicDirectory("Notes"), root + "/Notes");
+        QCOMPARE(PilonWorkspace::publicDirectory("notes"), root + "/notes");
         QVERIFY(!QFileInfo(root).exists());
         for (const auto &name : {QString(".."), QString("../outside"), QString("a\\b"), QString("a\n")}) {
             QVERIFY(PilonWorkspace::addonDataDirectory(name).isEmpty());
@@ -81,8 +99,10 @@ class WorkspaceTests : public QObject {
               "format = 1\ninclude = [\"theme.piconf\"]\n[appearance]\naccent = \"${vars.tint}\"\n"
               "[addons.\"org.example.timer\"]\nenabled = false\nsource = \"local\"\n"
               "config = \"../addon-data/org.example.timer/config.piconf\"\n");
-        const auto addon = QStringLiteral("/addon-data/org.example.timer/config.piconf");
+        const auto addon = QStringLiteral("/addons/org.example.timer/data/config.piconf");
         write(source + addon, "[settings]\ntint = \"${vars.tint}\"\n");
+        write(source + "/bin/user-data.txt", "user bin data");
+        write(source + "/runtime/user-data.txt", "user runtime data");
         auto &preferences = PiconfPreferences::instance();
         const auto cleanup = qScopeGuard([&] { preferences.stop(); });
         QVERIFY2(preferences.start(source, error), qPrintable(error));
@@ -91,10 +111,46 @@ class WorkspaceTests : public QObject {
         QVERIFY2(preferences.start(target, error), qPrintable(error));
         QCOMPARE(read(target + "/config/theme.piconf"), read(source + "/config/theme.piconf"));
         QCOMPARE(read(target + addon), read(source + addon));
+        QCOMPARE(read(target + "/bin/user-data.txt"), QByteArray("user bin data"));
+        QCOMPARE(read(target + "/runtime/user-data.txt"), QByteArray("user runtime data"));
         PiconfDocument moved;
         QVERIFY2(moved.load(target, error), qPrintable(error));
         QCOMPARE(moved.values().value("appearance").toMap().value("accent").toString(), "#f4aa66");
-        QCOMPARE(moved.values(addon.mid(1)).value("settings").toMap().value("tint").toString(), "#f4aa66");
+        QCOMPARE(moved.values(moved.addonFile("org.example.timer")).value("settings").toMap().value("tint").toString(), "#f4aa66");
+    }
+    void existingAddOnStorageMovesIntoThePackageDirectory() {
+        const auto root = choose("Existing add-on layout");
+        QString error;
+        QVERIFY2(PilonWorkspace::initializeStorage(&error), qPrintable(error));
+        write(root + "/addon-data/org.example.tasks/settings.ini", "value=7\n");
+        write(root + "/Notes/book.pin", "saved note");
+        write(root + "/.pilon/case-rename-calendar/event.pical", "saved event");
+        write(root + "/Artifacts/22222222222222222222222222222222/result.txt", "saved artifact");
+        QVERIFY(QDir().mkpath(root + "/Artifacts/11111111111111111111111111111111"));
+        PilonSettings().setValue("notes/directory", root + "/Notes");
+        QVERIFY2(PilonWorkspace::initializeStorage(&error), qPrintable(error));
+        QCOMPARE(PilonWorkspace::addonDataDirectory("org.example.tasks"), root + "/addons/org.example.tasks/data");
+        QCOMPARE(read(root + "/addons/org.example.tasks/data/settings.ini"), QByteArray("value=7\n"));
+        QVERIFY(!QFileInfo::exists(root + "/addon-data"));
+        QCOMPARE(PilonSettings().value("notes/directory").toString(), root + "/notes");
+        QCOMPARE(read(root + "/notes/book.pin"), QByteArray("saved note"));
+        QCOMPARE(read(root + "/calendar/event.pical"), QByteArray("saved event"));
+        QVERIFY(!QFileInfo::exists(root + "/.pilon/case-rename-calendar"));
+        QVERIFY(!QFileInfo::exists(root + "/artifacts/11111111111111111111111111111111"));
+        const auto previous = root + "/Artifacts/22222222222222222222222222222222/result.txt";
+        QCOMPARE(read(PilonWorkspace::currentPublicPath(root, previous)), QByteArray("saved artifact"));
+        QVERIFY2(PilonWorkspace::initializeStorage(&error), qPrintable(error));
+    }
+    void publicFolderRenamePreservesAConflictingFile() {
+        const auto root = choose("Existing folder and file");
+        QString error;
+        QVERIFY2(PilonWorkspace::initializeStorage(&error), qPrintable(error));
+        write(root + "/Notes/book.pin", "saved note");
+        write(root + "/notes", "different file");
+        QVERIFY2(PilonWorkspace::initializeStorage(&error), qPrintable(error));
+        QCOMPARE(read(root + "/Notes/book.pin"), QByteArray("saved note"));
+        QCOMPARE(read(root + "/notes"), QByteArray("different file"));
+        QVERIFY(!QFileInfo::exists(root + "/.pilon/case-rename-notes"));
     }
     void existingModelsMoveToTheirAddOnWithoutReplacingOtherFiles() {
         const auto modelOverride = qgetenv("PILON_MODELS_DIR");
@@ -106,8 +162,8 @@ class WorkspaceTests : public QObject {
         write(root + "/Models/hf/model.gguf", "weights");
         write(root + "/Models/whisper-large-v3-turbo/checkpoint", "speech");
         write(root + "/Models/ppocrv5/weights.onnx.part", "partial handwriting");
-        const auto assistant = root + "/addon-data/assistant/models";
-        const auto notes = root + "/addon-data/notes/models";
+        const auto assistant = root + "/addons/assistant/data/models";
+        const auto notes = root + "/addons/notes/data/models";
         write(notes + "/ppocrv5/existing.onnx", "existing");
         qunsetenv("PILON_MODELS_DIR");
         QVERIFY2(PilonWorkspace::initializeStorage(&error), qPrintable(error));
@@ -126,7 +182,7 @@ class WorkspaceTests : public QObject {
         QString error;
         QVERIFY2(PilonWorkspace::initializeStorage(&error), qPrintable(error));
         const auto source = root + "/Models/installed.json";
-        const auto target = root + "/addon-data/assistant/models/installed.json";
+        const auto target = root + "/addons/assistant/data/models/installed.json";
         write(source, "legacy");
         write(target, "existing");
         qunsetenv("PILON_MODELS_DIR");
@@ -195,7 +251,7 @@ class WorkspaceTests : public QObject {
         QCOMPARE(read(root + "/.pilon/notes-backups/backup.pin"), QByteArray("personal backup"));
         QCOMPARE(read(backup), QByteArray("personal backup"));
         QCOMPARE(read(root + "/addons/org.example.tasks.piext"), QByteArray("package"));
-        QCOMPARE(read(root + "/addon-data/org.example.tasks/settings.ini"), QByteArray("value=7\n"));
+        QCOMPARE(read(root + "/addons/org.example.tasks/data/settings.ini"), QByteArray("value=7\n"));
         QCOMPARE(read(original.fileName()), originalBytes);
         QCOMPARE(read(legacy + "/calendar/calendar.sqlite"), QByteArray("calendar database"));
         QCOMPARE(PilonSettings().value("notes/directory").toString(), profile.filePath("external-notes"));
@@ -225,22 +281,22 @@ class WorkspaceTests : public QObject {
     }
     void relocationPreservesSourceAndRemapsOwnedPaths() {
         const auto root = choose("Relocate source");
-        write(root + "/Notes/one.pin", "note");
+        write(root + "/notes/one.pin", "note");
         QString error;
         QVERIFY2(PilonWorkspace::initializeStorage(&error), qPrintable(error));
         write(root + "/.pilon/assistant/codex/tmp/arg0/wrapper", "transient wrapper");
-        QVERIFY(QFile::link(root + "/Notes/one.pin", root + "/.pilon/assistant/codex/tmp/arg0/link"));
+        QVERIFY(QFile::link(root + "/notes/one.pin", root + "/.pilon/assistant/codex/tmp/arg0/link"));
         write(root + "/.pilon/assistant/codex/.tmp/plugins/.git/HEAD", "ref: refs/heads/main\n");
         write(root + "/.pilon/assistant/codex/.tmp/plugins/readme.md", "generated plugin catalog");
         write(root + "/.pilon/assistant/codex/.tmp/keep", "other state");
         write(root + "/.pilon/assistant/codex/config.toml", "[plugins]\n");
         write(root + "/.pilon/assistant/codex/plugins/cache/installed/plugin.json", "installed plugin");
         PilonSettings settings;
-        settings.setValue("notes/directory", root + "/Notes");
+        settings.setValue("notes/directory", root + "/notes");
         settings.setValue("calendar/directory", profile.filePath("external-calendar"));
         settings.setValue("files/bookmarks",
-                          QVariantList{QVariantMap{{"deviceId", "local"}, {"path", root + "/Notes"}},
-                                       QVariantMap{{"deviceId", "remote"}, {"path", root + "/Notes"}}});
+                          QVariantList{QVariantMap{{"deviceId", "local"}, {"path", root + "/notes"}},
+                                       QVariantMap{{"deviceId", "remote"}, {"path", root + "/notes"}}});
         settings.sync();
         const auto before = read(root + "/.pilon/settings.ini");
         const auto target = profile.filePath("Relocate target");
@@ -257,55 +313,69 @@ class WorkspaceTests : public QObject {
         QCOMPARE(read(target + "/.pilon/assistant/codex/.tmp/keep"), QByteArray("other state"));
         QCOMPARE(read(target + "/.pilon/assistant/codex/config.toml"), QByteArray("[plugins]\n"));
         QCOMPARE(read(target + "/.pilon/assistant/codex/plugins/cache/installed/plugin.json"), QByteArray("installed plugin"));
-        QCOMPARE(read(root + "/Notes/one.pin"), QByteArray("note"));
-        QCOMPARE(read(target + "/Notes/one.pin"), QByteArray("note"));
+        QCOMPARE(read(root + "/notes/one.pin"), QByteArray("note"));
+        QCOMPARE(read(target + "/notes/one.pin"), QByteArray("note"));
         QCOMPARE(read(root + "/.pilon/settings.ini"), before);
-        QCOMPARE(PilonSettings().value("notes/directory").toString(), target + "/Notes");
+        QCOMPARE(PilonSettings().value("notes/directory").toString(), target + "/notes");
         QCOMPARE(PilonSettings().value("calendar/directory").toString(),
                  profile.filePath("external-calendar"));
         const auto bookmarks = PilonSettings().value("files/bookmarks").toList();
-        QCOMPARE(bookmarks[0].toMap().value("path").toString(), target + "/Notes");
-        QCOMPARE(bookmarks[1].toMap().value("path").toString(), root + "/Notes");
+        QCOMPARE(bookmarks[0].toMap().value("path").toString(), target + "/notes");
+        QCOMPARE(bookmarks[1].toMap().value("path").toString(), root + "/notes");
     }
-    void relocationRejectsGitOverlapAndConflictingData() {
+    void relocationRejectsRepositoryOverlapAndConflictingData() {
         const auto root = choose("Blocked source");
-        write(root + "/Notes/one.pin", "source");
+        write(root + "/notes/one.pin", "source");
         QString error;
         QVERIFY(PilonWorkspace::initializeStorage(&error));
         const auto target = profile.filePath("Blocked target");
-        write(root + "/Notes/.git", "gitdir: /external/worktree\n");
+        write(root + "/notes/.git", "gitdir: /external/worktree\n");
         QVERIFY(!PilonWorkspace::relocateStorage(target, &error));
-        QVERIFY(error.contains("Git"));
+        QVERIFY2(error.contains("Move repositories separately"), qPrintable(error));
         QCOMPARE(PilonWorkspace::configuredRoot(), root);
-        QVERIFY(QFile::remove(root + "/Notes/.git"));
+        QVERIFY(QFile::remove(root + "/notes/.git"));
         QVERIFY(!PilonWorkspace::relocateStorage(root + "/nested", &error));
-        write(target + "/Notes/one.pin", "keep destination");
+        write(target + "/notes/one.pin", "keep destination");
         QVERIFY(!PilonWorkspace::relocateStorage(target, &error));
         QCOMPARE(PilonWorkspace::configuredRoot(), root);
-        QCOMPARE(read(root + "/Notes/one.pin"), QByteArray("source"));
-        QCOMPARE(read(target + "/Notes/one.pin"), QByteArray("keep destination"));
+        QCOMPARE(read(root + "/notes/one.pin"), QByteArray("source"));
+        QCOMPARE(read(target + "/notes/one.pin"), QByteArray("keep destination"));
+    }
+    void startupRecoversAnInterruptedWorkspacePublication() {
+        const auto root = choose("Interrupted source");
+        QString error;
+        QVERIFY2(PilonWorkspace::initializeStorage(&error), qPrintable(error));
+        const auto target = profile.filePath("Interrupted destination");
+        const auto stage = target + "/.pilon-migrate-fixture";
+        const auto journal = QFileInfo(PilonWorkspace::bootstrapFile()).absolutePath() + "/workspace-migration.json";
+        const auto digest = [](const QByteArray &content) { return QString::fromLatin1(QCryptographicHash::hash(content, QCryptographicHash::Sha256).toHex()); };
+        write(root + "/notes/still-local.pin", "original note");
+        write(target + "/notes/copied.pin", "first published file");
+        write(target + "/notes/edited.pin", "edited after interruption");
+        write(target + "/notes/preexisting.pin", "external file");
+        write(stage + "/notes/not-yet-copied.pin", "staged note");
+        write(journal, QJsonDocument(QJsonObject{{"source", root}, {"target", target}, {"stage", stage},
+            {"publishing", QJsonObject{{"notes/copied.pin", digest("first published file")},
+                {"notes/edited.pin", digest("old contents")}, {"notes/not-yet-copied.pin", digest("staged note")}}}}).toJson());
+        QVERIFY2(PilonWorkspace::initializeStorage(&error), qPrintable(error));
+        QCOMPARE(PilonWorkspace::configuredRoot(), root);
+        QCOMPARE(read(root + "/notes/still-local.pin"), QByteArray("original note"));
+        QVERIFY(!QFileInfo::exists(target + "/notes/copied.pin"));
+        QCOMPARE(read(target + "/notes/edited.pin"), QByteArray("edited after interruption"));
+        QCOMPARE(read(target + "/notes/preexisting.pin"), QByteArray("external file"));
+        QVERIFY(!QFileInfo::exists(stage));
+        QVERIFY(!QFileInfo::exists(journal));
+        QVERIFY2(PilonWorkspace::relocateStorage(target, &error), qPrintable(error));
+        QCOMPARE(read(target + "/notes/still-local.pin"), QByteArray("original note"));
     }
     void defaultModelsArtifactsAndLibrariesMigrateInAnIsolatedInstall() {
         const auto install = qEnvironmentVariable("PILON_WORKSPACE_TEST_INSTALL");
         if (install.isEmpty()) {
-            QTemporaryDir temporary, home;
-            const auto binary = temporary.filePath("bin/workspace-tests");
-            QVERIFY(QDir().mkpath(QFileInfo(binary).absolutePath()));
-            QVERIFY(QFile::copy(QCoreApplication::applicationFilePath(), binary));
-            auto environment = QProcessEnvironment::systemEnvironment();
-            environment.insert("PILON_WORKSPACE_TEST_INSTALL", temporary.path());
-            environment.insert("HOME", home.path());
-            QProcess child;
-            child.setProcessEnvironment(environment);
-            child.start(binary, {"defaultModelsArtifactsAndLibrariesMigrateInAnIsolatedInstall"});
-            QVERIFY(child.waitForFinished(15000));
-            QVERIFY2(
-                child.exitStatus() == QProcess::NormalExit && child.exitCode() == 0,
-                qPrintable(QString::fromUtf8(child.readAllStandardOutput() + child.readAllStandardError())));
+            runAtPortableInstallation("defaultModelsArtifactsAndLibrariesMigrateInAnIsolatedInstall");
             return;
         }
         QCOMPARE(QDir(QCoreApplication::applicationDirPath()).canonicalPath(),
-                 QDir(install + "/bin").canonicalPath());
+                 QDir(install + "/.bin").canonicalPath());
         qunsetenv("PILON_MODELS_DIR");
         qunsetenv("PILON_ARTIFACT_DIR");
         qunsetenv("PILON_AGENT_DIR");
@@ -324,18 +394,63 @@ class WorkspaceTests : public QObject {
         write(QDir::homePath() + "/Pilon/Calendar/one.pical", "calendar");
         QString error;
         QVERIFY2(PilonWorkspace::initializeStorage(&error), qPrintable(error));
-        QCOMPARE(read(root + "/addon-data/assistant/models/model.gguf"), QByteArray("weights"));
+        QCOMPARE(read(root + "/addons/assistant/data/models/model.gguf"), QByteArray("weights"));
         QCOMPARE(read(install + "/models/model.gguf"), QByteArray("weights"));
-        write(root + "/addon-data/assistant/models/installed.json", "changed manifest");
+        write(root + "/addons/assistant/data/models/installed.json", "changed manifest");
         QCOMPARE(read(install + "/models/installed.json"), QByteArray("manifest"));
-        QCOMPARE(read(root + "/Artifacts/result.txt"), QByteArray("artifact"));
-        QCOMPARE(read(root + "/Notes/one.pin"), QByteArray("note"));
-        QCOMPARE(read(root + "/Calendar/one.pical"), QByteArray("calendar"));
-        QCOMPARE(PilonSettings().value("notes/directory").toString(), root + "/Notes");
-        QCOMPARE(PilonSettings().value("calendar/directory").toString(), root + "/Calendar");
+        QCOMPARE(read(root + "/artifacts/result.txt"), QByteArray("artifact"));
+        QCOMPARE(read(root + "/notes/one.pin"), QByteArray("note"));
+        QCOMPARE(read(root + "/calendar/one.pical"), QByteArray("calendar"));
+        QCOMPARE(PilonSettings().value("notes/directory").toString(), root + "/notes");
+        QCOMPARE(PilonSettings().value("calendar/directory").toString(), root + "/calendar");
         QVERIFY(!QFileInfo::exists(root + "/runtime"));
         QVERIFY(!QFileInfo::exists(root + "/tools"));
         QCOMPARE(QDir::cleanPath(PilonWorkspace::runtimeDirectory()), install + "/runtime");
+    }
+    void runtimePrefersTheOverrideThenPortableAndWorkspaceCopies() {
+        const auto install = qEnvironmentVariable("PILON_WORKSPACE_TEST_INSTALL");
+        if (install.isEmpty()) {
+            runAtPortableInstallation("runtimePrefersTheOverrideThenPortableAndWorkspaceCopies");
+            return;
+        }
+        qunsetenv("PILON_RUNTIME_DIR");
+        const auto root = choose("Workspace runtime");
+        write(root + "/runtime/bin/interpreter", "workspace runtime");
+        QCOMPARE(QDir::cleanPath(PilonWorkspace::runtimeDirectory()), root + "/runtime");
+        write(root + "/.runtime/bin/interpreter", "hidden workspace runtime");
+        QCOMPARE(PilonWorkspace::runtimeDirectory(), root + "/.runtime");
+        write(install + "/runtime/bin/interpreter", "portable runtime");
+        QCOMPARE(QDir::cleanPath(PilonWorkspace::runtimeDirectory()), install + "/runtime");
+        write(install + "/.runtime/bin/interpreter", "hidden portable runtime");
+        QCOMPARE(PilonWorkspace::runtimeDirectory(), install + "/.runtime");
+        const auto override = profile.filePath("Explicit runtime");
+        qputenv("PILON_RUNTIME_DIR", override.toUtf8());
+        QCOMPARE(PilonWorkspace::runtimeDirectory(), override);
+    }
+    void movingAnInstalledWorkspaceKeepsTheExecutableAndRuntime() {
+        const auto install = qEnvironmentVariable("PILON_WORKSPACE_TEST_INSTALL");
+        if (install.isEmpty()) {
+            runAtPortableInstallation("movingAnInstalledWorkspaceKeepsTheExecutableAndRuntime");
+            return;
+        }
+        QSettings().setValue("workspace/root", install);
+        QString error;
+        QVERIFY2(PilonWorkspace::initializeStorage(&error), qPrintable(error));
+        write(install + "/.bin/addons/notes.piext", "portable package");
+        const auto python = install + "/.runtime/handwriting/bin/python";
+        QVERIFY(QDir().mkpath(QFileInfo(python).absolutePath()));
+        QVERIFY(QFile::link("/bin/sh", python));
+        write(install + "/notes/working.pin", "user note");
+        qputenv("PILON_RUNTIME_DIR", QFile::encodeName(profile.filePath("Explicit runtime")));
+        const auto target = profile.filePath("Moved data only");
+        QVERIFY2(PilonWorkspace::relocateStorage(target, &error), qPrintable(error));
+        QCOMPARE(PilonWorkspace::configuredRoot(), target);
+        QCOMPARE(read(target + "/notes/working.pin"), QByteArray("user note"));
+        QVERIFY(QFileInfo::exists(install + "/.bin/pilon"));
+        QVERIFY(QFileInfo(python).isSymLink());
+        QCOMPARE(read(install + "/.bin/addons/notes.piext"), QByteArray("portable package"));
+        QVERIFY(!QFileInfo::exists(target + "/.bin"));
+        QVERIFY(!QFileInfo::exists(target + "/.runtime"));
     }
     void failedBootstrapWriteRollsBackPublishedFiles() {
         const auto root = choose("Pointer failure");
@@ -354,16 +469,10 @@ class WorkspaceTests : public QObject {
         QCOMPARE(read(legacy + "/calendar/calendar.sqlite"), QByteArray("keep source"));
         QVERIFY(!QFileInfo::exists(root + "/.pilon/calendar/calendar.sqlite"));
     }
-    void missingRootAndPendingUpdatesNeverCreateAnEmptyReplacement() {
+    void missingRootNeverCreatesAnEmptyReplacement() {
         const auto root = choose("Missing root");
         QString error;
         QVERIFY(PilonWorkspace::initializeStorage(&error));
-        PilonSettings settings;
-        settings.setValue("Git/pendingWorktrees",
-                          QVariantMap{{"/external/repository", QVariantMap{{"outcome", "applied"}}}});
-        settings.sync();
-        QVERIFY(!PilonWorkspace::relocateStorage(profile.filePath("Pending target"), &error));
-        QVERIFY(error.contains("Git"));
         QCOMPARE(PilonWorkspace::configuredRoot(), root);
         QVERIFY(QDir(root).removeRecursively());
         const auto pointer = read(PilonWorkspace::bootstrapFile());

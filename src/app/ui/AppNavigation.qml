@@ -234,6 +234,7 @@ Item {
                                 property real pressPosition: 0
                                 anchors.fill: parent
                                 enabled: navigation.reorderEnabled
+                                pressAndHoldInterval: Math.min(250, Qt.styleHints.mousePressAndHoldInterval)
                                 preventStealing: navigation.draggedItem === row
                                 function beginDrag() {
                                     navigation.dragSourceIndex = row.DelegateModel.itemsIndex

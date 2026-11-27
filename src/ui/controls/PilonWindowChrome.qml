@@ -24,7 +24,7 @@ Item {
         z: -1
         enabled: !chrome.fillsBounds && Qt.platform.os !== "android"
         acceptedButtons: Qt.LeftButton
-        cursorShape: Qt.SizeAllCursor
+        cursorShape: pressed ? Qt.SizeAllCursor : Qt.ArrowCursor
         property bool manualMove: false
         property point startPointer
         property point startPosition

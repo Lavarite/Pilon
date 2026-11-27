@@ -134,9 +134,15 @@ public final class PinchProbeInstrumentation extends Instrumentation {
     @Override public void onCreate(Bundle args) { super.onCreate(args); arguments = args; start(); }
     @Override public void onStart() {
         Bundle result = new Bundle(); int code = Activity.RESULT_OK;
-        try { pinch(); result.putString("stream", "Pilon pinch injection completed\n"); }
+        try {
+            pinch();
+            mainPidAfter = mainPid(automation);
+            if (mainPidBefore.isEmpty() || !mainPidBefore.equals(mainPidAfter))
+                throw new IllegalStateException("Pilon process changed or could not be verified");
+            result.putString("stream", "Pilon pinch injection completed\n");
+        }
         catch (Throwable error) { code = Activity.RESULT_CANCELED; result.putString("stream", "Pilon pinch injection failed: " + error.getMessage() + "\n"); }
-        finally { if (automation != null) mainPidAfter = mainPid(automation); }
+        finally { if (automation != null && mainPidAfter.isEmpty()) mainPidAfter = mainPid(automation); }
         result.putInt("events", injected); result.putBoolean("cancelAttempted", cancelAttempted);
         result.putBoolean("cancelAccepted", cancelAccepted);
         result.putString("mainPidBefore", mainPidBefore); result.putString("mainPidAfter", mainPidAfter);

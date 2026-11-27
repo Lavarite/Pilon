@@ -63,7 +63,21 @@ PilonScrollView {
         Flow {
             Layout.fillWidth: true
             spacing: 8
-            PilonWrapButton { objectName: "devicesRefresh"; text: page.manager.busy ? qsTr("Working…") : qsTr("Refresh"); enabled: !page.manager.busy; onClicked: page.runAction(() => page.manager.refresh()) }
+            PilonWrapButton {
+                objectName: "devicesRefresh"
+                text: qsTr("Refresh")
+                enabled: !page.manager.busy
+                onClicked: page.runAction(() => page.manager.refresh())
+                ProgressBar {
+                    objectName: "devicesRefreshIndicator"
+                    anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
+                    anchors.margins: 4
+                    height: 3
+                    visible: page.manager.busy
+                    indeterminate: visible
+                    Accessible.name: qsTr("Tailscale operation in progress")
+                }
+            }
             PilonWrapButton {
                 objectName: "devicesOpenExternal"
                 text: qsTr("Open Tailscale")

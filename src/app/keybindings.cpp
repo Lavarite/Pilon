@@ -173,34 +173,56 @@ QVariantList KeyBindings::stylusActions() const {
     return {QVariantMap{{"id", "right"}, {"label", tr("Primary stylus button")}, {"tool", all.value("right")}, {"custom", custom("right")}},
         QVariantMap{{"id", "middle"}, {"label", tr("Secondary stylus button")}, {"tool", all.value("middle")}, {"custom", custom("middle")}}};
 }
-void KeyBindings::clearStylusToolBinding(const QString &button) {
+void KeyBindings::clearStylusToolBinding(QVariantMap &bindings, const QString &button) const {
     for (const auto &action : m_actions) {
         if (stylusTool(action.id).isEmpty()) continue;
-        auto keys = m_custom.value(action.id, action.defaults).toStringList();
-        if (keys.removeAll(stylusInput(button))) m_custom[action.id] = keys;
+        auto keys = bindings.value(action.id, action.defaults).toStringList();
+        if (keys.removeAll(stylusInput(button))) bindings[action.id] = keys;
     }
-    PilonSettings().setValue("keybindings/overrides", m_custom);
+}
+QString KeyBindings::saveBindings(QVariantMap bindings, QVariantMap stylus) {
+    PilonSettings settings;
+    const auto overridesKey = QStringLiteral("keybindings/overrides"), stylusKey = QStringLiteral("keybindings/stylus");
+    const auto previousBindings = settings.value(overridesKey), previousStylus = settings.value(stylusKey);
+    const auto store = [&](const QString &key, const QVariant &value) {
+        if (value.isValid()) settings.setValue(key, value);
+        else settings.remove(key);
+    };
+    if (bindings != m_custom) store(overridesKey, bindings);
+    if (stylus != m_stylusCustom) store(stylusKey, stylus.isEmpty() ? QVariant{} : QVariant(stylus));
+    settings.sync();
+    if (settings.status() != QSettings::NoError) {
+        store(overridesKey, previousBindings);
+        store(stylusKey, previousStylus);
+        settings.sync();
+        return tr("Unable to save shortcuts. Check your settings folder permissions and try again.");
+    }
+    m_custom = std::move(bindings);
+    m_stylusCustom = std::move(stylus);
+    emit changed();
+    return {};
 }
 QString KeyBindings::setStylusBinding(const QString &button, const QString &tool) {
     if (button != "right" && button != "middle") return tr("Unknown stylus button.");
     if (tool != "none" && tool != "pointer" && tool != "pen" && tool != "eraser" && tool != "pan" && tool != "text")
         return tr("Unknown Notes tool.");
-    clearStylusToolBinding(button);
-    m_stylusCustom[button] = tool;
-    PilonSettings().setValue("keybindings/stylus", m_stylusCustom);
-    emit changed();
-    return {};
+    auto bindings = m_custom, stylus = m_stylusCustom;
+    clearStylusToolBinding(bindings, button);
+    stylus[button] = tool;
+    return saveBindings(std::move(bindings), std::move(stylus));
 }
 QString KeyBindings::resetStylusBinding(const QString &button) {
-    if (button.isEmpty()) { m_stylusCustom.clear(); clearStylusToolBinding("right"); clearStylusToolBinding("middle"); }
-    else {
-        if (button != "right" && button != "middle") return tr("Unknown stylus button.");
-        clearStylusToolBinding(button);
-        m_stylusCustom.remove(button);
+    if (!button.isEmpty() && button != "right" && button != "middle") return tr("Unknown stylus button.");
+    auto bindings = m_custom, stylus = m_stylusCustom;
+    if (button.isEmpty()) {
+        stylus.clear();
+        clearStylusToolBinding(bindings, "right");
+        clearStylusToolBinding(bindings, "middle");
+    } else {
+        clearStylusToolBinding(bindings, button);
+        stylus.remove(button);
     }
-    PilonSettings().setValue("keybindings/stylus", m_stylusCustom);
-    emit changed();
-    return {};
+    return saveBindings(std::move(bindings), std::move(stylus));
 }
 QString KeyBindings::setBinding(const QString &id, const QString &text) {
     const auto current = std::find_if(m_actions.cbegin(), m_actions.cend(), [&](const Action &action) { return action.id == id; });
@@ -219,7 +241,9 @@ QString KeyBindings::setBinding(const QString &id, const QString &text) {
     }
     const auto error = conflict(*current, keys);
     if (!error.isEmpty()) return error;
-    m_custom[id] = keys; PilonSettings().setValue("keybindings/overrides", m_custom); emit changed(); return {};
+    auto bindings = m_custom;
+    bindings[id] = keys;
+    return saveBindings(std::move(bindings), m_stylusCustom);
 }
 QString KeyBindings::conflict(const Action &current, const QStringList &keys) const {
     const auto all = bindings();
@@ -231,15 +255,14 @@ QString KeyBindings::conflict(const Action &current, const QStringList &keys) co
     return {};
 }
 QString KeyBindings::reset(const QString &id) {
-    if (id.isEmpty()) { m_custom.clear(); m_stylusCustom.clear(); PilonSettings().remove("keybindings/stylus"); }
-    else {
-        const auto action = std::find_if(m_actions.cbegin(), m_actions.cend(), [&](const Action &action) { return action.id == id; });
-        if (action == m_actions.cend()) return tr("Unknown action.");
-        const auto error = conflict(*action, action->defaults);
-        if (!error.isEmpty()) return error;
-        m_custom.remove(id);
-    }
-    PilonSettings().setValue("keybindings/overrides", m_custom); emit changed(); return {};
+    if (id.isEmpty()) return saveBindings({}, {});
+    const auto action = std::find_if(m_actions.cbegin(), m_actions.cend(), [&](const Action &action) { return action.id == id; });
+    if (action == m_actions.cend()) return tr("Unknown action.");
+    const auto error = conflict(*action, action->defaults);
+    if (!error.isEmpty()) return error;
+    auto bindings = m_custom;
+    bindings.remove(id);
+    return saveBindings(std::move(bindings), m_stylusCustom);
 }
 QString KeyBindings::keyText(int key, int modifiers) const {
     if (key == Qt::Key_unknown || key == Qt::Key_Control || key == Qt::Key_Shift || key == Qt::Key_Alt || key == Qt::Key_Meta) return {};

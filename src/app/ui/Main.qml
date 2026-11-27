@@ -6,7 +6,6 @@ import QtQuick.Layouts
 import QtQuick.Controls.impl as ControlsImpl
 import QtQuick.Dialogs
 import QtCore
-import QtMultimedia
 import Pilon as Backend
 import "ui"
 import "ui/PilonStyle.js" as PilonStyle
@@ -138,7 +137,7 @@ Window {
     function syncWidgetRuntimes() {
         if (!workspaceActive || !extensionsReady || !widgetCatalogueReady || !widgetBackend || !widgetBackend.available || preparingWorkspace) return
         for (const provider of widgetBackend.activeProviders())
-            if (addonEnabled(provider.addonId) && !ownerLocked(provider.addonId)) ensureAddonRuntime(provider.addonId)
+            if (addonEnabled(provider.addonId)) ensureAddonRuntime(provider.addonId)
     }
     function refreshHomeWidgets() {
         if (!workspaceActive || !widgetBackend || !widgetBackend.available || preparingWorkspace
@@ -169,7 +168,7 @@ Window {
         if (!widgetCatalogueReady || !widgetBackend || !widgetBackend.available) return false
         let action = widgetBackend.resolve(url)
         const host = addonHosts[action.addonId]
-        if (!host || !addonEnabled(action.addonId) || ownerLocked(action.addonId) || host.preparing
+        if (!host || !addonEnabled(action.addonId) || host.preparing
             || !(host.descriptor.widgets || []).some(row => row.id === action.widgetId)) {
             addonError = widgetBackend.error || qsTr("This widget is unavailable. Open its add-on to refresh it.")
             return false
@@ -208,29 +207,13 @@ Window {
         return addonHosts.ssh || null
     }
     property var integrationHosts: []
-    property var workspaceGuards: []
-    property var workspaceOwners: []
     property bool runtimesReady: false
-    readonly property bool extensionsReady: runtimesReady && workspaceGuards.every(guard => guard.ready !== false)
-    readonly property bool workspaceLocked: workspaceGuards.some(guard => guard.managedLocked === true || guard.initializing === true)
-    readonly property bool operationBusy: workspaceGuards.some(guard => guard.operationBusy === true)
-    readonly property bool resetBlocked: workspaceGuards.some(guard => guard.resetBlocked === true)
-    readonly property string guardError: workspaceGuards.map(guard => guard.error || "").filter(message => !!message).join("\n")
-    function canActivateOwner(id) {
-        return extensionsReady && workspaceGuards.every(guard => typeof guard.canActivate !== "function" || guard.canActivate(id))
-    }
+    readonly property bool extensionsReady: runtimesReady
     function ownerQuiesced(id) { const revision = pageRevision; const host = addonHosts[id]; return host ? host.quiesced : false }
-    function ownerLocked(id) { return workspaceGuards.some(guard => typeof guard.locked === "function" && guard.locked(id)) }
-    function updateWorkspaceLocks() {
-        for (const host of Object.values(addonHosts)) {
-            const id = host.descriptor.id
-            if (!preparingWorkspace && !addonCleanup.busy && !changingAddons[id]) host.preparing = ownerLocked(id)
-        }
+    onExtensionsReadyChanged: {
         Qt.callLater(flushPendingFiles)
         Qt.callLater(syncWidgetRuntimes)
     }
-    onWorkspaceLockedChanged: updateWorkspaceLocks()
-    onExtensionsReadyChanged: updateWorkspaceLocks()
     function runtimeExports(id) {
         const host = addonHosts[id]
         return host && host.runtime ? host.runtime.exports || null : null
@@ -262,7 +245,6 @@ Window {
     }
     function releaseOwners() {
         for (const host of Object.values(addonHosts).concat(integrationHosts).filter(item => !!item)) { host.preparing = false; if (host.quiesced !== undefined) host.quiesced = false }
-        updateWorkspaceLocks()
         syncWidgetCatalogue()
         Qt.callLater(requestWidgetPublications)
     }
@@ -323,7 +305,6 @@ Window {
         const current = addonHosts[selectedPage]
         if (current && workspaceActive && selectedPage !== navigationTarget) current.ensurePage()
         pageRevision++
-        updateWorkspaceLocks()
         syncingAddons = false
         syncWidgetRuntimes()
         Qt.callLater(requestWidgetPublications)
@@ -342,11 +323,6 @@ Window {
     }
     function selectPage(id, fromNavigation) {
         if (!workspaceActive) return false
-        if (ownerLocked(id)) {
-            addonError = qsTr("Finish the current update before editing this page.")
-            for (const guard of workspaceGuards) if (typeof guard.openRecovery === "function") guard.openRecovery(id)
-            return false
-        }
         if (!window.addonEnabled(id)) { addonError = qsTr("Enable this add-on in Settings to use it."); return false }
         const host = addonHosts[id]
         if (!host || !host.enabled || host.preparing || !host.descriptor.page || !host.descriptor.page.toString()) {
@@ -377,10 +353,8 @@ Window {
         if (id === "calendar") host.page.forceActiveFocus()
     }
     function setAddonEnabled(id, enabled) {
-        if (ownerLocked(id)) return qsTr("Finish the current update before changing this add-on.")
         const row = addonRegistry.addons.find(entry => entry.id === id)
         if (addonCleanup.busy) return qsTr("Wait for account cleanup to finish.")
-        if (window.resetBlocked) return qsTr("Finish the current update before changing add-ons.")
         if (Object.keys(changingAddons).length || preparingWorkspace || disableDependentsConfirmation.response)
             return qsTr("An add-on change is already in progress.")
         if (row && (row.configuredEnabled === undefined ? row.enabled : row.configuredEnabled) === enabled) return true
@@ -393,9 +367,7 @@ Window {
     }
     function disableAddons(id, dependents) {
         const members = dependents.concat([id])
-        if (members.some(member => ownerLocked(member)))
-            return qsTr("Finish the current update before changing these add-ons.")
-        if (addonCleanup.busy || resetBlocked || preparingWorkspace || Object.keys(changingAddons).length)
+        if (addonCleanup.busy || preparingWorkspace || Object.keys(changingAddons).length)
             return qsTr("An add-on change is already in progress.")
         if (addonRegistry.dependents(id).join("\n") !== dependents.join("\n"))
             return qsTr("The dependent add-ons changed. Review them and try again.")
@@ -479,41 +451,58 @@ Window {
         if (id === "models" || id === "voice") return openAddonSettings("assistant", id)
         return false
     }
-    function openFile(url) {
-        if (url.toString().startsWith("pilon://widget/")) { openWidget(url); return }
-        const path = url.toString().split("?")[0].toLowerCase()
-        if (path.endsWith(".piext")) { addonRegistry.install(url); if (appService.setupRequired !== true) openSettings("addons") }
-        else if (!workspaceActive || !extensionsReady || (path.endsWith(".pin") && ownerLocked("notes"))
-            || (path.endsWith(".pical") && ownerLocked("calendar"))
-            || (path.endsWith(".pin") && addonEnabled("notes") && (!notesManager.active || notesManager.loading))
-            || (path.endsWith(".pical") && addonEnabled("calendar") && !calendarManager.active)) pendingFiles = pendingFiles.concat([url])
-        else if (path.endsWith(".pin")) {
-            if (selectPage("notes") && notesManager.openNoteFile(url)) notesPane.openNote(notesManager.currentId)
-        } else if (path.endsWith(".pical")) {
-            if (!selectPage("calendar")) return
-            const opened = calendarManager.openEventFile(url)
-            if (opened.event) calendarPane.openEvent(opened.event, opened.date)
+    function openFile(url) { openFiles([url]) }
+    function openFiles(files) {
+        const packages = [], deferred = []
+        for (const url of files) {
+            if (url.toString().startsWith("pilon://widget/")) { openWidget(url); continue }
+            const kind = appService.fileOpenKind(url)
+            if (kind === "piext") { packages.push(url); continue }
+            if (kind !== "pin" && kind !== "pical") continue
+            const isNote = kind === "pin"
+            const owner = isNote ? "notes" : "calendar"
+            const ready = isNote ? notesManager.active && !notesManager.loading : calendarManager.active
+            if (!workspaceActive || !extensionsReady || (addonEnabled(owner) && !ready)) {
+                deferred.push(url)
+                continue
+            }
+            if (!selectPage(owner)) continue
+            if (isNote) {
+                if (notesManager.openNoteFile(url)) notesPane.openNote(notesManager.currentId)
+                else if (!notesManager.errorMessage) addonError = qsTr("Unable to open the note file.")
+            } else {
+                const opened = calendarManager.openEventFile(url)
+                if (opened.event) calendarPane.openEvent(opened.event, opened.date)
+                else addonError = calendarManager.error || qsTr("Unable to open the calendar event file.")
+            }
+        }
+        if (deferred.length) pendingFiles = pendingFiles.concat(deferred)
+        if (packages.length) {
+            if (setupActive) Qt.callLater(() => firstRunSetup.importPackages(packages))
+            else {
+                addonSettingsPage.importPackages(packages)
+                openSettings("addons")
+            }
         }
     }
     function flushPendingFiles() {
         if (!workspaceActive || !extensionsReady) return
         const files = pendingFiles; pendingFiles = []
-        for (const file of files) openFile(file)
+        openFiles(files)
     }
     function changeWorkspace(path, resumeStep) {
-        if (preparingWorkspace || addonCleanup.busy || resetBlocked || Object.keys(changingAddons).length)
+        if (preparingWorkspace || addonCleanup.busy || Object.keys(changingAddons).length)
             return Promise.resolve(qsTr("Wait for the current change to finish."))
         return prepareWorkspace(() => window.appService.changeWorkspace(path, resumeStep) || window.appService.error)
     }
     function openSetup() {
         if (addonCleanup.busy) { addonError = qsTr("Wait for account cleanup to finish."); return }
-        if (resetBlocked) { addonError = qsTr("Finish the current update before running setup."); return }
         addonError = ""
         if (preparingWorkspace || Object.keys(changingAddons).length) {
             addonError = qsTr("Wait for the current change to finish before running setup.")
             return
         }
-        if (sshManager.running || operationBusy || tailscaleManager.busy || remoteFiles.busy || sharedFiles.filePickerOpen || sharedFiles.sharedManagers().some(manager => manager && manager.busy)
+        if (sshManager.running || tailscaleManager.busy || remoteFiles.busy || sharedFiles.filePickerOpen || sharedFiles.sharedManagers().some(manager => manager && manager.busy)
             || (filesPane && filesPane.tiles.some(tile => tile.remoteFiles && tile.remoteFiles.busy))) {
             addonError = qsTr("Finish the current connection or file operation before running setup.")
             return
@@ -524,7 +513,6 @@ Window {
             if (reason) { addonError = reason; return }
         }
         prepareWorkspace(() => {
-            if (resetBlocked) { addonError = qsTr("Finish the current operation before running setup."); return }
             for (const manager of managers) if (!manager.prepareDisable()) {
                 addonError = manager.disableBlockedReason() || qsTr("Unable to save the current work.")
                 return
@@ -538,10 +526,6 @@ Window {
     onSetupActiveChanged: {
         if (!addonsReady) return
         if (setupActive) runtimesReady = false
-        for (const guard of workspaceGuards) {
-            if (setupActive && typeof guard.suspendForSetup === "function") guard.suspendForSetup()
-            else if (!setupActive && typeof guard.initialize === "function") guard.initialize()
-        }
         syncAddonHosts()
         if (setupActive) hide()
         else Qt.callLater(() => {
@@ -647,7 +631,6 @@ Window {
     flags: Qt.Window | Qt.FramelessWindowHint
     title: qsTr("Pilon")
     function saveWorkspace() {
-        if (operationBusy) { addonError = qsTr("Wait for the current operation to finish."); return false }
         if (notesPane && !notesPane.saveCurrentNote()) { window.selectPage("notes"); show(); return false }
         if (workspaceActive && window.addonEnabled("assistant") && !assistantManager.saveChat()) { window.selectPage("assistant"); show(); return false }
         return true
@@ -683,20 +666,21 @@ Window {
         })
     }
     onClosing: close => {
-        if (addonCleanup.busy) { close.accepted = false; if (appService.trayEnabled) appService.hideWindow(); return }
+        const hideToTray = appService.canHideToTray
+        if (addonCleanup.busy) { close.accepted = false; if (hideToTray) appService.hideWindow(); return }
         if (!workspacePrepared && (preparingWorkspace || Object.keys(changingAddons).length)) { close.accepted = false; return }
-        if (!appService.trayEnabled && !workspacePrepared && hasAddonPreparation()) {
+        if (!hideToTray && !workspacePrepared && hasAddonPreparation()) {
             close.accepted = false
             prepareWorkspace(() => window.close())
             return
         }
         if (!saveWorkspace()) { close.accepted = false; return }
-        if (appService.trayEnabled) { close.accepted = false; appService.hideWindow() }
+        if (hideToTray) { close.accepted = false; appService.hideWindow() }
     }
     Connections {
         target: window.appService
         ignoreUnknownSignals: true
-        function onFilesRequested(files) { for (const file of files) window.openFile(file) }
+        function onFilesRequested(files) { window.openFiles(files) }
         function onSuspendRequested() {
             const noteSaved = !window.notesPane || window.notesPane.saveCurrentNote()
             const chatSaved = !window.workspaceActive || !window.addonEnabled("assistant") || assistantManager.saveChat()
@@ -706,17 +690,20 @@ Window {
         }
         function onQuitRequested() {
             if (addonCleanup.busy) { if (window.appService.resetting !== true) window.appService.cancelQuit(); return }
-            if (!window.workspacePrepared && (window.preparingWorkspace || Object.keys(window.changingAddons).length)) { window.appService.cancelQuit(); return }
+            if (!window.workspacePrepared && window.preparingWorkspace) { window.appService.deferQuit(); return }
+            if (!window.workspacePrepared && Object.keys(window.changingAddons).length) { window.appService.cancelQuit(); return }
             if (!window.workspacePrepared && window.hasAddonPreparation()) {
-                window.appService.cancelQuit()
                 const resetting = window.appService.resetting === true
+                if (resetting) window.appService.cancelQuit()
+                else window.appService.deferQuit()
                 const keep = resetting ? window.appService.pendingResetChoices : ({})
                 const paths = resetting ? window.appService.pendingResetOwnedPaths : ({})
                 window.prepareWorkspace(() => resetting ? window.appService.resetToSetup(keep, paths) : window.appService.quit())
+                    .then(result => { if (result !== true) window.appService.showWindow() })
             } else if (!window.saveWorkspace()) window.appService.cancelQuit()
         }
         function onSettingsRequested() { if (window.setupActive) firstRunSetup.open(); else window.openSettings("application") }
-        function onSyncRequested() { if (!window.workspaceActive || !extensionsReady || workspaceLocked || addonCleanup.busy || window.preparingWorkspace) return; if (window.addonEnabled("calendar")) calendarManager.sync(); if (window.addonEnabled("devices")) tailscaleManager.refresh() }
+        function onSyncRequested() { if (!window.workspaceActive || !extensionsReady || addonCleanup.busy || window.preparingWorkspace) return; if (window.addonEnabled("calendar")) calendarManager.sync(); if (window.addonEnabled("devices")) tailscaleManager.refresh() }
     }
     onCustomMainColourChanged: applySelectedColours()
     onCustomSecondaryColourChanged: applySelectedColours()
@@ -735,13 +722,15 @@ Window {
         addonsReady = true
         if (mobilePlatform) restoreLastPage(lastPage)
         else syncAddonHosts()
-        for (const file of startupFiles) openFile(file)
         if (setupActive) {
             if (appService.setupResumeStep === -2 && appService.completeSetup()) {}
             else Qt.callLater(firstRunSetup.begin)
         }
-        else if (addonRegistry.recovery) openSettings("addons")
-        else if (appService.error) Qt.callLater(() => window.openSettings("application"))
+        openFiles(startupFiles)
+        if (!setupActive) {
+            if (addonRegistry.recovery) openSettings("addons")
+            else if (appService.error) Qt.callLater(() => window.openSettings("application"))
+        }
     }
 
     Overlay.overlay.scale: window.uiScale
@@ -802,7 +791,7 @@ Window {
             objectName: "workspaceErrorStatus"
             owner: addonArea
             message: !settingsMenu.visible && !firstRunSetup.visible
-                ? window.addonError || window.guardError || window.addonHosts[window.selectedPage]?.error || "" : ""
+                ? window.addonError || window.addonHosts[window.selectedPage]?.error || "" : ""
             onDismissed: if (message === window.addonError) window.addonError = ""
         }
     }
@@ -823,7 +812,6 @@ Window {
             readonly property string workspaceRoot: window.appService.workspaceRoot || ""
             readonly property bool deviceDiscoveryEnabled: !!sharedFiles.deviceDiscovery
             readonly property var discoveredDevices: sharedFiles.sshDevices
-            readonly property var workspaceOwners: window.workspaceOwners
             readonly property bool workspaceActive: window.workspaceActive
             readonly property string settingsFile: window.appService.settingsFile || ""
             readonly property url settingsLocation: window.appService.settingsLocation || ""
@@ -840,19 +828,6 @@ Window {
                     return Promise.reject(new Error(qsTr("This runtime dependency was not declared.")))
                 return window.ensureAddonRuntime(id) ? Promise.resolve(window.runtimeExports(id)) : Promise.reject(new Error(qsTr("The runtime dependency is unavailable.")))
             }
-            function prepareOwners(ids, freezeActivity) {
-                return window.prepareOwners(ids).then(result => { window.releaseOwners(); return result })
-            }
-            function registerWorkspaceGuard(guard) {
-                if (configurationOnly || window.workspaceGuards.indexOf(guard) >= 0) return
-                window.workspaceGuards = window.workspaceGuards.concat([guard])
-            }
-            function unregisterWorkspaceGuard(guard) { window.workspaceGuards = window.workspaceGuards.filter(item => item !== guard) }
-            function registerWorkspaceOwner(owner) {
-                if (configurationOnly || window.workspaceOwners.some(item => item.id === addonId)) return
-                window.workspaceOwners = window.workspaceOwners.concat([owner])
-            }
-            function unregisterWorkspaceOwner(owner) { window.workspaceOwners = window.workspaceOwners.filter(item => item !== owner) }
             function contributions(point) {
                 const revision = addonRegistry.addons
                 return addonRegistry.integrationRecords(addonId).filter(record => record.point === point)
@@ -991,7 +966,7 @@ Window {
     Backend.RemoteFileManager {
         id: remoteFiles
         remoteEnabled: window.sshEnabled
-        automaticRefreshEnabled: window.workspaceActive && !workspaceLocked
+        automaticRefreshEnabled: window.workspaceActive
         showHidden: persistentSettings.showHiddenFiles
     }
 
@@ -999,7 +974,7 @@ Window {
         id: fileManagerFactory
         Backend.RemoteFileManager {
             remoteEnabled: window.sshEnabled
-            automaticRefreshEnabled: window.workspaceActive && !workspaceLocked
+            automaticRefreshEnabled: window.workspaceActive
             showHidden: persistentSettings.showHiddenFiles
         }
     }
@@ -1036,9 +1011,9 @@ Window {
         }
     }
 
-    Backend.NotesManager { id: notesManager; active: window.workspaceActive && window.runtimesReady && window.addonEnabled("notes") && !window.ownerQuiesced("notes") && canActivateOwner("notes") }
+    Backend.NotesManager { id: notesManager; active: window.workspaceActive && window.runtimesReady && window.addonEnabled("notes") && !window.ownerQuiesced("notes") }
 
-    Backend.CalendarManager { id: calendarManager; active: window.workspaceActive && window.runtimesReady && window.addonEnabled("calendar") && !window.ownerQuiesced("calendar") && canActivateOwner("calendar") }
+    Backend.CalendarManager { id: calendarManager; active: window.workspaceActive && window.runtimesReady && window.addonEnabled("calendar") && !window.ownerQuiesced("calendar") }
     Connections {
         target: notesManager
         function onLoadingChanged() { if (!notesManager.loading) Qt.callLater(window.flushPendingFiles) }
@@ -1051,7 +1026,7 @@ Window {
 
     Backend.AssistantManager {
         id: assistantManager
-        active: window.workspaceActive && window.addonEnabled("assistant") && !window.ownerQuiesced("assistant") && extensionsReady && !workspaceLocked
+        active: window.workspaceActive && window.addonEnabled("assistant") && !window.ownerQuiesced("assistant") && extensionsReady
         calendar: window.workspaceActive && window.addonEnabled("calendar") ? calendarManager : null
         remoteEnabled: window.sshEnabled
         devices: sharedFiles.sshDevices
@@ -1294,7 +1269,7 @@ Window {
                 width: parent ? parent.width : implicitWidth
                 text: qsTr("Reset Pilon")
                 warningColour: window.selectedWarningColour
-                enabled: !addonCleanup.busy && !window.preparingWorkspace && !window.resetBlocked
+                enabled: !addonCleanup.busy && !window.preparingWorkspace
                 onActivated: resetConfirmation.open()
                 Keys.onUpPressed: settingsMenu.focusCategory(settingsMenu.categories.length - 1)
             }
@@ -1310,25 +1285,55 @@ Window {
         PilonErrorPopup {
             objectName: "applicationErrorStatus"
             owner: settingsMenu.contentItem
-            message: addonCleanup.error || window.appService.error || window.addonError || window.guardError
+            message: addonCleanup.error || (!sharedFiles.generatedFilePickerOpen ? window.appService.error : "")
+                || window.addonError
             onDismissed: if (message === window.addonError) window.addonError = ""
         }
         FileDialog {
             id: configurationPicker
             objectName: "configurationPicker"
             parentWindow: settingsMenu
-            title: qsTr("Export configuration")
-            fileMode: FileDialog.SaveFile
-            defaultSuffix: "piconfpack"
+            property bool exporting: false
+            readonly property string suggestedName: "Pilon.piconfpack"
+            title: exporting ? qsTr("Export configuration") : qsTr("Import configuration")
+            fileMode: exporting ? FileDialog.SaveFile : FileDialog.OpenFile
+            defaultSuffix: exporting ? "piconfpack" : ""
             nameFilters: [qsTr("Pilon configuration bundles (*.piconfpack)")]
-            function choose() {
-                if (window.mobilePlatform) open()
-                else useSelection(window.appService.chooseConfigurationBundle(settingsMenu, true, title, nameFilters[0]))
+            function choose(save) {
+                exporting = save
+                if (sharedFiles.canOpenFiles) {
+                    const initialPath = window.mobilePlatform ? "" : window.appService.workspaceRoot
+                    if (save) {
+                        sharedFiles.saveGeneratedFile(title, suggestedName, initialPath, settingsMenu, {
+                            suffix: ".piconfpack",
+                            error: () => window.appService.error,
+                            exists: file => window.appService.configurationExportTargetExists(file),
+                            save: (file, replace) => configurationPicker.save(file, replace),
+                            prepare: name => {
+                                persistentSettings.sync()
+                                return window.appService.prepareConfigurationExport(name)
+                            },
+                            discard: () => window.appService.discardConfigurationExport()
+                        })
+                    } else {
+                        sharedFiles.selectFiles(title, files => {
+                            if (files.length === 1) configurationReview.inspect(files[0])
+                            for (const file of files) sharedFiles.selectionManager.discardPreparedSelection(file)
+                        }, initialPath, ".piconfpack", settingsMenu)
+                    }
+                } else if (window.mobilePlatform) {
+                    selectedFile = save ? "file:///" + suggestedName : ""
+                    open()
+                } else useSelection(window.appService.chooseConfigurationBundle(settingsMenu, save, title, nameFilters[0]))
+            }
+            function save(file, replace) {
+                persistentSettings.sync()
+                return window.appService.exportConfiguration(file, replace)
             }
             function useSelection(file) {
                 if (!file || !file.toString()) return
-                persistentSettings.sync()
-                window.appService.exportConfiguration(file)
+                if (exporting) save(file, true)
+                else configurationReview.inspect(file)
             }
             onAccepted: useSelection(selectedFile)
         }
@@ -1350,7 +1355,7 @@ Window {
             onRejected: window.appService.cancelConfigurationImport()
             onAccepted: {
                 if (!review.different) { window.appService.cancelConfigurationImport(); return }
-                if (addonCleanup.busy || addonRegistry.restoringAddon || window.resetBlocked || Object.keys(window.changingAddons).length) {
+                if (addonCleanup.busy || addonRegistry.restoringAddon || Object.keys(window.changingAddons).length) {
                     window.addonError = qsTr("Finish the current operation before importing.")
                     window.appService.cancelConfigurationImport()
                     return
@@ -1371,6 +1376,7 @@ Window {
             visible: settingsMenu.currentId === "addons"
             contentWidth: availableWidth; clip: true
             AddonsSettings {
+                id: addonSettingsPage
                 width: addonSettingsScroll.availableWidth
                 registry: addonRegistry
                 widgetsAvailable: window.workspaceActive && window.widgetCatalogueReady && !!window.widgetBackend && window.widgetBackend.available
@@ -1435,15 +1441,13 @@ Window {
                         PilonWrapButton {
                             objectName: "exportConfiguration"
                             text: qsTr("Export configuration…")
-                            onClicked: configurationPicker.choose()
+                            onClicked: configurationPicker.choose(true)
                         }
                         PilonWrapButton {
                             objectName: "importConfiguration"
                             text: qsTr("Import configuration…")
-                            enabled: !window.preparingWorkspace && !addonCleanup.busy && !addonRegistry.restoringAddon && !window.resetBlocked
-                            onClicked: sharedFiles.selectFiles(qsTr("Import configuration"), files => {
-                                if (files.length === 1) configurationReview.inspect(files[0])
-                            }, window.appService.workspaceRoot, ".piconfpack", settingsMenu)
+                            enabled: !window.preparingWorkspace && !addonCleanup.busy && !addonRegistry.restoringAddon
+                            onClicked: configurationPicker.choose(false)
                         }
                     }
                     ConfiguredAddonRestore {
@@ -1513,6 +1517,10 @@ Window {
                         checked: persistentSettings.keyboardShortcutHints
                         palette.windowText: window.selectedTextColour
                         onToggled: persistentSettings.keyboardShortcutHints = checked
+                    }
+                    PilonButton {
+                        text: qsTr("Privacy policy")
+                        onClicked: Qt.openUrlExternally("https://github.com/Lavarite/Pilon/blob/main/docs/privacy.md")
                     }
                 }
             }
@@ -1678,7 +1686,6 @@ Window {
             addonId: owner.id, host: window.addonHosts[owner.id] || null, configurationOnly: true, cleanupOnly: true
         })
         prepareOwners: ids => {
-            if (window.resetBlocked) return qsTr("Finish the current update first.")
             return window.prepareOwners(ids, true)
         }
         preflightReset: (keep, paths) => {
@@ -1824,6 +1831,15 @@ Window {
         width: Math.min(480, uiContent.width - 32, maximumContentWidth)
         height: Math.min(Math.max(2 * padding + 42, sshConnectionContents.implicitHeight + topPadding + bottomPadding),
             maximumContentHeight)
+        // A floating Wayland window can keep its old size until its size hints change.
+        Binding {
+            target: sshLoginNotification.dialogWindow
+            property: "minimumHeight"
+            when: !window.mobilePlatform
+            value: Math.ceil(sshLoginNotification.height * sshLoginNotification.dialogWindow.uiScale
+                + sshLoginNotification.dialogWindow.SafeArea.margins.top
+                + sshLoginNotification.dialogWindow.SafeArea.margins.bottom)
+        }
         padding: 16
         modal: connecting || prompting
         focus: modal
@@ -1853,17 +1869,29 @@ Window {
                     for (const child of children) {
                         if (!child.visible) continue
                         ++count
-                        if (child !== sshDetailsScroll) result += child.implicitHeight
+                        if (child !== sshPromptScroll && child !== sshDetailsScroll) result += child.implicitHeight
                     }
                     return result + Math.max(0, count - 1) * spacing
                 }
-                Label {
-                    Layout.fillWidth: true
+                readonly property real textHeight: Math.max(sshDetailsMetrics.height,
+                    (sshLoginNotification.maximumContentHeight - sshLoginNotification.topPadding
+                    - sshLoginNotification.bottomPadding - minimumFormHeight)
+                    / (sshPromptScroll.visible && sshDetailsScroll.visible ? 2 : 1))
+                PilonScrollView {
+                    id: sshPromptScroll
                     visible: sshLoginNotification.prompting
-                    text: sshManager.promptText
-                    textFormat: Text.PlainText
-                    color: window.selectedTextColour
-                    wrapMode: Text.Wrap
+                    Layout.fillWidth: true; Layout.minimumHeight: 0
+                    Layout.preferredHeight: Math.min(160, sshPromptText.contentHeight, sshConnectionContents.textHeight)
+                    PilonTextArea {
+                        id: sshPromptText
+                        objectName: "sshConnectionPrompt"
+                        width: sshPromptScroll.availableWidth
+                        text: sshManager.promptText
+                        textFormat: TextEdit.PlainText
+                        color: window.selectedTextColour
+                        wrapMode: TextEdit.Wrap
+                        readOnly: true; selectByMouse: true; padding: 0; background: null
+                    }
                 }
                 PilonScrollView {
                     id: sshDetailsScroll
@@ -1871,10 +1899,7 @@ Window {
                     visible: sshLoginNotification.details.length > 0
                     Layout.fillWidth: true; Layout.fillHeight: true
                     Layout.minimumHeight: 0
-                    Layout.preferredHeight: Math.min(220, sshConnectionDetails.implicitHeight,
-                        Math.max(sshDetailsMetrics.height, sshLoginNotification.maximumContentHeight
-                            - sshLoginNotification.topPadding - sshLoginNotification.bottomPadding
-                            - sshConnectionContents.minimumFormHeight))
+                    Layout.preferredHeight: Math.min(220, sshConnectionDetails.implicitHeight, sshConnectionContents.textHeight)
                     contentWidth: availableWidth; clip: true
                     ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
                     PilonTextArea {

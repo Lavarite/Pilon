@@ -5,13 +5,13 @@ pilon_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 if [[ "${PILON_ENV_LOADED:-0}" != 1 ]]; then
     exec python3 "$pilon_root/src/scripts/environment.py" bash "${BASH_SOURCE[0]}" "$@"
 fi
-pilon_work="$pilon_root/build/android/runtime"
-pilon_output="$pilon_root/builds/android/runtime/arm64-v8a"
+pilon_dev="${PILON_DEV_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/pilon-dev}"
+pilon_work="$pilon_dev/dev-deps/android/runtime"
+pilon_output="$pilon_dev/builds/android/runtime/arm64-v8a"
 pilon_ndk="${ANDROID_NDK_ROOT:-${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}/ndk/27.2.12479018}"
-pilon_codex_version=0.167.0
 pilon_llama_revision=4d9176092d00586775af140581bb0b558ddc4389
 pilon_kleidiai_version=v1.24.0
-pilon_licenses="$pilon_root/builds/android/licenses/runtime"
+pilon_licenses="$pilon_dev/builds/android/licenses/runtime"
 mkdir -p "$pilon_work/downloads" "$pilon_output" "$pilon_licenses"
 
 download() {
@@ -33,12 +33,8 @@ download "https://codeload.github.com/ggml-org/llama.cpp/tar.gz/$pilon_llama_rev
 download "https://github.com/ARM-software/kleidiai/releases/download/$pilon_kleidiai_version/kleidiai-$pilon_kleidiai_version-src.tar.gz" \
     "$pilon_work/downloads/kleidiai-$pilon_kleidiai_version-src.tar.gz" \
     9348b969e042d8890a54b01a463dbe71f5a4c074b5329e9c26a85ef3b68aa19b
-download "https://raw.githubusercontent.com/openai/codex/rust-v$pilon_codex_version/LICENSE" \
-    "$pilon_licenses/Codex-LICENSE.txt" \
-    d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc
-download "https://raw.githubusercontent.com/openai/codex/rust-v$pilon_codex_version/NOTICE" \
-    "$pilon_licenses/Codex-NOTICE.txt" \
-    9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915
+install -m644 "$pilon_licenses/codex/LICENSE.txt" "$pilon_licenses/Codex-LICENSE.txt"
+install -m644 "$pilon_licenses/codex/NOTICE.txt" "$pilon_licenses/Codex-NOTICE.txt"
 pilon_kleidiai_source="$pilon_work/kleidiai-$pilon_kleidiai_version"
 if [[ ! -f "$pilon_kleidiai_source/CMakeLists.txt" ]]; then
     tar -xzf "$pilon_work/downloads/kleidiai-$pilon_kleidiai_version-src.tar.gz" -C "$pilon_work"

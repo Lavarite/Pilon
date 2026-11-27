@@ -1,59 +1,46 @@
-# Add-ons
-
-Pilon loads trusted `.piext` packages containing QML, JavaScript and assets.
-They run in the application as your user; install only code you trust. The
-format is a Qt binary resource, not a sandbox or source-code obfuscation.
+# Manage add-ons
 
 ## Install and enable
 
-Open **Settings → Add-ons** and select the dashed **+** card, whose tooltip and
-accessible name are **Add add-ons**. Select one or more `.piext` files in Pilon's
-picker. Import attempts every chosen file and reports failures. Alternatively,
-copy a package into the selected Pilon folder's `addons/` directory; discovery
-is automatic, with no Refresh step.
+1. Open **Settings → Add-ons** and select the **+** card.
+2. Choose one or more trusted `.piext` packages.
+3. Enable the add-on. Pilon checks that its required dependencies are installed.
 
-New external packages start disabled. Files, SSH, Assistant, Notes and Calendar
-start enabled on new profiles; Git and Devices start off. Saved choices win.
-Enabling a package validates and enables its installed required dependencies;
-missing/incompatible packages must be installed first. Optional integrations
-have separate saved choices and start off unless the contributor supplies an
-enabled default. A package with a page adds a sidebar item;
-runtime/settings-only packages do not.
+You can also copy a package into the selected workspace's `addons/` folder.
+Pilon discovers it and moves it into `addons/<id>/<id>.piext`.
 
-Select **Reorder sidebar tabs** in Add-ons settings to open an expanded sidebar preview.
-Drag a tab to change the saved order, or focus it and press **Alt+Up** or
-**Alt+Down**. The sidebar updates after each drop. Clear a tab's checkbox to hide
-its page without disabling the add-on; check it again to restore the page.
+New external packages start disabled. Initial built-ins are Files, SSH,
+Assistant, Notes and Calendar. Enable Devices separately. Pilon runs add-ons
+as your user, so install packages from sources you trust.
 
-Below 600 logical pixels of usable workspace width, navigation moves to the
-bottom and gives the page the full width. That recovers 64 logical pixels
-from the collapsed sidebar, or 150 from the expanded sidebar. Swipe the bar
-or use the Left and Right arrow keys to reach tabs outside the visible area.
+## Tabs and settings
 
-Enabled package settings appear as grouped sections in the main Settings menu.
-Opening them does not create its page or start background work. Disabled add-ons
-have no settings entries. Disabling keeps data, preferences and accounts. All
-pages can be off; core Settings and add-on management remain available.
+- Choose **Reorder sidebar tabs**. Drag a tab or use **Alt+Up** and **Alt+Down**.
+- Clear a tab's checkbox to hide its page while keeping the add-on active.
+- Enabled add-on settings appear in the main Settings menu.
+- On narrow screens, swipe the bottom bar or use Left and Right to reach more tabs.
 
-## Update, remove and recover
+## Disable, update or remove
 
-Externally replacing or deleting an already discovered valid package requires
-restart; Pilon keeps its current snapshot until then. A changed package cannot replace
-code under live objects. Shipped updates preserve locally modified packages and
-do not restore deliberately removed ones.
+Turning an add-on off keeps its folders, files, preferences and accounts.
+Built-in and core Settings remain available when all add-on pages are off.
 
-Use the card's Remove action after disabling. Declared account cleanup must
-succeed before removal; failed cleanup preserves retryable state and names the
-owner. Removal records retained data ownership for a later reset. Restore missing
-cleanup code if Pilon asks for it. Disabling alone does not sign out accounts.
+- Restart Pilon after replacing a package from outside the app.
+- To remove a package from Pilon, disable it first, then use **Remove** on its card.
+  If account cleanup fails, resolve the reported error and retry.
+- To restore a removed built-in, import its `.piext` from the Linux bundle.
 
-If an add-on prevents normal startup, quit Pilon and run `pilon --disable-addons`.
-Saved activation choices are preserved. This recovery mode cannot undo changes
-that trusted code already made outside managed storage.
+## Recover from a startup failure
 
-## Build a package
+Quit Pilon, then start it with add-ons temporarily paused.
 
-Follow the [authoring guide](index.md) and the
-[Counter](../../examples/counter/readme.md) or
-[Checklist](../../examples/checklist/readme.md) example. Ordinary external
-packages need no Pilon source edit or application rebuild.
+```sh
+pilon --disable-addons
+```
+
+Recovery mode keeps your saved activation choices.
+
+## Build an add-on
+
+Follow the [authoring guide](index.md) or start with
+[Counter](../../examples/counter/readme.md) or [Checklist](../../examples/checklist/readme.md).

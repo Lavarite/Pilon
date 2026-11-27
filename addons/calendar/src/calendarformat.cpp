@@ -20,6 +20,15 @@ QTimeZone zone(const QVariantMap &event) {
     auto value = QTimeZone(name);
     return value.isValid() ? value : QTimeZone::systemTimeZone();
 }
+QDate exclusiveEndDate(const QDateTime &end) {
+    return end.date().addDays(end.time() != QTime(0, 0));
+}
+bool overlapsRange(const QDateTime &start, const QDateTime &end, bool allDay, const QDateTime &from,
+                   const QDateTime &to) {
+    if (!start.isValid() || !end.isValid()) return false;
+    if (allDay) return end.date() > from.date() && start.date() < exclusiveEndDate(to);
+    return end > from && start < to;
+}
 QString timeString(icaltimetype t, const QString &tz) {
     if (t.is_date)
         return QDate(t.year, t.month, t.day).toString(Qt::ISODate);
@@ -63,7 +72,7 @@ const QStringList msDays{"monday", "tuesday", "wednesday", "thursday", "friday",
 const QStringList positions{"first", "second", "third", "fourth", "last"};
 QMap<QString, QString> ruleParts(const QString &rule) {
     QMap<QString, QString> result;
-    for (const auto &p : rule.split(';'))
+    for (const auto &p : rule.split(';', Qt::SkipEmptyParts))
         result[p.section('=', 0, 0)] = p.section('=', 1);
     return result;
 }
@@ -102,6 +111,10 @@ QDateTime CalendarFormat::dateTime(const QVariantMap &e, const QString &field) {
                          QDateTime::TransitionResolution::Reject);
     }
     return QDateTime::fromString(s, Qt::ISODate);
+}
+bool CalendarFormat::overlaps(const QVariantMap &e, const QDateTime &from, const QDateTime &to) {
+    if (!from.isValid() || !to.isValid() || to <= from) return false;
+    return overlapsRange(dateTime(e, "start"), dateTime(e, "end"), e.value("allDay").toBool(), from, to);
 }
 QString CalendarFormat::validate(const QVariantMap &e) {
     if (e.value("title").toString().trimmed().isEmpty())
@@ -144,28 +157,31 @@ QVariantMap CalendarFormat::content(const QVariantMap &e) {
 QVariantList CalendarFormat::occurrences(const QVariantMap &e, const QDateTime &from, const QDateTime &to) {
     QVariantList result;
     auto start = dateTime(e, "start"), end = dateTime(e, "end");
-    if (!start.isValid() || !end.isValid())
+    if (!start.isValid() || !end.isValid() || !from.isValid() || !to.isValid() || to <= from)
         return result;
+    const bool allDay = e.value("allDay").toBool();
     const auto duration = start.secsTo(end);
     const auto dayDuration = start.date().daysTo(end.date());
+    const auto occurrenceKey = [allDay](const QDateTime &at) {
+        return allDay ? at.date().toString(Qt::ISODate) : at.toUTC().toString(Qt::ISODate);
+    };
+    QSet<QDateTime> excluded;
+    for (const auto &value : e.value("exdates").toList()) {
+        auto exclusion = e;
+        exclusion["start"] = value;
+        excluded.insert(dateTime(exclusion, "start"));
+    }
     QSet<QString> emitted;
     auto add = [&](QDateTime at) {
-        const auto finish = e.value("allDay").toBool() ? at.addDays(dayDuration) : at.addSecs(duration);
-        const auto key =
-            e.value("allDay").toBool() ? at.date().toString(Qt::ISODate) : at.toUTC().toString(Qt::ISODate);
-        if (finish <= from || at >= to || emitted.contains(key))
+        const auto finish = allDay ? at.addDays(dayDuration) : at.addSecs(duration);
+        const auto key = occurrenceKey(at);
+        if (!overlapsRange(at, finish, allDay, from, to) || excluded.contains(at) || emitted.contains(key))
             return;
-        for (const auto &x : e.value("exdates").toList()) {
-            auto ex = e;
-            ex["start"] = x;
-            if (dateTime(ex, "start") == at)
-                return;
-        }
         emitted.insert(key);
         auto item = e;
         item["occurrence"] = key;
-        item["start"] = e.value("allDay").toBool() ? at.date().toString(Qt::ISODate) : at.toString(Qt::ISODate);
-        item["end"] = e.value("allDay").toBool() ? finish.date().toString(Qt::ISODate) : finish.toString(Qt::ISODate);
+        item["start"] = allDay ? at.date().toString(Qt::ISODate) : at.toString(Qt::ISODate);
+        item["end"] = allDay ? finish.date().toString(Qt::ISODate) : finish.toString(Qt::ISODate);
         result.append(item);
     };
     const auto rule = e.value("recurrence").toString();
@@ -176,19 +192,19 @@ QVariantList CalendarFormat::occurrences(const QVariantMap &e, const QDateTime &
         auto seed = icalTime(e, "start");
         auto iterator = icalrecur_iterator_new(recur, seed);
         if (iterator) {
-            if (!recur.count && from > start) {
+            if (!recur.count && (allDay ? from.date() > start.date() : from > start)) {
                 auto lower = e;
-                lower["start"] = from.addSecs(-duration).toTimeZone(zone(e)).toString(Qt::ISODate);
-                if (e.value("allDay").toBool())
-                    lower["start"] = from.addDays(-dayDuration).date().toString(Qt::ISODate);
+                lower["start"] = allDay ? from.date().addDays(-dayDuration).toString(Qt::ISODate)
+                                        : from.addSecs(-duration).toTimeZone(zone(e)).toString(Qt::ISODate);
                 icalrecur_iterator_set_start(iterator, icalTime(lower, "start"));
             }
+            const auto endDay = exclusiveEndDate(to);
             for (int n = 0; n < 1000000; ++n) {
                 auto t = icalrecur_iterator_next(iterator);
                 if (icaltime_is_null_time(t))
                     break;
                 QDateTime at(QDate(t.year, t.month, t.day), QTime(t.hour, t.minute, t.second), zone(e));
-                if (at >= to)
+                if (allDay ? at.date() >= endDay : at >= to)
                     break;
                 add(at);
             }
@@ -209,6 +225,7 @@ QVariantList CalendarFormat::expandedEvents(const EventRecords &records, const E
     QVariantList result;
     if (!begin.isValid() || !end.isValid() || end <= begin)
         return result;
+    const auto from = begin.toTimeZone(zone), to = end.toTimeZone(zone);
     for (auto it = records.cbegin(); it != records.cend(); ++it) {
         auto e = it.value();
         bool pending = false;
@@ -221,7 +238,7 @@ QVariantList CalendarFormat::expandedEvents(const EventRecords &records, const E
         if (!e.value("local", true).toBool() &&
             !calendars.value(e.value("source").toString()).value("enabled").toBool())
             continue;
-        auto occurrences = CalendarFormat::occurrences(e, begin, end);
+        auto occurrences = CalendarFormat::occurrences(e, from, to);
         if (!e.value("recurrence").toString().isEmpty() && !e.value("pending").toBool()) {
             QString source = e.value("source").toString();
             if (source.isEmpty())
@@ -249,8 +266,7 @@ QVariantList CalendarFormat::expandedEvents(const EventRecords &records, const E
                 QVariantList fallback;
                 for (const auto &value : occurrences) {
                     const auto occurrence = value.toMap();
-                    const auto at = CalendarFormat::dateTime(occurrence, "start"), finish = CalendarFormat::dateTime(occurrence, "end");
-                    if ((at < cacheEnd && finish > cacheBegin)
+                    if (CalendarFormat::overlaps(occurrence, cacheBegin, cacheEnd)
                         || overridden.contains(occurrenceKey(occurrence.value("occurrence", occurrence.value("start")).toString()))) continue;
                     fallback.append(occurrence);
                 }
@@ -265,7 +281,7 @@ QVariantList CalendarFormat::expandedEvents(const EventRecords &records, const E
                         if (instance.contains(key))
                             o[key] = instance[key];
                     o["occurrence"] = instance.value("originalStart", instance.value("start"));
-                    if (CalendarFormat::dateTime(o, "end") > begin && CalendarFormat::dateTime(o, "start") < end)
+                    if (CalendarFormat::overlaps(o, from, to))
                         occurrences.append(o);
                 }
             }
@@ -776,7 +792,7 @@ QVariantMap CalendarFormat::toMicrosoft(const QVariantMap &e, const QVariantMap 
     if (!reminders.isEmpty())
         r["reminderMinutesBeforeStart"] = reminders.first();
     const auto p = ruleParts(e.value("recurrence").toString());
-    r["recurrence"] = QVariant();
+    if (!original.isEmpty()) r["recurrence"] = QVariant();
     if (!p.isEmpty()) {
         const auto freq = p.value("FREQ");
         bool relative = p.contains("BYDAY") && freq != "WEEKLY";

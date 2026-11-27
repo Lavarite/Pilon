@@ -35,7 +35,7 @@ Item {
             "application-x-pilon-note": "pin",
             "application-x-pilon-calendar": "pical",
             "application-x-pilon-extension": "piext",
-            "cog-6-tooth": "piconf",
+            "cog-6-tooth": "piconf piconfpack",
             "photo": "png jpg jpeg gif bmp webp svg tif tiff",
             "film": "mp4 mkv mov avi webm mpeg mpg",
             "musical-note": "mp3 flac wav ogg m4a aac opus",
@@ -222,18 +222,29 @@ Item {
         palette.placeholderText: appearance.workspace.mutedTextColour
         palette.highlight: appearance.workspace.accentColour
         palette.highlightedText: appearance.workspace.accentTextColour
+        onClosed: clearImportedIcon()
 
+        function clearImportedIcon() {
+            if (importSource.toString()) appearance.workspace.selectionManager.discardPreparedSelection(importSource)
+            importSource = ""
+        }
+        function useImportedIcon(file) {
+            clearImportedIcon()
+            importSource = file
+            choice = ""
+            errorText = ""
+        }
         function loadIcon(icon, colour) {
             choice = icon || ""
             tint = colour || ""
-            importSource = ""
+            clearImportedIcon()
             previewTint = ""
             if (gallery.item) gallery.item.reset()
             errorText = ""
         }
 
         function chooseIcon(icon) {
-            importSource = ""
+            clearImportedIcon()
             choice = icon
             errorText = ""
         }
@@ -379,10 +390,18 @@ Item {
                             width: parent.width
                             spacing: 8
                             PilonButton {
+                                objectName: "importFileAppearanceIcon"
                                 width: Math.min(implicitWidth, parent.width)
                                 text: qsTr("Import icon…")
                                 enabled: appearance.loaded && typeof appearance.manager.importAppearanceIcon === "function"
-                                onClicked: importDialog.open()
+                                onClicked: {
+                                    const workspace = appearance.workspace
+                                    if (!workspace.canOpenFiles) { importDialog.open(); return }
+                                    workspace.selectFiles(qsTr("Import icon"), files => {
+                                        if (editor.opened && files.length === 1) editor.useImportedIcon(files[0])
+                                        else for (const file of files) workspace.selectionManager.discardPreparedSelection(file)
+                                    }, "", [".png", ".svg"], editor.dialogWindow)
+                                }
                             }
                             PilonButton {
                                 width: Math.min(implicitWidth, parent.width)
@@ -391,7 +410,7 @@ Item {
                                 enabled: editor.choice !== "" || editor.importSource.toString() !== ""
                                 onClicked: {
                                     editor.choice = ""
-                                    editor.importSource = ""
+                                    editor.clearImportedIcon()
                                 }
                             }
                             PilonButton {
@@ -420,11 +439,7 @@ Item {
             parentWindow: editor.dialogWindow
             fileMode: PlatformDialogs.FileDialog.OpenFile
             nameFilters: [qsTr("Icons (*.png *.svg)")]
-            onAccepted: {
-                editor.importSource = selectedFile
-                editor.choice = ""
-                editor.errorText = ""
-            }
+            onAccepted: editor.useImportedIcon(selectedFile)
         }
         PilonColourDialog {
             id: colourDialog

@@ -15,6 +15,7 @@ class PiconfPreferences : public QObject {
     // Qt INI files discard numeric and boolean scalar types on a new process.
     static QVariant scopedValue(const QSettings &store, const QString &key, const QVariant &fallback = {});
     static void setScopedType(QSettings &store, const QString &key, const QVariant &value);
+    static QVariantMap supportedAddons(QVariantMap declarations);
     bool flush(QString &error);
     bool prepareInstalled(const QString &id, QString &error);
     bool validate(const PiconfDocument &document, QString &error) const;

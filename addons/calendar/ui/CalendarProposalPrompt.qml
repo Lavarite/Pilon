@@ -147,7 +147,9 @@ Control {
             PilonButton {
                 objectName: "calendarProposalDiscard"
                 text: qsTr("Discard")
-                onClicked: prompt.calendar.discardProposal(prompt.proposal.id)
+                onClicked: {
+                    if (!prompt.calendar.discardProposal(prompt.proposal.id)) prompt.message = prompt.calendar.error
+                }
             }
             PilonButton {
                 text: qsTr("Later")

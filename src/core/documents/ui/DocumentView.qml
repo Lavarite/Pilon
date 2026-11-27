@@ -43,7 +43,7 @@ Viewer.ViewerSurface {
     PilonErrorPopup {
         owner: root
         readonly property var current: pages.count ? pages.itemAt(root.currentPage) : null
-        message: current && current.pageError ? qsTr("Page %1: %2").arg(current.index + 1).arg(current.pageError) : ""
+        message: document.searchError || (current && current.pageError ? qsTr("Page %1: %2").arg(current.index + 1).arg(current.pageError) : "")
     }
     Repeater {
         id: pages
@@ -66,7 +66,7 @@ Viewer.ViewerSurface {
                 active: page.y + page.height >= root.contentY - root.height && page.y <= root.contentY + root.height * 2
                 sourceComponent: Rectangle {
                     color: "white"
-                    Image { objectName: "documentPageImage"; anchors.fill: parent; source: page.pageImage; asynchronous: true; cache: false }
+                    Image { objectName: "documentPageImage"; anchors.fill: parent; source: page.pageImage; asynchronous: true; cache: false; retainWhileLoading: true }
                     Repeater {
                         model: page.highlights
                         Rectangle {

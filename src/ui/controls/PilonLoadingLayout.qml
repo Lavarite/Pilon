@@ -24,7 +24,6 @@ Control {
             case "calendar": return calendarLayout
             case "assistant": return assistantLayout
             case "ssh": return sshLayout
-            case "git": return gitLayout
             default: return textLayout
             }
         }
@@ -219,33 +218,6 @@ Control {
         }
     }
 
-    Component {
-        id: gitLayout
-        Item {
-            id: git
-            Row {
-                id: gitTools
-                spacing: 8
-                Block { width: Math.max(0, git.width - 152); height: 40 }
-                Repeater { model: 3; delegate: Block { width: 40; height: 40 } }
-            }
-            Column {
-                objectName: "loadingRepositories"
-                y: gitTools.height + 16
-                width: git.width
-                spacing: 12
-                Repeater {
-                    model: 4
-                    delegate: Panel {
-                        width: git.width
-                        height: 56
-                        Block { x: 12; y: 14; width: parent.width * .46; height: 13 }
-                        Block { x: 12; y: 34; width: parent.width * .24; height: 8 }
-                    }
-                }
-            }
-        }
-    }
 
     Component {
         id: textLayout

@@ -36,12 +36,13 @@ TestCase {
         property var calls: []
         function record(action) { calls = calls.concat(action) }
         property bool deferRefresh: false
+        property bool deferLogout: false
         function refresh() { record("refresh"); if (deferRefresh) { errorMessage = ""; busy = true } }
         function startService() { record("connect") }
         function openExternalApplication() { record("open") }
         function disconnectExternalApplication() { record("disconnect") }
         function login() { record("login") }
-        function logout() { record("logout") }
+        function logout() { record("logout"); if (deferLogout) { errorMessage = ""; busy = true } }
         function useCurrentAccount() { record("claim") }
         function connectDiscovery(id, secret) { record("discovery-connect"); if (discoverySucceeds) { discoveryConnected = true; discoveryChanged() } }
         function disconnectDiscovery() { record("discovery-disconnect"); if (discoveryDisconnects) { discoveryConnected = false; discoveryChanged() } }
@@ -93,6 +94,7 @@ TestCase {
         manager.externalStatus = "No Android VPN active."
         manager.loggedIn = false; manager.serviceRunning = false; manager.busy = false
         manager.errorMessage = ""; manager.devices = []; manager.calls = []; manager.deferRefresh = false
+        manager.deferLogout = false
         owner.width = 380; owner.height = 680; owner.show(); owner.requestActivate()
         page = createTemporaryObject(settingsComponent, surface)
         verify(page !== null); wait(30)
@@ -138,6 +140,23 @@ TestCase {
         error.dismiss()
         manager.errorMessage = "Background refresh failed again"
         verify(!error.visible)
+    }
+    function test_refreshKeepsConnectionCommandsInPlace() {
+        const refresh = control("devicesRefresh")
+        const next = control("devicesOpenExternal")
+        const before = next.mapToItem(page, 0, 0)
+        const label = refresh.text
+        const width = refresh.width
+        manager.deferRefresh = true
+        click("devicesRefresh")
+        tryCompare(refresh, "enabled", false)
+        compare(refresh.text, label)
+        compare(refresh.width, width)
+        compare(next.mapToItem(page, 0, 0), before)
+        verify(control("devicesRefreshIndicator").visible)
+        manager.busy = false
+        verify(refresh.enabled)
+        verify(!control("devicesRefreshIndicator").visible)
     }
     function test_externalControlsArePassiveAndDoNotExposeAnotherAccount() {
         compare(manager.calls.length, 0)
@@ -282,6 +301,26 @@ TestCase {
             tabletInput.setScreenGeometry(screen)
         }
     }
+    function test_failedSignOutKeepsTheSessionAndReportsTheError() {
+        manager.externalApplication = false
+        manager.loggedIn = true
+        manager.serviceRunning = true
+        manager.deferLogout = true
+        click("devicesSignOut")
+        const confirmation = control("devicesSignOutConfirmation")
+        tryCompare(confirmation, "opened", true)
+        clickConfirmationAction(confirmation, control("devicesConfirmSignOut"))
+        tryCompare(confirmation, "opened", false)
+        compare(manager.calls, ["logout"])
+        verify(!control("devicesSignOut").enabled)
+
+        manager.errorMessage = "Unable to sign out of Tailscale."
+        manager.busy = false
+        tryCompare(control("tailscaleOperationError"), "message", manager.errorMessage)
+        compare(control("devicesConnectionStatus").text, "Signed in")
+        verify(control("devicesSignOut").enabled)
+        compare(manager.calls, ["logout"])
+    }
     function test_missingDesktopClientShowsDownloadInsteadOfServiceActions() {
         manager.externalApplication = false
         manager.externalAppInstalled = false
@@ -313,6 +352,37 @@ TestCase {
         verify(control("devicesConnectDiscovery").visible)
         owner.width=320
         capture(page,"read-only-discovery")
+    }
+    function test_signInAndDiscoveryControlsFitAtLargeType() {
+        const font = tabletInput.applicationFont()
+        try {
+            owner.width=320; owner.height=480; owner.uiScale=1.4
+            tabletInput.setApplicationFont(Qt.font({family: font.family, pixelSize: 28}))
+            manager.externalApplication=false; manager.serviceRunning=true
+            const column = page.contentItem.contentItem.children[0]
+            const actions = Array.from(column.children).find(item => Array.from(item.children).some(button => button.text === "Sign in"))
+            verify(actions !== undefined)
+            const signIn = Array.from(actions.children).find(item => item.text === "Sign in")
+            owner.update()
+            verify(waitForRendering(owner.contentItem))
+            verify(signIn.visible && !signIn.contentItem.truncated)
+            verify(signIn.mapToItem(page,signIn.width,0).x <= page.width + 1)
+            mouseClick(signIn)
+            compare(manager.calls.join(","), "login")
+            manager.externalApplication=true
+            owner.update()
+            verify(waitForRendering(owner.contentItem))
+            for (const name of ["devicesDiscoveryClientId", "devicesDiscoveryClientSecret", "devicesConnectDiscovery"]) {
+                const item=control(name)
+                verify(item.visible && item.width > 0)
+                verify(item.mapToItem(page,0,0).x >= -1 && item.mapToItem(page,item.width,0).x <= page.width+1, name)
+            }
+            const connect = control("devicesConnectDiscovery")
+            verify(!connect.contentItem.truncated && connect.contentItem.contentWidth <= connect.contentItem.width + 1)
+        } finally {
+            owner.uiScale=1
+            tabletInput.setApplicationFont(font)
+        }
     }
     function test_discoveredNamesRemainLiteralAndDoNotExposeSavedHostActions() {
         manager.discoveryConnected=true

@@ -3,13 +3,15 @@ set -euo pipefail
 
 version="${1#v}"
 stem="pilon-$version-linux-x86_64"
-assets="$PWD/release-assets"
+assets="$PILON_DEV_DIR/builds/releases/ci"
+build_dir="$PILON_DEV_DIR/builds/work/linux"
+install_dir="$PILON_DEV_DIR/builds/linux-package"
 verify="$(mktemp -d)"
 trap 'rm -rf -- "$verify"' EXIT
 
-cmake --install build --prefix "$PWD/builds"
+cmake --install "$build_dir" --prefix "$install_dir" --component Pilon
 python3 src/scripts/package-release.py source --output-dir "$assets"
-python3 src/scripts/package-release.py linux --corresponding-source --output-dir "$assets"
+python3 src/scripts/package-release.py linux --corresponding-source --linux-binary "$install_dir/pilon" --linux-build-dir "$build_dir" --output-dir "$assets"
 python3 - "$assets/$stem-corresponding-source-report.json" <<'PY'
 import json
 from pathlib import Path
@@ -27,11 +29,11 @@ tar -xzf "$assets/$stem.tar.gz" -C "$verify"
 status=0
 (
     cd "$verify/$stem"
-    QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software timeout 8s ./builds/pilon
+    QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software timeout 8s ./.bin/pilon
 ) || status="$?"
 if [[ "$status" != 124 ]]; then
     printf 'The extracted executable exited before the smoke test finished (%s).\n' "$status" >&2
     exit 1
 fi
-sh -n src/scripts/install-linux.sh
-install -m 755 src/scripts/install-linux.sh "$assets/install-linux.sh"
+sh -n src/scripts/install.sh
+install -m 755 src/scripts/install.sh "$assets/install-linux.sh"

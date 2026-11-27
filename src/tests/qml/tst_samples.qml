@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtTest
 import Pilon as Backend
+import "../../examples/addon" as Counter
 import "../../examples/checklist" as Checklist
 
 TestCase {
@@ -30,6 +31,8 @@ TestCase {
     }
     Component { id: pageFactory; Checklist.Page { addon: context } }
     Component { id: settingsFactory; Checklist.Settings { addon: context } }
+    Component { id: counterPage; Counter.Page { addon: context } }
+    Component { id: counterSettings; Counter.Settings { addon: context } }
     Component { id: registryFactory; Backend.AddonRegistry {} }
     Component {
         id: scopedContextFactory
@@ -145,6 +148,31 @@ TestCase {
         verify(control(page,"checklistError").visible)
         context.failWrites=false
         add("Recovered draft"); compare(page.itemCount,2); compare(page.prepareDisable(),true)
+    }
+    function test_counterFailedWritesKeepDisplayedValues() {
+        page.visible = false
+        context.values = ({count: 4, step: 3})
+        context.failWrites = true
+        const settings = createTemporaryObject(counterSettings, host, {width: host.width, height: 160})
+        const spin = control(settings, "counterStep")
+        verify(spin)
+        spin.forceActiveFocus()
+        keyClick(Qt.Key_Up)
+        compare(spin.value, 3)
+        compare(context.values.step, 3)
+        verify(control(settings, "counterSettingsError").visible)
+        settings.destroy()
+        const counter = createTemporaryObject(counterPage, host, {width: host.width, height: host.height})
+        const increment = control(counter, "counterIncrement")
+        verify(increment)
+        increment.forceActiveFocus()
+        keyClick(Qt.Key_Space)
+        compare(counter.count, 4)
+        verify(control(counter, "counterPageError").visible)
+        context.failWrites = false
+        keyClick(Qt.Key_Space)
+        compare(counter.count, 7)
+        verify(!control(counter, "counterPageError").visible)
     }
     function test_invalidSavedItemsAreNotOverwritten() {
         page.destroy(); wait(0)

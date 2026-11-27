@@ -46,11 +46,13 @@ TestCase {
         function clearSavedPasswords() { forgetCalls++; return "" }
         property string connectedUser: ""
         property string connectedHost: ""
+        property string connectedAlias: ""
         property int connectionCalls: 0
         property string terminalBytes: ""
         signal terminalData(var data)
-        function connectToHost(user,host) { ++connectionCalls; connectedUser=user; connectedHost=host; running=true }
+        function connectToHost(user,host) { ++connectionCalls; connectedUser=user; connectedHost=host; connectedAlias=""; running=true }
         function connectToHostAt(user,host,path) { connectToHost(user,host) }
+        function connectToDevice(user,host,alias,path) { connectToHost(user,host); connectedAlias=alias }
         function disconnectFromHost() { running=false }
         function writeTerminalData(data) { terminalBytes += data }
         function resizeTerminal(rows,columns) {}
@@ -127,6 +129,26 @@ TestCase {
         combo.currentIndex=index;combo.activated(index)
         return combo
     }
+    function test_discoveredAliasesReachOpenSshOnSelectedDeviceRoutes() {
+        tailscale.devices = [
+            {id: "google", name: "First peer", ip: "192.0.2.1", sshAlias: "first-peer", online: true},
+            {id: "portable", name: "Second peer", ip: "192.0.2.2", sshAlias: "second-peer", online: true}
+        ]
+        waitForPolish(page)
+        workspace.setDeviceUsername("google", "first-user")
+        select(0)
+        mouseClick(findChild(page, "sshConnectButton"))
+        compare(ssh.connectedAlias, "first-peer")
+        compare(ssh.connectedHost, "192.0.2.1")
+        compare(ssh.connectedUser, "first-user")
+        select(1)
+        tryCompare(ssh, "connectedAlias", "second-peer")
+        compare(ssh.connectedHost, "192.0.2.2")
+        page.openTerminalAt(tailscale.devices[0], "directory-user", "/reports")
+        tryCompare(ssh, "connectedAlias", "first-peer")
+        compare(ssh.connectedHost, "192.0.2.1")
+        compare(ssh.connectedUser, "directory-user")
+    }
     function test_deviceSelectionUsesOverridesAndStableDefault() {
         const user=findChild(page,"sshUsernameInput")
         compare(user.text,"default-user")
@@ -173,6 +195,33 @@ TestCase {
         const calls=ssh.connectionCalls
         page.openTerminalAt(device,"fixture-user","/")
         compare(ssh.connectionCalls,calls+(data.allowed?1:0))
+    }
+    function test_customHostDropdownOnlyConnectsOnConfirm() {
+        const combo=select(0)
+        mouseClick(findChild(page,"sshConnectButton"))
+        compare(ssh.connectedHost,"192.0.2.1")
+        const startCalls=ssh.connectionCalls
+        for (const dismiss of ["escape","outside"]) {
+            combo.popup.open()
+            tryVerify(()=>combo.addressInput !== null)
+            combo.addressInput.forceActiveFocus()
+            combo.addressInput.text="unfinished.fixture.invalid"
+            if (dismiss === "escape")
+                keyClick(Qt.Key_Escape)
+            else
+                mouseClick(page,4,4)
+            tryCompare(combo.popup,"visible",false)
+            compare(ssh.connectionCalls,startCalls)
+            compare(ssh.connectedHost,"192.0.2.1")
+        }
+        combo.popup.open()
+        tryVerify(()=>combo.addressInput !== null)
+        compare(combo.addressInput.text,"")
+        combo.addressInput.forceActiveFocus()
+        combo.addressInput.text="ssh-alias"
+        keyClick(Qt.Key_Return)
+        tryCompare(ssh,"connectionCalls",startCalls+1)
+        compare(ssh.connectedHost,"ssh-alias")
     }
     function showMobileTerminal() {
         page.mobileControls=true; ssh.running=true; ssh.authenticated=true

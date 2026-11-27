@@ -92,7 +92,7 @@ int FolderSizeCache::watchDirectory(const QByteArray &path, const struct stat &i
 }
 
 FolderSizeCache::Result FolderSizeCache::scan(const QByteArray &path, const struct stat &info,
-                                              const std::atomic_bool &cancel, int depth)
+                                              const std::atomic_bool &cancel, int depth, qsizetype *remainingEntries)
 {
     if (cancel.load() || depth > 512) return {};
     const int watch = watchDirectory(path, info);
@@ -123,12 +123,16 @@ FolderSizeCache::Result FolderSizeCache::scan(const QByteArray &path, const stru
         }
         const QByteArray name(entry->d_name);
         if (name == "." || name == "..") continue;
+        if (remainingEntries) {
+            if (*remainingEntries == 0) return {};
+            --*remainingEntries;
+        }
         struct stat child{};
         if (::fstatat(descriptor, name.constData(), &child, AT_SYMLINK_NOFOLLOW)) return {};
         auto bytes = qint64(child.st_size);
         auto transfer = S_ISLNK(child.st_mode) ? 0 : bytes;
         if (S_ISDIR(child.st_mode)) {
-            const auto nested = scan(prefix + name, child, cancel, depth + 1);
+            const auto nested = scan(prefix + name, child, cancel, depth + 1, remainingEntries);
             bytes = nested.bytes;
             transfer = nested.transferBytes;
             total.watched &= nested.watched;
@@ -144,7 +148,7 @@ FolderSizeCache::Result FolderSizeCache::scan(const QByteArray &path, const stru
 }
 
 std::optional<qint64> FolderSizeCache::measure(const QString &path, const std::atomic_bool &cancel, bool *watched,
-                                              qint64 *transferBytes)
+                                              qint64 *transferBytes, qsizetype *remainingEntries)
 {
     if (watched) *watched = false;
     if (transferBytes) *transferBytes = -1;
@@ -157,7 +161,7 @@ std::optional<qint64> FolderSizeCache::measure(const QString &path, const std::a
         if (directories.size() >= maximumWatches && !directories.contains(name)) reset();
         struct stat info{};
         if (::lstat(name.constData(), &info) || !S_ISDIR(info.st_mode)) return {};
-        const auto result = scan(name, info, cancel, 0);
+        const auto result = scan(name, info, cancel, 0, remainingEntries);
         // Changes racing enumeration must invalidate any totals we just stored.
         drainChanges();
         if (result.bytes >= 0 && !cancel.load()) {

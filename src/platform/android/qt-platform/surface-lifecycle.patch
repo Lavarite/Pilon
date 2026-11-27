@@ -957,7 +957,7 @@ index 482a4ab1..45f02eaf 100644
      PFN_vkCreateAndroidSurfaceKHR m_createVkSurface;
      PFN_vkDestroySurfaceKHR m_destroyVkSurface;
 diff --git a/src/plugins/platforms/android/qandroidplatformwindow.cpp b/src/plugins/platforms/android/qandroidplatformwindow.cpp
-index 7ba82ef7..20c10276 100644
+index 7ba82ef7..bf8dbf63 100644
 --- a/src/plugins/platforms/android/qandroidplatformwindow.cpp
 +++ b/src/plugins/platforms/android/qandroidplatformwindow.cpp
 @@ -5,15 +5,22 @@
@@ -1060,7 +1060,7 @@ index 7ba82ef7..20c10276 100644
  void QAndroidPlatformWindow::createSurface()
  {
      const bool windowStaysOnTop = bool(window()->flags() & Qt::WindowStaysOnTopHint);
-@@ -294,44 +328,117 @@ void QAndroidPlatformWindow::createSurface()
+@@ -294,44 +328,119 @@ void QAndroidPlatformWindow::createSurface()
  
      m_nativeQtWindow.callMethod<void>("createSurface", windowStaysOnTop, 32, isOpaque,
                                        m_surfaceContainerType);
@@ -1180,6 +1180,8 @@ index 7ba82ef7..20c10276 100644
 +
 +void QAndroidPlatformWindow::releaseSurface()
 +{
++    // The parked Android callback must retire exposure before Qt can resume.
++    m_surfaceValid = false;
 +    destroyWindowSurface();
 +    if (m_nativeWindow) {
 +        ANativeWindow_release(m_nativeWindow);
@@ -1199,7 +1201,7 @@ index 7ba82ef7..20c10276 100644
  bool QAndroidPlatformWindow::blockedByModal() const
  {
      QWindow *modalWindow = QGuiApplication::modalWindow();
-@@ -345,27 +452,83 @@ bool QAndroidPlatformWindow::isEmbeddingContainer() const
+@@ -345,27 +454,85 @@ bool QAndroidPlatformWindow::isEmbeddingContainer() const
      return !QtAndroid::isQtApplication() && window()->isTopLevel();
  }
  
@@ -1257,7 +1259,7 @@ index 7ba82ef7..20c10276 100644
 +                     && QAndroidEventDispatcherStopper::stopped())) {
 +        finished.callMethod<void>("run");
 +        return;
-     }
++    }
 +    // Android keeps the old frame until drawingFinished runs, which may happen
 +    // on any thread, so no wait here.
 +    QMetaObject::invokeMethod(qApp, [windowId, finished]() {
@@ -1281,23 +1283,25 @@ index 7ba82ef7..20c10276 100644
 +        finish();
 +        return;
 +    }
-+    // A parked Qt thread cannot process queued teardown until resume.
-+    if (QtAndroid::blockEventLoopsWhenSuspended()
-+            && QAndroidEventDispatcherStopper::stopped()) {
++    // Android cannot wait for a parked Qt thread. Deliver its exposure and
++    // surface events on the Qt thread after resume, even if Android already released.
++    const bool parked = QtAndroid::blockEventLoopsWhenSuspended()
++            && QAndroidEventDispatcherStopper::stopped();
++    if (parked) {
 +        if (auto *pw = findWindowById(windowId))
 +            pw->releaseSurface();
 +        finish();
-+        return;
-+    }
-+    QMetaObject::invokeMethod(qApp, [windowId, finish]() {
+     }
++    QMetaObject::invokeMethod(qApp, [windowId, finish, parked]() {
 +        if (auto *pw = findWindowById(windowId))
 +            pw->onSurfaceDestroyed();
-+        finish();
++        if (!parked)
++            finish();
 +    }, Qt::QueuedConnection);
  }
  
  void QAndroidPlatformWindow::windowFocusChanged(JNIEnv *env, jobject object,
-@@ -454,48 +617,14 @@ static void updateWindows(JNIEnv *env, jobject object)
+@@ -454,48 +621,14 @@ static void updateWindows(JNIEnv *env, jobject object)
  }
  Q_DECLARE_JNI_NATIVE_METHOD(updateWindows)
  
@@ -1350,16 +1354,17 @@ index 7ba82ef7..20c10276 100644
                  Q_JNI_NATIVE_SCOPED_METHOD(safeAreaMarginsChanged, QAndroidPlatformWindow)
              })) {
 diff --git a/src/plugins/platforms/android/qandroidplatformwindow.h b/src/plugins/platforms/android/qandroidplatformwindow.h
-index a5c0af76..99a84303 100644
+index a5c0af76..363f81ee 100644
 --- a/src/plugins/platforms/android/qandroidplatformwindow.h
 +++ b/src/plugins/platforms/android/qandroidplatformwindow.h
-@@ -12,19 +12,30 @@
+@@ -12,19 +12,31 @@
  #include <QtCore/qjniobject.h>
  #include <QtCore/qjnitypes.h>
  #include <QtCore/qloggingcategory.h>
 -#include <QtCore/qmutex.h>
 -#include <QtCore/qwaitcondition.h>
  #include <jni.h>
++#include <atomic>
  
 +struct ANativeWindow;
 +
@@ -1386,7 +1391,7 @@ index a5c0af76..99a84303 100644
  class QAndroidPlatformWindow: public QPlatformWindow
  {
  public:
-@@ -65,26 +76,40 @@ public:
+@@ -65,26 +77,40 @@ public:
      QtJniTypes::QtWindow nativeWindow() const { return m_nativeQtWindow; }
  
      virtual void applicationStateChanged(Qt::ApplicationState);
@@ -1433,11 +1438,11 @@ index a5c0af76..99a84303 100644
 +
 +    // Between Android's surfaceCreated and surfaceDestroyed. Unlike
 +    // m_nativeWindow, it drops before the GPU surface is torn down.
-+    bool m_surfaceValid = false;
++    std::atomic_bool m_surfaceValid { false };
  
      bool m_isRaster;
  
-@@ -92,28 +117,27 @@ protected:
+@@ -92,28 +118,27 @@ protected:
      QtJniTypes::QtWindow m_nativeQtWindow;
      SurfaceContainer m_surfaceContainerType = SurfaceContainer::SurfaceView;
      QtJniTypes::QtWindow m_nativeParentQtWindow;

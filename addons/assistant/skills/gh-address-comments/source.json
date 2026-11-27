@@ -1,8 +1,0 @@
-{
-  "repository": "https://github.com/openai/skills",
-  "revision": "49f948faa9258a0c61caceaf225e179651397431",
-  "path": "skills/.curated/gh-address-comments",
-  "license": "Apache-2.0",
-  "original_sha256": "77389eefd3fb6584210668ca8e43f4b8de87e7722ddd953474bc9e24cdfaaedd",
-  "adaptation": "Instructions adapted for existing Pilon tools and authorization; original retained in upstream.md."
-}

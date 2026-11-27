@@ -19,6 +19,20 @@ def publication():
 
 
 class CalendarTests(unittest.TestCase):
+    def test_publication_preserves_instants_across_a_repeated_hour(self):
+        payload = publication()
+        event = payload["events"][0]
+        event.update(start="2026-10-25T01:50:00+01:00", end="2026-10-25T01:10:00+00:00")
+        for fields in (["title"], []):
+            with self.subTest(fields=fields):
+                payload["fields"] = fields
+                result = occurrences(project(payload), "2026-10-25", "2026-10-26")
+                self.assertEqual(len(result), 1)
+                self.assertEqual(result[0]["endMs"] - result[0]["startMs"], 20 * 60 * 1000)
+        with self.assertRaises(ValueError):
+            event["start"], event["end"] = event["end"], event["start"]
+            project(payload)
+
     def test_publication_timestamp_is_server_generated_and_survives_restart(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "calendar.sqlite"
@@ -191,8 +205,12 @@ class CalendarTests(unittest.TestCase):
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0]["title"], "Rescheduled lecture")
         self.assertEqual(events[0]["startMinute"], 660)
-        # Outside the cached view, fall back to the series, just like the app.
-        self.assertEqual(len(occurrences(payload, "2026-09-30", "2026-11-02")), 3)
+        wider = occurrences(payload, "2026-09-30", "2026-11-02")
+        self.assertEqual([(e["displayDate"], e["startMinute"]) for e in wider], [("2026-10-02", 660)])
+        payload["events"][0]["instances"].update({"from": "2026-10-02", "to": "2026-10-04"})
+        partial = occurrences(payload, "2026-10-01", "2026-10-06")
+        self.assertEqual([(e["displayDate"], e["startMinute"]) for e in partial],
+                         [("2026-10-02", 660), ("2026-10-04", 540)])
 
     def test_all_day_end_is_exclusive_and_until_is_inclusive(self):
         payload = publication()

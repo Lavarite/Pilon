@@ -63,7 +63,7 @@ public final class PilonWidgetTimelineService extends RemoteViewsService {
         views.setContentDescription(R.id.widget_title, frame.optString("title") + (!showFooter && !footer.isEmpty() ? "\n" + footer : ""));
         views.setOnClickPendingIntent(R.id.widget_root, PilonWidgets.launch(context, id, binding, snapshot, frame.optString("actionId", "open")));
         if (Build.VERSION.SDK_INT >= 31) {
-            RemoteViews body = PilonWidgetTimeGrid.scrollItem(context, id, binding, snapshot, frame, capacity);
+            RemoteViews body = PilonWidgetTimeGrid.scrollItem(context, id, binding, snapshot, frame, capacity, full);
             views.setRemoteAdapter(R.id.widget_timeline_list, new RemoteViews.RemoteCollectionItems.Builder()
                 .setHasStableIds(true).setViewTypeCount(1).addItem(0, body).build());
         } else {

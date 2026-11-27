@@ -64,14 +64,19 @@ final class PilonWidgetTimeGrid {
     private static int layout(Context context, Plan plan, List<JSONObject> events, int start, int end, float scale, int maximum, int requestedCapacity) {
         List<Card> candidates = new ArrayList<>();
         plan.end = Math.min(end, start + plan.height * 60f / plan.hour);
-        float minimum = px(context, 34 * scale);
+        float minimum = px(context, 34 * scale), gap = px(context, 2);
+        float visibleHeight = Math.min(plan.height, (end - start) * plan.hour / 60f);
+        float latestStart = Math.max(0, (1440 - start) * plan.hour / 60f - minimum);
+        int hidden = 0;
         for (JSONObject row : events) {
             JSONObject range = row.optJSONObject("timeRange"); int a = range.optInt("startMinute"), b = range.optInt("endMinute");
             if (a >= plan.end || b <= start || plan.height <= 0) continue;
             Card card = new Card(row);
             // Ongoing tails get a readable target; actual ranges/time labels remain unchanged.
-            card.top = (Math.min(Math.max(a, start), 1440 - minimum * 60f / plan.hour) - start) * plan.hour / 60f;
-            card.bottom = Math.min((1440 - start) * plan.hour / 60f, Math.max(card.top + minimum, (b - start) * plan.hour / 60f));
+            card.top = Math.min(latestStart, (Math.max(a, start) - start) * plan.hour / 60f);
+            float bottom = Math.min(visibleHeight, Math.max(card.top + minimum, (b - start) * plan.hour / 60f));
+            card.bottom = Math.round(bottom - gap) > Math.round(card.top) ? bottom - gap : bottom;
+            if (Math.round(card.bottom) <= Math.round(card.top)) { ++hidden; continue; }
             candidates.add(card);
         }
         candidates.sort(Comparator.comparingDouble((Card card) -> card.top).thenComparingDouble(card -> -card.bottom)
@@ -83,7 +88,7 @@ final class PilonWidgetTimeGrid {
         }
         assign(group); plan.cards.clear();
         float available = Math.max(1, plan.width - plan.gutter), laneMinimum = px(context, 96 * scale);
-        int capacity = requestedCapacity > 0 ? requestedCapacity : Math.max(1, (int)Math.floor(available / laneMinimum)), hidden = 0;
+        int capacity = requestedCapacity > 0 ? requestedCapacity : Math.max(1, (int)Math.floor(available / laneMinimum));
         int limit = maximum - (plan.allDayVisible ? 1 : 0);
         for (Card card : candidates) {
             if (card.lane >= capacity || plan.cards.size() >= limit) { ++hidden; continue; }
@@ -91,9 +96,6 @@ final class PilonWidgetTimeGrid {
             float laneWidth = Math.max(1, available - px(context, 6)) / lanes;
             card.left = plan.gutter + px(context, 3) + card.lane * laneWidth;
             card.width = Math.max(1, Math.min(plan.width - card.left - px(context, 3), laneWidth * span - px(context, 2)));
-            card.top = Math.max(0, card.top);
-            card.bottom = Math.min(plan.height, card.bottom - px(context, 2));
-            if (card.bottom <= card.top) continue;
             plan.cards.add(card);
         }
         return hidden;
@@ -126,14 +128,16 @@ final class PilonWidgetTimeGrid {
         int strip = plan.allDay == null ? 0 : Math.max(px(context, 32), px(context, 16)
             + PilonWidgets.textHeight(context, plan.allDay.optString("title"), 14, true, plan.width - px(context, 16), 1)) + px(context, 8);
         JSONObject range = frame.optJSONObject("timeGrid"); int start = range.optInt("startMinute"), end = range.optInt("endMinute");
+        int readable = px(context, 8) + PilonWidgets.textHeight(context, "Ag", 14, true, Math.max(1, plan.width - plan.gutter - px(context, 10)), 1);
         // Footer reservation only grows, avoiding an oscillation when a boundary event leaves the viewport.
         for (int pass = 0; pass < 4; ++pass) {
             plan.height = Math.max(0, available - plan.footerHeight - (plan.allDayVisible ? strip : 0));
-            if (plan.allDayVisible && (strip > available || (!events.isEmpty() && plan.height < px(context, 34 * scale)))) { plan.allDayVisible = false; plan.height += strip; }
+            if (plan.allDayVisible && (strip > available || (!events.isEmpty() && plan.height < px(context, 34 * scale)))) {
+                plan.allDayVisible = false; plan.height = Math.max(0, available - plan.footerHeight);
+            }
             plan.hidden = layout(context, plan, events, start, end, scale);
             plan.footer = footer(context, plan.hidden, allDay.size() - (plan.allDayVisible ? 1 : 0), messages, rows.length() == 0);
             int needed = footerHeight(context, plan.footer, plan.width);
-            int readable = px(context, 8) + PilonWidgets.textHeight(context, "Ag", 14, true, Math.max(1, plan.width - plan.gutter - px(context, 10)), 1);
             if (needed > 0 && ((!events.isEmpty() && available - (plan.allDayVisible ? strip : 0) - needed < readable)
                 || (events.isEmpty() && plan.allDayVisible && available - strip - needed < 0))) {
                 plan.footerOmitted = true; plan.footerHeight = 0;
@@ -170,7 +174,10 @@ final class PilonWidgetTimeGrid {
         return plan;
     }
     static RemoteViews scrollItem(Context context, int id, PilonWidgets.Binding binding, PilonWidgetData.Snapshot snapshot, JSONObject frame, int capacity) {
-        Plan plan = scrollPlan(context, frame, capacity); int[] palette = PilonWidgets.colours(context, snapshot);
+        return scrollItem(context, id, binding, snapshot, frame, capacity, scrollPlan(context, frame, capacity));
+    }
+    static RemoteViews scrollItem(Context context, int id, PilonWidgets.Binding binding, PilonWidgetData.Snapshot snapshot, JSONObject frame, int capacity, Plan plan) {
+        int[] palette = PilonWidgets.colours(context, snapshot);
         RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.pilon_widget_time_scroll_item);
         views.removeAllViews(R.id.widget_timeline_item);
         views.setInt(R.id.widget_timeline_item, "setMinimumHeight", plan.height);
@@ -213,7 +220,7 @@ final class PilonWidgetTimeGrid {
         return views;
     }
     private static void addClock(Context context, RemoteViews views, int container, JSONObject frame, Plan plan, int colour) {
-        double minute = PilonWidgetClock.minute(frame, System.currentTimeMillis());
+        double minute = PilonWidgetSchedule.minute(frame, System.currentTimeMillis());
         if (!Double.isFinite(minute) || minute >= plan.end) return;
         int start = frame.optJSONObject("timeGrid").optInt("startMinute"), top = Math.round((float)(minute - start) * plan.hour / 60f);
         int thickness = Math.max(1, px(context, 1));

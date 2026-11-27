@@ -3,12 +3,18 @@
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
+import sys
 import time
 from zipfile import ZipFile
 
 ROOT = Path(__file__).resolve().parents[4]
+sys.path.insert(0, str(ROOT / "src/scripts"))
+from environment import development_root
+
+DEV = development_root()
 ADB = Path.home() / "Android/Sdk/platform-tools/adb"
 TEST_SHA = "ddf8402acc007be20deee24235b49042b703b052ebf8eb63644cc50be1eeb942"
 PACKAGE = "org.pilon.Pilon"
@@ -29,7 +35,7 @@ def main():
     parser.add_argument("proof", type=Path)
     args = parser.parse_args()
     args.proof.mkdir(parents=True, exist_ok=True)
-    test = ROOT / "build/android/app/office-probe-test.apk"
+    test = Path(os.environ.get("PILON_ANDROID_BUILD_DIR") or DEV / "builds/work/android/app") / "office-probe-test.apk"
     fixtures = ROOT / "src/platform/android/tests/assets/office-fixtures.zip"
     assert len(args.app_sha256) == 64 and digest(test) == TEST_SHA
     with ZipFile(test) as archive:
