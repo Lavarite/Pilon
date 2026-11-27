@@ -34,7 +34,7 @@ pkgbase = pilon-app
 	source = https://github.com/Lavarite/Pilon/releases/download/v1.0.0/pilon-1.0.0-source.tar.gz
 	source = https://www.leonerd.org.uk/code/libvterm/libvterm-0.3.3.tar.gz
 	source = https://github.com/libical/libical/releases/download/v3.0.20/libical-3.0.20.tar.gz
-	sha256sums = 95bb9c1c201687549a2e0ed1e2a8f509587192d0a11e2d1c1448bafa155e9e6f
+	sha256sums = ef68b6279b74787bd16b89f927b878faee8b10989fccc324a99dd3af53dfdd99
 	sha256sums = 09156f43dd2128bd347cbeebe50d9a571d32c64e0cf18d211197946aff7226e0
 	sha256sums = e73de92f5a6ce84c1b00306446b290a2b08cdf0a80988eca0a2c9d5c3510b4c2
 
