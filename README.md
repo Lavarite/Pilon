@@ -7,7 +7,7 @@ Enable the add-ons you need or build your own.
 
 ## Trailer
 
-A 23-second tour of Pilon.
+https://github.com/user-attachments/assets/827b071c-0b3a-4cbf-9d68-6c40344704d6
 
 ## Install
 
