@@ -30,10 +30,12 @@ dependencies {
     implementation 'androidx.window:window:1.5.1'
     implementation 'androidx.window:window-java:1.5.1'
     implementation 'com.google.ai.edge.litertlm:litertlm-android:0.19.1'
-    implementation 'com.google.android.gms:play-services-auth:22.0.0'
     implementation('com.microsoft.identity.client:msal:8.6.0') {
         // This Surface Duo platform API is supplied by that device, not redistributed.
         exclude group: 'com.microsoft.device.display', module: 'display-mask'
+        // Pilon authorizes through the system browser.
+        exclude group: 'com.google.android.gms'
+        exclude group: 'androidx.credentials', module: 'credentials-play-services-auth'
     }
 }
 
@@ -123,6 +125,13 @@ def pilonNotices = tasks.register('generatePilonDependencyNotices') {
     doLast {
         def release = gradle.startParameter.taskNames.any { it.toLowerCase().contains('release') }
         def runtime = release ? configurations.releaseRuntimeClasspath : configurations.debugRuntimeClasspath
+        def googlePlayServices = runtime.incoming.resolutionResult.allComponents.findAll {
+            it.moduleVersion?.group == 'com.google.android.gms'
+        }
+        if (!googlePlayServices.isEmpty()) {
+            def names = googlePlayServices.collect { it.id.displayName }.join(', ')
+            throw new GradleException("Android runtime contains Google Play services: ${names}")
+        }
         def rows = runtime.resolvedConfiguration.resolvedArtifacts.unique { it.file.absolutePath }.collect { artifact ->
             def id = artifact.moduleVersion.id
             def pom = configurations.detachedConfiguration(dependencies.create("${id.group}:${id.name}:${id.version}@pom")).singleFile

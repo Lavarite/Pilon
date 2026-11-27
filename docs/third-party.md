@@ -37,11 +37,9 @@ kept in the repository.
   [Codex](https://github.com/openai/codex), [CPython](https://www.python.org/),
   [Node.js](https://nodejs.org/), and [esbuild](https://esbuild.github.io/).
   Their Android recipes retain upstream notices, dependency inventories, and local patches.
-- AndroidX, [Microsoft MSAL](https://github.com/AzureAD/microsoft-authentication-library-for-android),
-  and [Google Play services](https://developers.google.com/android/guides/overview)
+- AndroidX and [Microsoft MSAL](https://github.com/AzureAD/microsoft-authentication-library-for-android)
   appear in the APK’s `assets/licenses/android-dependencies/DEPENDENCIES.json`.
-  That inventory links each resolved dependency to its packaged notices, including
-  the SDK terms applicable to the Google clients.
+  The inventory links each resolved dependency to its packaged notices.
 
 The Android `source-notices` archive includes the native runtime notices and a
 copy of the SDK inventory and notices from the APK. Several native components

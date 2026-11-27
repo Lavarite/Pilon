@@ -49,6 +49,9 @@ to build an APK from source.
 To install a published APK from Termux, install `curl` and `python` with `pkg`
 and run the terminal installer. It verifies the APK before opening it.
 
+Google Calendar sign-in is available on Linux. See the
+[Calendar guide](../addons/calendar/readme.md) for supported Android accounts.
+
 Startup and Files were tested on an Android 15 emulator with ARM64 translation.
 Native ARM64 device testing is pending. Codex device-code sign-in currently fails
 during token polling.

@@ -1,19 +1,11 @@
 package org.pilon;
 
-import android.accounts.Account;
 import android.app.Activity;
 import android.content.Context;
-import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Base64;
-import com.google.android.gms.auth.api.identity.AuthorizationRequest;
-import com.google.android.gms.auth.api.identity.AuthorizationResult;
-import com.google.android.gms.auth.api.identity.ClearTokenRequest;
-import com.google.android.gms.auth.api.identity.Identity;
-import com.google.android.gms.common.api.ApiException;
-import com.google.android.gms.common.api.Scope;
 import com.microsoft.identity.client.AcquireTokenParameters;
 import com.microsoft.identity.client.AcquireTokenSilentParameters;
 import com.microsoft.identity.client.AuthenticationCallback;
@@ -44,10 +36,6 @@ public final class PilonCalendarAuth {
     private static final java.util.concurrent.ExecutorService WORKERS = Executors.newFixedThreadPool(2);
     private static final AtomicLong NEXT = new AtomicLong();
     private static final ConcurrentHashMap<Long, Job> JOBS = new ConcurrentHashMap<>();
-    private static final ConcurrentHashMap<Integer, Job> RESOLUTIONS = new ConcurrentHashMap<>();
-    private static int nextResolution = 0x6000;
-    private static final List<String> GOOGLE_SCOPES = Arrays.asList("openid", "email",
-        "https://www.googleapis.com/auth/calendar.events", "https://www.googleapis.com/auth/calendar.calendarlist.readonly");
     private static final List<String> MICROSOFT_SCOPES = Arrays.asList("User.Read", "Calendars.ReadBasic",
         "Calendars.ReadWrite", "Calendars.ReadWrite.Shared");
     private static IMultipleAccountPublicClientApplication microsoft;
@@ -81,20 +69,6 @@ public final class PilonCalendarAuth {
         Job job = JOBS.remove(id);
         if (job == null) return;
         synchronized (job) { job.cancelled = true; job.result = null; }
-        MAIN.post(() -> RESOLUTIONS.entrySet().removeIf(entry -> entry.getValue() == job));
-    }
-
-    public static boolean onActivityResult(int requestCode, int resultCode, Intent data) {
-        Job job = RESOLUTIONS.remove(requestCode);
-        if (job == null) return false;
-        if (!job.alive()) return true;
-        if (resultCode != Activity.RESULT_OK || data == null) {
-            job.error("Calendar sign-in was cancelled or denied.");
-            return true;
-        }
-        try { job.googleResult(Identity.getAuthorizationClient(job.context).getAuthorizationResultFromIntent(data)); }
-        catch (ApiException failure) { job.googleError(failure); }
-        return true;
     }
 
     private static synchronized IMultipleAccountPublicClientApplication microsoft(Context context, String clientId) throws Exception {
@@ -144,75 +118,15 @@ public final class PilonCalendarAuth {
         }
         @Override public void run() {
             if (!alive()) return;
-            try {
-                if (!action.equals("connect") && !action.equals("refresh") && !action.equals("disconnect")) throw new IllegalArgumentException("Unsupported Calendar authorization operation.");
-                if (provider.equals("google")) google();
-                else if (provider.equals("microsoft")) microsoft();
-                else throw new IllegalArgumentException("Unsupported Calendar account provider.");
-            } catch (Exception failure) { error("Calendar authorization could not be started. Check the Android application registration and try again."); }
-        }
-        void google() throws Exception {
-            String previous = metadata.optString("access_token");
-            if (action.equals("disconnect") || action.equals("refresh")) {
-                if (metadata.optString("native_account").isEmpty()) throw new IllegalStateException("Missing Calendar account identity.");
-                if (!previous.isEmpty()) {
-                    if (!alive()) return;
-                    Identity.getAuthorizationClient(context).clearToken(ClearTokenRequest.builder().setToken(previous).build())
-                        .addOnSuccessListener(ignored -> {
-                            if (!alive()) return;
-                            if (action.equals("disconnect")) finish(new JSONObject());
-                            else googleAuthorize();
-                        }).addOnFailureListener(failure -> googleError(failure));
-                    return;
-                }
-                if (action.equals("disconnect")) { finish(new JSONObject()); return; }
-            }
-            googleAuthorize();
-        }
-        void googleAuthorize() {
-            if (!alive()) return;
-            AuthorizationRequest.Builder builder = AuthorizationRequest.builder();
-            List<Scope> scopes = new ArrayList<>();
-            for (String scope : GOOGLE_SCOPES) scopes.add(new Scope(scope));
-            builder.setRequestedScopes(scopes);
-            try {
-                if (action.equals("connect")) builder.setPrompt(AuthorizationRequest.Prompt.SELECT_ACCOUNT);
-                else builder.setAccount(new Account(metadata.optString("native_account"), "com.google"));
-                Identity.getAuthorizationClient(context).authorize(builder.build())
-                    .addOnSuccessListener(this::googleResult).addOnFailureListener(this::googleError);
-            } catch (Exception failure) { googleError(failure); }
-        }
-        void googleError(Exception failure) {
-            // SDK exception messages may contain account or request data; expose only the status.
-            if (failure instanceof ApiException) error("Google Calendar authorization failed (" + ((ApiException) failure).getStatusCode() + "). Check the Android registration or reconnect the account.");
-            else error("Google Calendar authorization failed. Reconnect the account.");
-        }
-        void googleResult(AuthorizationResult value) {
-            if (!alive()) return;
-            if (value.hasResolution()) {
-                if (!action.equals("connect")) { error("Reconnect the Google Calendar account to renew its authorization."); return; }
-                MAIN.post(() -> {
-                    if (!alive()) return;
-                    if (!(context instanceof Activity) || ((Activity) context).isFinishing()) { error("Open Pilon before connecting a Calendar account."); return; }
-                    try {
-                        // Never reuse a request code: a cancelled Activity result must not reach a new job.
-                        if (nextResolution > 0x7fff) { error("Restart Pilon before connecting another Calendar account."); return; }
-                        int code = nextResolution++;
-                        RESOLUTIONS.put(code, this);
-                        ((Activity) context).startIntentSenderForResult(value.getPendingIntent().getIntentSender(), code, null, 0, 0, 0);
-                    } catch (Exception failure) { RESOLUTIONS.entrySet().removeIf(entry -> entry.getValue() == this); error("Google Calendar authorization could not be opened."); }
-                });
+            if ("google".equals(provider)) {
+                error("Google Calendar sign-in is unavailable on Android.");
                 return;
             }
             try {
-                List<String> granted = value.getGrantedScopes();
-                boolean email = granted.contains("email") || granted.contains("https://www.googleapis.com/auth/userinfo.email");
-                if (value.getAccessToken() == null || value.getAccessToken().isEmpty() || !email || !granted.contains("openid") || !granted.containsAll(GOOGLE_SCOPES.subList(2, 4))) {
-                    error("Google Calendar authorization did not grant the requested Calendar and account permissions."); return;
-                }
-                finish(new JSONObject().put("access_token", value.getAccessToken()).put("scope", String.join(" ", value.getGrantedScopes()))
-                    .put("native_provider", provider).put("native_account", metadata.optString("native_account")));
-            } catch (Exception invalid) { error("Google Calendar returned an invalid authorization result."); }
+                if (!action.equals("connect") && !action.equals("refresh") && !action.equals("disconnect")) throw new IllegalArgumentException("Unsupported Calendar authorization operation.");
+                if (provider.equals("microsoft")) microsoft();
+                else throw new IllegalArgumentException("Unsupported Calendar account provider.");
+            } catch (Exception failure) { error("Calendar authorization could not be started. Check the Android application registration and try again."); }
         }
         void microsoft() throws Exception {
             IMultipleAccountPublicClientApplication application = PilonCalendarAuth.microsoft(context, clientId);

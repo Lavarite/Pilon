@@ -2,11 +2,13 @@ package org.pilon;
 
 import android.app.Activity;
 import android.app.Instrumentation;
+import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
+import android.net.Uri;
 import android.os.Bundle;
-import com.google.android.gms.auth.api.identity.AuthorizationResult;
 import com.microsoft.identity.client.IAccount;
 import com.microsoft.identity.client.IAuthenticationResult;
-import java.util.Arrays;
 import java.util.Date;
 import java.util.Map;
 import java.util.UUID;
@@ -53,6 +55,16 @@ public final class CalendarAuthProbeInstrumentation extends Instrumentation {
         Bundle output = new Bundle();
         try {
             check(Class.forName("com.microsoft.identity.client.BrowserTabActivity") != null, "MSAL browser activity resolves without platform stub");
+            String redirect = "msauth://" + getTargetContext().getPackageName() + "/"
+                + Uri.encode(PilonCalendarAuth.signingHash(getTargetContext()));
+            Intent callback = new Intent(Intent.ACTION_VIEW, Uri.parse(redirect))
+                .setPackage(getTargetContext().getPackageName()).addCategory(Intent.CATEGORY_BROWSABLE);
+            ResolveInfo handler = getTargetContext().getPackageManager().resolveActivity(callback, PackageManager.MATCH_DEFAULT_ONLY);
+            check(handler != null && handler.activityInfo.name.equals("com.microsoft.identity.client.BrowserTabActivity"), "MSAL browser callback resolves for the signing certificate");
+            boolean googleClientAbsent;
+            try { Class.forName("com.google.android.gms.auth.api.identity.Identity"); googleClientAbsent = false; }
+            catch (ClassNotFoundException expected) { googleClientAbsent = true; }
+            check(googleClientAbsent, "Google authorization client is absent");
             check(Class.forName("com.microsoft.identity.common.internal.ui.DualScreenActivity") != null, "MSAL activity base resolves without platform stub");
             boolean platformStubAbsent;
             try { Class.forName("com.microsoft.device.display.DisplayMask"); platformStubAbsent = false; }
@@ -69,29 +81,20 @@ public final class CalendarAuthProbeInstrumentation extends Instrumentation {
                 check(!spanned[0], "ordinary device avoids Duo-only API");
             }
             JSONObject empty = new JSONObject();
-            PilonCalendarAuth.Job cancelled = job("google", "connect", empty);
+            PilonCalendarAuth.Job cancelled = job("microsoft", "connect", empty);
             cancelled.cancelled = true;
             cancelled.finish(new JSONObject().put("access_token", "late-fixture"));
             check(cancelled.result == null, "cancelled job rejected late result");
             cancelled.error("late error"); check(cancelled.result == null, "cancelled job rejected late error");
-            PilonCalendarAuth.Job completed = job("google", "connect", empty);
+            PilonCalendarAuth.Job completed = job("microsoft", "connect", empty);
             completed.error("first"); completed.finish(new JSONObject().put("access_token", "late-fixture"));
             check(new JSONObject(completed.result).getString("error").equals("first"), "completed result immutable");
 
-            java.util.List<String> googleScopes = Arrays.asList("openid", "https://www.googleapis.com/auth/userinfo.email",
-                "https://www.googleapis.com/auth/calendar.events", "https://www.googleapis.com/auth/calendar.calendarlist.readonly");
-            PilonCalendarAuth.Job google = job("google", "connect", empty);
-            google.googleResult(new AuthorizationResult(null, "fixture-access-token", null, googleScopes, null, null, new Bundle()));
-            JSONObject result = new JSONObject(google.result);
-            check(!result.has("error"), "canonical Google email scope accepted");
-            check(result.getString("native_provider").equals("google"), "Google provider retained");
-            check(!result.has("refresh_token") && !result.has("id_token") && !result.has("serverAuthCode"), "Google SDK secrets excluded");
-            PilonCalendarAuth.Job declined = job("google", "connect", empty);
-            declined.googleResult(new AuthorizationResult(null, "fixture-access-token", null, Arrays.asList("openid", "email"), null, null, new Bundle()));
-            check(new JSONObject(declined.result).has("error"), "declined Google Calendar scopes rejected");
-            PilonCalendarAuth.Job noToken = job("google", "connect", empty);
-            noToken.googleResult(new AuthorizationResult(null, null, null, googleScopes, null, null, new Bundle()));
-            check(new JSONObject(noToken.result).has("error"), "missing Google token rejected");
+            for (String action : new String[]{"connect", "refresh", "disconnect"}) {
+                PilonCalendarAuth.Job google = job("google", action, empty);
+                google.run();
+                check(new JSONObject(google.result).getString("error").equals("Google Calendar sign-in is unavailable on Android."), "Google request rejected before provider SDK");
+            }
 
             PilonCalendarAuth.Job readOnly = job("microsoft", "connect", empty);
             readOnly.microsoftResult(new Result("account", "tenant", "https://graph.microsoft.com/User.Read", "https://graph.microsoft.com/Calendars.ReadBasic"));
@@ -115,7 +118,6 @@ public final class CalendarAuthProbeInstrumentation extends Instrumentation {
             PilonCalendarAuth.Job stopped = job("microsoft", "refresh", previous);
             stopped.cancelled = true; stopped.microsoftResult(new Result("account", "tenant", "User.Read", "Calendars.ReadWrite"));
             check(stopped.result == null, "cancelled MSAL callback rejected");
-            check(!PilonCalendarAuth.onActivityResult(0x4000, Activity.RESULT_OK, null), "unowned Activity result ignored");
             long id = PilonCalendarAuth.begin(getTargetContext(), "unsupported", "invalid", "", "{}");
             check(id != 0, "fixture job allocated");
             long deadline = android.os.SystemClock.elapsedRealtime() + 5000;

@@ -38,6 +38,7 @@ TestCase {
     QtObject {
         id: connectedCalendar
         property var accounts: []
+        property bool googleSignInAvailable: true
         property var calendars: []
         property var preferences: ({timeZone: "Europe/London", firstDay: 1, reminder: 10})
         property string error: ""
@@ -252,6 +253,7 @@ TestCase {
         settings.expandedAccount = ""
         connectedCalendar.connectionRequest = null; connectedCalendar.feedRequest = null; connectedCalendar.responseRequest = null
         connectedCalendar.error = ""
+        connectedCalendar.googleSignInAvailable = true
         workspaceStub.actionPath = ""; workspaceStub.actionParent = null; workspaceStub.actionRequests = 0
         settings.storageActions=[]; storageAction.enabled=true
         connectedCalendar.shares = []; connectedCalendar.sharingBusy = false; connectedCalendar.sharingError = ""
@@ -517,6 +519,22 @@ TestCase {
         touch.release(0, reminder, reminder.width - 16, reminder.height / 2).commit()
         compare(connectedCalendar.preferences.reminder, before + 1)
         connectedCalendar.preferences = {timeZone: "Europe/London", firstDay: 1, reminder: 10}
+    }
+    function test_unavailableGoogleSignInKeepsExistingAccountActions() {
+        connectedCalendar.googleSignInAvailable = false
+        connectedCalendar.accounts = connectedCalendar.accounts.map(account => account.provider === "google"
+            ? Object.assign({}, account, {status: "Google Calendar sign-in is unavailable on Android."}) : account)
+        page.visible = false; settings.visible = true; settings.section = "accounts"
+        tryCompare(findChild(settings, "calendarConnectGoogle"), "visible", false)
+        verify(findChild(settings, "calendarConnectMicrosoft").visible)
+        touchClick(revealSettingsControl("calendarAccount-google"))
+        verify(!findChild(settings, "calendarReconnect-google").visible)
+        verify(findChild(settings, "calendarEnabled-personal").checked)
+        verify(findChild(settings, "calendarSignOut-google").visible)
+        touchClick(revealSettingsControl("calendarSyncIssue-google"))
+        const details = findChild(settings, "calendarSyncDetails")
+        compare(details.message, "Google Calendar sign-in is unavailable on Android.")
+        compare(details.actionText, "")
     }
     function test_proposalStaysInlineAndOpensEditableDraft() {
         for (const proposal of testCalendar.proposals) testCalendar.discardProposal(proposal.id)

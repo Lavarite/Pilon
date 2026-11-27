@@ -383,9 +383,14 @@ bool CalendarManager::persist() {
 QVariantList CalendarManager::calendars() const { return values(m_calendars); }
 QVariantList CalendarManager::accounts() const {
     QVariantList result;
-    for (const auto &account : m_accounts)
-        if (!account.value("pending").toBool())
-            result.append(account);
+    for (auto account : m_accounts) {
+        if (account.value("pending").toBool()) continue;
+        if (account.value("provider") == "google" && !googleSignInAvailable()) {
+            account["status"] = googleSignInUnavailable();
+            account.remove("setupUrl");
+        }
+        result.append(account);
+    }
     return result;
 }
 QVariantList CalendarManager::proposals() const { return values(m_proposals); }

@@ -21,10 +21,16 @@ PilonScrollView {
     property var storageActions: []
     property string section: "all"
     signal folderRequested(string path)
+    readonly property bool googleSignInAvailable: calendar.googleSignInAvailable !== false
     readonly property string operationError: calendar.error || ""
     onOperationErrorChanged: if (active && operationError) showIssue(operationError)
-    function showIssue(message, setupUrl = "") { syncIssue.setupUrl = setupUrl; syncIssue.message = message }
+    function showIssue(message, setupUrl = "", retryAllowed = true) {
+        syncIssue.setupUrl = setupUrl
+        syncIssue.retryAllowed = retryAllowed
+        syncIssue.message = message
+    }
     function accountIssue(account) {
+        if (account.provider === "google" && !googleSignInAvailable) return account.status || ""
         const messages = []
         if (account.status && account.status !== qsTr("Connected")) messages.push(account.status)
         if (account.credentialWarning) messages.push(account.credentialWarning)
@@ -59,7 +65,10 @@ PilonScrollView {
                 PilonSectionHeader { Layout.fillWidth: true; text: qsTr("Connect calendars") }
                 Flow {
                     Layout.fillWidth: true; Layout.minimumWidth: 0; Layout.preferredWidth: 1; spacing: 8
-                    SettingsButton { objectName: "calendarConnectGoogle"; text: qsTr("Connect Google"); onClicked: page.calendar.connectAccount("google") }
+                    SettingsButton {
+                        objectName: "calendarConnectGoogle"; text: qsTr("Connect Google"); visible: page.googleSignInAvailable
+                        onClicked: page.calendar.connectAccount("google")
+                    }
                     SettingsButton { objectName: "calendarConnectMicrosoft"; text: qsTr("Connect Microsoft"); onClicked: page.calendar.connectAccount("microsoft") }
                     SettingsButton { objectName: "calendarConnectIcloud"; text: qsTr("Connect iCloud"); onClicked: applePopup.open() }
                     SettingsButton { objectName: "calendarSubscribeFeed"; text: qsTr("Subscribe to feed"); onClicked: feedPopup.open() }
@@ -76,6 +85,7 @@ PilonScrollView {
                     delegate: CalendarAccountGroup {
                         id: accountRow
                         required property var modelData
+                        readonly property bool canUseProvider: modelData.provider !== "google" || page.googleSignInAvailable
                         account: modelData
                         calendars: page.calendar.calendars.filter(c => c.account === modelData.id)
                         selectedCalendars: page.calendar.calendars.filter(c => c.enabled).map(c => c.id)
@@ -92,12 +102,12 @@ PilonScrollView {
                                 objectName: "calendarSyncIssue-" + accountRow.modelData.id
                                 text: qsTr("Sync details"); visible: !!page.accountIssue(accountRow.modelData)
                                 onClicked: {
-                                    page.showIssue(page.accountIssue(accountRow.modelData), accountRow.modelData.setupUrl || "")
+                                    page.showIssue(page.accountIssue(accountRow.modelData), accountRow.modelData.setupUrl || "", accountRow.canUseProvider)
                                 }
                             }
                             SettingsButton {
                                 objectName: "calendarReconnect-" + accountRow.modelData.id
-                                visible: accountRow.modelData.provider !== "feed" && accountRow.modelData.provider !== "ics"
+                                visible: accountRow.canUseProvider && accountRow.modelData.provider !== "feed" && accountRow.modelData.provider !== "ics"
                                 text: qsTr("Reconnect")
                                 onClicked: {
                                     if (accountRow.modelData.provider === "icloud") { appleEmail.text = accountRow.modelData.email; applePopup.open() }
@@ -210,7 +220,8 @@ PilonScrollView {
         objectName: "calendarSyncDetails"
         owner: page
         property string setupUrl: ""
-        actionText: page.calendar.syncing ? "" : qsTr("Retry sync")
+        property bool retryAllowed: true
+        actionText: page.calendar.syncing || !retryAllowed ? "" : qsTr("Retry sync")
         onActionRequested: { message = ""; page.calendar.retrySync() }
         secondaryActionText: setupUrl ? qsTr("Enable Google Calendar API") : ""
         onSecondaryActionRequested: Qt.openUrlExternally(setupUrl)

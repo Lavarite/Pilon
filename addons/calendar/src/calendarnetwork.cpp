@@ -125,10 +125,24 @@ QStringList listStrings(const QVariant &v) {
     return result;
 }
 } // namespace
+bool CalendarManager::googleSignInAvailable() const {
+#ifdef Q_OS_ANDROID
+    return false;
+#else
+    return true;
+#endif
+}
+QString CalendarManager::googleSignInUnavailable() {
+    return tr("Google Calendar sign-in is unavailable on Android.");
+}
 QString CalendarManager::googleClientId() const { return QString::fromUtf8(PILON_GOOGLE_CLIENT_ID); }
 QString CalendarManager::microsoftClientId() const { return QString::fromUtf8(PILON_MICROSOFT_CLIENT_ID); }
 std::function<void()> CalendarManager::nativeAuthorization(const QString &provider, const QString &action,
                                                           const QVariantMap &previous, AuthorizationReply done) {
+    if (provider == "google" && !googleSignInAvailable()) {
+        done({}, googleSignInUnavailable());
+        return {};
+    }
     if (m_nativeAuthorizer) return m_nativeAuthorizer(provider, action, previous, std::move(done));
 #ifdef Q_OS_ANDROID
     auto context = QNativeInterface::QAndroidApplication::context();
@@ -214,6 +228,7 @@ void CalendarManager::verifyAccountIdentity(const QString &provider, QVariantMap
     });
 }
 void CalendarManager::connectMobileAccount(const QString &provider) {
+    if (provider == "google" && !googleSignInAvailable()) { fail(googleSignInUnavailable()); return; }
     if (!m_nativeDisconnects.isEmpty()) { fail(tr("Wait for the account to finish disconnecting.")); return; }
     if (provider == "microsoft" && microsoftClientId().isEmpty() && !m_nativeAuthorizer) {
         fail(tr("This build has no Microsoft Android application registration. See the Calendar setup documentation.")); return;
@@ -410,6 +425,10 @@ void CalendarManager::request(const QString &account, const QByteArray &method, 
         return;
     }
     const auto provider = m_accounts.value(account).value("provider").toString();
+    if (provider == "google" && !googleSignInAvailable()) {
+        done(403, json({{"error", QVariantMap{{"message", googleSignInUnavailable()}}}}), {});
+        return;
+    }
     const auto scopes = m_accounts.value(account).value("calendarScopes").toStringList();
     if (provider == "microsoft" && m_accounts.value(account).contains("calendarScopes") &&
         !scopes.contains("Calendars.ReadWrite") && !scopes.contains("Calendars.ReadWrite.Shared") &&
@@ -741,7 +760,7 @@ bool CalendarManager::disconnectAccount(const QString &id) {
     }
     QVariantMap secret;
     const auto provider = m_accounts.value(id).value("provider").toString();
-    if (provider == "google" || provider == "microsoft") {
+    if ((provider == "google" && googleSignInAvailable()) || provider == "microsoft") {
 #ifdef Q_OS_ANDROID
         secret = credentials(id);
 #else

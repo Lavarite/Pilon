@@ -12,7 +12,8 @@ Open **Settings → Calendar → Accounts** and enable the calendars you want to
 
 | Source | What to use |
 | --- | --- |
-| Google or Microsoft | Sign in with the provider. The Pilon build needs a registered application. |
+| Google | Sign in on Linux with a registered desktop OAuth client. |
+| Microsoft | Sign in with a registered Microsoft application. |
 | iCloud | Use your Apple Account and an [app-specific password](https://support.apple.com/en-us/102654). |
 | Calendar feed | Add a private or public HTTPS or webcal URL. Feeds are read-only. |
 | ICS file | Use **Add ICS file** for a read-only snapshot. Re-import to add a fresh snapshot. |
@@ -37,7 +38,7 @@ For maintainers distributing a build. Local Calendar works without provider regi
 
 | Provider | Desktop | Android |
 | --- | --- | --- |
-| Google | Enable Calendar API and register a desktop OAuth client. Set `PILON_GOOGLE_CLIENT_ID`. | Register `org.pilon.Pilon` and the signing certificate SHA-1 in the Cloud project. |
+| Google | Enable Calendar API and register a desktop OAuth client. Set `PILON_GOOGLE_CLIENT_ID`. | Unavailable. |
 | Microsoft | Register a mobile and desktop client with the `http://localhost` redirect. Set `PILON_MICROSOFT_CLIENT_ID`. | Register `org.pilon.Pilon` and its signing signature hash. Set `PILON_MICROSOFT_ANDROID_CLIENT_ID`. |
 
 Google needs `openid`, `email`, `calendar.events` and `calendar.calendarlist.readonly`. Complete Google's verification before distributing public sign-in. [Google Calendar scopes](https://developers.google.com/workspace/calendar/api/auth) · [OAuth verification](https://developers.google.com/identity/protocols/oauth2/production-readiness/sensitive-scope-verification)

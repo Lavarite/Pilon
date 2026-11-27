@@ -27,6 +27,7 @@ class CalendarManager : public QObject {
     Q_PROPERTY(bool syncing READ syncing NOTIFY changed)
     Q_PROPERTY(bool accountOperationsBusy READ accountOperationsBusy NOTIFY changed)
     Q_PROPERTY(int revision READ revision NOTIFY changed)
+    Q_PROPERTY(bool googleSignInAvailable READ googleSignInAvailable CONSTANT)
     Q_PROPERTY(QString googleClientId READ googleClientId CONSTANT)
     Q_PROPERTY(QString microsoftClientId READ microsoftClientId CONSTANT)
     Q_PROPERTY(QVariantList shares READ shares NOTIFY sharingChanged)
@@ -59,6 +60,7 @@ class CalendarManager : public QObject {
     bool syncing() const { return m_syncing; }
     bool accountOperationsBusy() const;
     int revision() const { return m_revision; }
+    bool googleSignInAvailable() const;
     QString googleClientId() const;
     QString microsoftClientId() const;
     QVariantList shares() const;
@@ -181,6 +183,7 @@ class CalendarManager : public QObject {
     void tokenRequest(const QString &provider, const QVariantMap &fields,
                       std::function<void(QVariantMap, QString)> done);
     void completeLogin(const QString &code);
+    static QString googleSignInUnavailable();
     std::function<void()> nativeAuthorization(const QString &provider, const QString &action, const QVariantMap &previous, AuthorizationReply done);
     void connectMobileAccount(const QString &provider);
     static QString mobileAuthorizationError(const QString &provider, const QVariantMap &tokens, const QVariantMap &previous = {});

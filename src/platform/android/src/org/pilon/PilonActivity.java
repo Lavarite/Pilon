@@ -149,12 +149,6 @@ public class PilonActivity extends QtActivity {
     }
 
     @Override
-    public void onActivityResult(int requestCode, int resultCode, android.content.Intent data) {
-        if (!PilonCalendarAuth.onActivityResult(requestCode, resultCode, data))
-            super.onActivityResult(requestCode, resultCode, data);
-    }
-
-    @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         PilonStorage.permissionResult(requestCode);
