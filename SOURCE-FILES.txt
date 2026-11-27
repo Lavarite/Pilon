@@ -450,6 +450,7 @@ docs/configuration.md
 docs/development/agent-notes.md
 docs/index.md
 docs/install.md
+docs/pilon-addons.svg
 docs/pilon-banner.svg
 docs/privacy.md
 docs/screenshots/add-ons.png

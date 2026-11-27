@@ -1,10 +1,9 @@
 # ![Pilon](docs/pilon-banner.svg)
 
-Pilon is an open-source workspace for Linux and Android. Browse files, write
-and draw notes, manage calendars, and connect over SSH. Extend it with your own
-QML and JavaScript add-ons.
+Pilon is an open-source workspace for everyday work on Linux and Android.
+Enable the add-ons you need or build your own.
 
-[Install](#install) · [Build an add-on](#build-an-add-on) · [Documentation](docs/index.md)
+[Install](#install) · [Add-ons](#built-in-add-ons) · [Build an add-on](#build-an-add-on) · [Documentation](docs/index.md)
 
 ## Install
 
@@ -17,44 +16,19 @@ curl -fsSL https://pilon.vasylevskyi.net/download | sh
 See [GitHub Releases](https://github.com/Lavarite/Pilon/releases) for platform downloads.
 The [install guide](docs/install.md) covers Linux requirements and Android installation.
 
+## Built-in add-ons
+
+![Notes for writing and drawing, Calendar for events, Files for transfers, SSH for remote terminals, Tailscale for finding devices, and Assistant for AI chat.](docs/pilon-addons.svg)
+
 ## Build an add-on
 
-Describe the tool you need and give a coding agent the
-[add-on instructions](docs/addons/AGENTS.md). Start from
-[Counter](examples/counter/readme.md) or [Checklist](examples/checklist/readme.md),
-then import the resulting `.piext` in **Settings → Add-ons**.
+Describe what you need and give Codex, Claude Code, or OpenCode the
+[add-on instructions](docs/addons/AGENTS.md). QML defines the interface.
+JavaScript handles actions such as saving a checklist item.
 
-## Screenshots
-
-<table width="100%">
-  <thead>
-    <tr>
-      <th width="50%" align="center">Notes</th>
-      <th width="50%" align="center">Calendar</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td width="50%" align="center" valign="top"><img src="docs/screenshots/notes.png" width="640" alt="A note with typed text and a hand-drawn map"></td>
-      <td width="50%" align="center" valign="top"><img src="docs/screenshots/calendar.png" width="640" alt="Pilon Calendar in month view"></td>
-    </tr>
-  </tbody>
-</table>
-
-<table width="100%">
-  <thead>
-    <tr>
-      <th width="50%" align="center">Files</th>
-      <th width="50%" align="center">Add-ons</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td width="50%" align="center" valign="top"><img src="docs/screenshots/files.png" width="640" alt="Files showing folders and documents on this device"></td>
-      <td width="50%" align="center" valign="top"><img src="docs/screenshots/add-ons.png" width="640" alt="Settings showing the installed add-ons and an add-on import tile"></td>
-    </tr>
-  </tbody>
-</table>
+Start from [Counter](examples/counter/readme.md) or
+[Checklist](examples/checklist/readme.md). Import and enable the resulting
+`.piext` in **Settings → Add-ons**.
 
 [Contribute](CONTRIBUTING.md) · [Report a bug](https://github.com/Lavarite/Pilon/issues) · [GPL-3.0-only](LICENSE)
 
